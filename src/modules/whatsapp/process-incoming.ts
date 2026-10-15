@@ -14,7 +14,7 @@ import { transcribeAudio } from "@/modules/ai/transcribe";
 import { storeVoiceMessage } from "@/modules/voice/storage";
 import { audioDurationSeconds, UNTRANSCRIBED_AUDIO } from "@/modules/voice/received-audio";
 import { isPhoneBlocked } from "./blocklist";
-import { isWhatsappProviderName, setConversationChannel } from "./instances";
+import { agentRepliesOn, isWhatsappProviderName, setConversationChannel } from "./instances";
 import type { IncomingMessage, WhatsAppProvider } from "./provider";
 import { shouldPauseAgentForReaction } from "./reactions";
 import { sendAgentReply } from "./send-agent-reply";
@@ -73,6 +73,7 @@ export async function processIncomingWhatsapp(
     select: {
       tenantId: true,
       status: true,
+      agentReplies: true,
       tenant: { select: { whatsappIgnoreGroups: true } },
     },
   });
@@ -242,6 +243,20 @@ export async function processIncomingWhatsapp(
     : null;
   const userMessage =
     received?.transcript ?? (incoming.hasAudio ? UNTRANSCRIBED_AUDIO : incoming.text);
+  // Número só de recebimento (ex.: Meta usada só para Disparos): a mensagem
+  // entra em Conversas para a equipe e o agente não é chamado nem cobrado.
+  if (!agentRepliesOn(instance)) {
+    await appendMessage(
+      conversation.id,
+      "user",
+      userMessage,
+      undefined,
+      incoming.messageKeyId,
+      received?.audioUrl,
+      received?.seconds,
+    );
+    return ok({ ok: true, silent: "agente não responde neste número" });
+  }
   if (incoming.hasAudio && (!agent?.listenAudio || !received?.transcript)) {
     await appendMessage(
       conversation.id,

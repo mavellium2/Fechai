@@ -120,6 +120,12 @@ um lugar só (`instances.ts`):
 - **Lembretes do Clinicorp** escolhem por paciente: quem já conversou pelo QR
   recebe o texto por lá; quem nunca falou, ou fala pela Meta, recebe o template
   aprovado pela Meta. Nunca primeiro contato pelo QR.
+- **Número só de recebimento** (`WhatsappInstance.agentReplies`, nasce `true`):
+  desligado em `/integracoes` (hoje a chave fica no cartão da Meta), quem
+  escreve para aquele número entra em Conversas e o agente **não** é chamado —
+  nem resposta, nem follow-up, nem "responder pendente". É o "Meta só para
+  Disparos" enquanto o QR atende. Não desvia para o outro número (mesma regra de
+  nunca cruzar); a equipe responde à mão dentro da janela de 24h.
 - **Estado em uma palavra** (início, onboarding, admin): conectada se **qualquer**
   conexão atende (`summarizeWhatsappStatus`).
 - **Abrir `/integracoes` não cria instância na Evolution** de conta que só usa a

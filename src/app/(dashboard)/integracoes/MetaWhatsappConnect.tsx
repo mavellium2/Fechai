@@ -8,10 +8,12 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { reconnectMetaWhatsapp, saveMetaWhatsapp } from "./actions";
-import { DisconnectControl } from "./WhatsappControls";
+import { AgentRepliesControl, DisconnectControl } from "./WhatsappControls";
 
 type Props = {
   connected: boolean;
+  /** O agente responde por este número; desligado, a Meta fica só para Disparos. */
+  agentReplies: boolean;
   encryptionConfigured: boolean;
   hasCredentials: boolean;
   displayPhone: string | null;
@@ -129,7 +131,14 @@ export function MetaWhatsappConnect(props: Props) {
       </Alert>
 
       {props.connected && (
-        <DisconnectControl provider="meta" className="border-t border-white/10 pt-6" />
+        <>
+          <AgentRepliesControl
+            provider="meta"
+            agentReplies={props.agentReplies}
+            className="border-t border-white/10 pt-6"
+          />
+          <DisconnectControl provider="meta" className="border-t border-white/10 pt-6" />
+        </>
       )}
     </div>
   );

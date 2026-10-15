@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
 import { isPhoneBlocked } from "@/modules/whatsapp/blocklist";
 import { getWhatsAppProviderForInstance } from "@/modules/whatsapp/meta-config";
-import { channelProvider, findWhatsappChannel, setConversationChannel } from "@/modules/whatsapp/instances";
+import { agentRepliesOn, channelProvider, findWhatsappChannel, setConversationChannel } from "@/modules/whatsapp/instances";
 import { sendAgentReply } from "@/modules/whatsapp/send-agent-reply";
 import { resolveAgent, runAgentTurn } from "./orchestrator";
 
@@ -52,6 +52,9 @@ export async function recoverPendingAgentReply(
   const channel = await findWhatsappChannel(tenantId, conversation.whatsappProvider);
   if (!channel?.externalId) {
     return { status: "failed", error: "O número desta conversa está desconectado. Reconecte-o antes de responder." };
+  }
+  if (!agentRepliesOn(channel)) {
+    return { status: "failed", error: "O agente não responde por este número. Responda à mão pela conversa." };
   }
   const providerName = channelProvider(channel);
   if (providerName === "meta" && (!conversation.lastInboundAt || Date.now() - conversation.lastInboundAt.getTime() >= 24 * 60 * 60 * 1000)) {

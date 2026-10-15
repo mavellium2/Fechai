@@ -755,6 +755,10 @@ model WhatsappInstance {
   provider   String  @default("evolution")
   /// Evolution: nome da instância. Meta: Phone Number ID.
   externalId String?
+  /// O agente responde (e faz follow-up) quem escreve para ESTE número.
+  /// Desligado, o número só recebe: as mensagens entram em Conversas para a
+  /// equipe, e a Meta fica só para Disparos. Nasce ligado, o comportamento de antes.
+  agentReplies Boolean @default(true)
 
   /// Configuração da WhatsApp Cloud API oficial. Tokens/segredos são cifrados
   /// com AES-256-GCM; nunca guardar credencial reversível em texto claro.

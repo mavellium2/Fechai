@@ -22,6 +22,7 @@ vi.mock("@/modules/whatsapp/blocklist", () => ({ isPhoneBlocked: mocks.blocked }
 vi.mock("@/modules/whatsapp/instances", () => ({
   findWhatsappChannel: mocks.channel,
   channelProvider: (channel: { provider: string }) => channel.provider,
+  agentRepliesOn: (channel: { agentReplies?: boolean }) => channel.agentReplies !== false,
   setConversationChannel: vi.fn(async () => {}),
 }));
 vi.mock("@/modules/whatsapp/meta-config", () => ({ getWhatsAppProviderForInstance: () => mocks.provider }));
