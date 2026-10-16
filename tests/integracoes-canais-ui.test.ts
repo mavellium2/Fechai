@@ -21,6 +21,7 @@ vi.mock("@/app/(dashboard)/integracoes/actions", () => ({
   reconnectMetaWhatsapp: vi.fn(),
   saveMetaWhatsapp: vi.fn(),
   setWhatsappAgentEnabled: vi.fn(),
+  setWhatsappAgentReplies: vi.fn(),
   setWhatsappIgnoreGroups: vi.fn(),
   blockWhatsappNumber: vi.fn(),
   unblockWhatsappNumber: vi.fn(),
@@ -62,6 +63,7 @@ const meta = (over: Record<string, unknown> = {}) =>
   render(
     createElement(MetaWhatsappConnect, {
       connected: true,
+      agentReplies: true,
       encryptionConfigured: true,
       hasCredentials: true,
       displayPhone: "+55 14 99999-0000",
@@ -152,6 +154,15 @@ describe("Cartão da API oficial da Meta", () => {
     const html = meta({ connected: false });
     expect(html).toContain("Reconectar com a Meta");
     expect(html).not.toContain("Desconectar número");
+  });
+
+  it("conectado: oferece deixar o número só para Disparos", () => {
+    expect(meta()).toContain("O agente responde por este número");
+    expect(meta({ agentReplies: false })).toContain("Este número só faz disparos");
+  });
+
+  it("desconectado não mostra a chave do agente", () => {
+    expect(meta({ connected: false })).not.toContain("O agente responde por este número");
   });
 });
 

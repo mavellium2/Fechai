@@ -17,12 +17,21 @@ import { WHATSAPP_PROVIDER_SELECT, type WhatsappProviderInstance } from "./meta-
  */
 
 /** Linha de conexão com o que os consumidores precisam para escolher e enviar. */
-export type WhatsappChannel = WhatsappProviderInstance & { status: string };
+export type WhatsappChannel = WhatsappProviderInstance & { status: string; agentReplies: boolean };
 
 export const WHATSAPP_CHANNEL_SELECT = {
   status: true,
+  agentReplies: true,
   ...WHATSAPP_PROVIDER_SELECT,
 } as const;
+
+/**
+ * O agente pode escrever sozinho por esta conexão? Desligado, o número só
+ * recebe (a Meta fica só para Disparos). Linha sem o campo vale como ligada.
+ */
+export function agentRepliesOn(row: { agentReplies?: boolean | null }): boolean {
+  return row.agentReplies !== false;
+}
 
 export function isWhatsappProviderName(value: unknown): value is WhatsAppProviderName {
   return value === "evolution" || value === "meta";

@@ -320,6 +320,7 @@ export default async function IntegracoesPage({
             <MetaWhatsappConnect
               key={metaStatus}
               connected={metaConnected}
+              agentReplies={metaRow?.agentReplies !== false}
               encryptionConfigured={isEncryptionConfigured()}
               hasCredentials={Boolean(
                 metaRow?.metaPhoneNumberId &&

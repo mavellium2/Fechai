@@ -2,12 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Power, Unplug, Users } from "lucide-react";
+import { Bot, Power, Unplug, Users } from "lucide-react";
 import { FormFeedback } from "@/components/ui/alert";
 import { ConfirmButton } from "@/components/ui/confirm-dialog";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { disconnectWhatsapp, setWhatsappAgentEnabled, setWhatsappIgnoreGroups } from "./actions";
+import {
+  disconnectWhatsapp,
+  setWhatsappAgentEnabled,
+  setWhatsappAgentReplies,
+  setWhatsappIgnoreGroups,
+} from "./actions";
 
 type ActionResult = { ok: boolean; error?: string; info?: string };
 
@@ -175,6 +180,64 @@ export function AttendanceControls({
           />
         </div>
       )}
+
+      <FormFeedback error={error} info={info} />
+    </div>
+  );
+}
+
+/**
+ * O agente responde por ESTA conexão? Desligado, o número só recebe: quem
+ * escreve entra em Conversas para a equipe, sem resposta nem follow-up
+ * automático. É o que deixa a Meta só para Disparos enquanto o QR atende.
+ */
+export function AgentRepliesControl({
+  provider,
+  agentReplies,
+  className,
+}: {
+  provider: "evolution" | "meta";
+  agentReplies: boolean;
+  className?: string;
+}) {
+  const [on, setOn] = useState(agentReplies);
+  const { pending, error, info, run } = useControlAction();
+  const descId = `whatsapp-replies-desc-${provider}`;
+
+  return (
+    <div className={cn("space-y-4", className)}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            aria-hidden
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+              on ? "bg-success/20 text-success" : "bg-white/10 text-white/60"
+            }`}
+          >
+            <Bot size={18} />
+          </span>
+          <div className="min-w-0">
+            <p className="font-medium text-white">
+              {on ? "O agente responde por este número" : "Este número só faz disparos"}
+            </p>
+            <p id={descId} className="mt-0.5 max-w-prose text-sm text-white/65">
+              {on
+                ? "Desligue para usar este número só nos Disparos. Quem responder entra em Conversas para a equipe, sem resposta automática."
+                : "Quem escreve para este número entra em Conversas e é respondido pela equipe. O agente segue respondendo nos outros números."}
+            </p>
+          </div>
+        </div>
+        <Switch
+          checked={on}
+          onCheckedChange={(next) =>
+            run(() => setWhatsappAgentReplies(provider, next), () => setOn(next))
+          }
+          loading={pending}
+          disabled={pending}
+          label={`Agente neste número ${on ? "ligado" : "desligado"}`}
+          describedBy={descId}
+        />
+      </div>
 
       <FormFeedback error={error} info={info} />
     </div>

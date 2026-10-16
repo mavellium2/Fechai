@@ -1,7 +1,7 @@
 import { recordMessageContext } from "../../src/modules/reports/contact-context-events";
 import { prisma } from "../../src/lib/prisma";
 import { getWhatsAppProviderForInstance } from "../../src/modules/whatsapp/meta-config";
-import { findWhatsappChannel } from "../../src/modules/whatsapp/instances";
+import { agentRepliesOn, findWhatsappChannel } from "../../src/modules/whatsapp/instances";
 import {
   FOLLOWUP_STALE_AFTER_MINUTES,
   cumulativeDelays,
@@ -253,6 +253,9 @@ export async function scanAndSendFollowUps(now: Date = new Date()) {
     // troca de número (ver `pickWhatsappChannel`).
     const instance = await findWhatsappChannel(c.tenantId, c.whatsappProvider);
     if (!instance?.externalId) continue;
+    // Número em que o agente não responde (ex.: Meta só para Disparos): o
+    // follow-up é o agente escrevendo sozinho, então também não sai.
+    if (!agentRepliesOn(instance)) continue;
     const provider = getWhatsAppProviderForInstance(instance);
     if (!provider.isConfigured()) continue;
 

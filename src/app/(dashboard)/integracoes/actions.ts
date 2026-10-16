@@ -466,6 +466,37 @@ export async function setWhatsappAgentEnabled(enabled: boolean): Promise<Whatsap
   return { ok: true, info: enabled ? `${agent.name} voltou a responder.` : `${agent.name} parou de responder.` };
 }
 
+/**
+ * Liga/desliga o agente em UMA conexão. Desligado, o número só recebe: as
+ * mensagens entram em Conversas para a equipe, sem resposta nem follow-up
+ * automático — é o "Meta só para Disparos". A outra conexão não muda.
+ */
+export async function setWhatsappAgentReplies(
+  requested: string,
+  enabled: boolean,
+): Promise<WhatsappControlResult> {
+  const { tenantId } = await requireTenant();
+  if (!isWhatsappProviderName(requested) || typeof enabled !== "boolean") {
+    return { ok: false, error: "Conexão de WhatsApp inválida." };
+  }
+  if (requested === "meta" && !(await tenantCanUseMetaWhatsapp(tenantId))) {
+    return { ok: false, error: META_WHATSAPP_NOT_ENABLED };
+  }
+  const updated = await prisma.whatsappInstance.updateMany({
+    where: { tenantId, provider: requested },
+    data: { agentReplies: enabled },
+  });
+  if (updated.count === 0) return { ok: false, error: "Esta conexão ainda não foi configurada." };
+
+  revalidatePath("/integracoes");
+  return {
+    ok: true,
+    info: enabled
+      ? "O agente volta a responder quem escreve para este número."
+      : "O agente não responde mais por este número. As mensagens continuam chegando em Conversas.",
+  };
+}
+
 /** Configura se o agente ignora mensagens de grupos do WhatsApp. */
 export async function setWhatsappIgnoreGroups(ignore: boolean): Promise<WhatsappControlResult> {
   const { tenantId } = await requireTenant();
