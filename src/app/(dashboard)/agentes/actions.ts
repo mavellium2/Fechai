@@ -1201,7 +1201,7 @@ export async function loadReminderTemplatesAction(): Promise<
   try {
     const templates = await connection.provider.listBroadcastTemplates();
     if (!templates.length) {
-      return { ok: false, error: "Nenhum template aprovado e compatível na Meta. Crie um de texto no Gerenciador do WhatsApp e aguarde a aprovação." };
+      return { ok: false, error: "Nenhum template aprovado e compatível na Meta. Crie um em Disparos › Modelos de mensagem e aguarde a aprovação." };
     }
     return { ok: true, templates };
   } catch (err) {

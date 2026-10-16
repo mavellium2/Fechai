@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { FileSpreadsheet, RefreshCw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -252,8 +253,11 @@ export function DisparosClient({
                 </p>
                 {loaded && !templates.length && (
                   <Alert tone="warn">
-                    Nenhum template compatível. Crie e aprove um template de
-                    texto no Gerenciador do WhatsApp da Meta.
+                    Nenhum template compatível.{" "}
+                    <Link href="/disparos/modelos" className="underline underline-offset-2">
+                      Crie um modelo
+                    </Link>{" "}
+                    e aguarde a aprovação da Meta.
                   </Alert>
                 )}
               </div>

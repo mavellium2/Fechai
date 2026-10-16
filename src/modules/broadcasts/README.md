@@ -87,7 +87,18 @@ de fórmulas para abertura no Excel.
 
 Templates compatíveis: aprovados, texto, cabeçalho/rodapé fixos e até 20 variáveis
 posicionais no corpo. Mídia, botões, variáveis nomeadas e cabeçalho variável ficam
-fora desta versão. A criação/aprovação continua no Gerenciador da Meta.
+fora desta versão.
+
+**Criar modelo pelo fechai** (`/disparos/modelos`, mesmo guarda dos Disparos):
+o formulário monta exatamente esse formato — `template-draft.ts` valida (nome
+`a-z0-9_`, Utilidade ou Marketing, `pt_BR`, variáveis em sequência, corpo que
+não começa nem termina em variável, um exemplo por variável) e
+`createMessageTemplate` faz `POST /{WABA}/message_templates`. Quem aprova é a
+Meta, depois; a lista (`listManagedTemplates`) mostra em análise, aprovados e
+recusados com o motivo. **Não contorna a Meta**: conta que ela não autoriza a
+gerir modelos (subcode `2494160`) recebe a mesma recusa daqui, com a frase
+apontando o suporte da Meta. Falha de rede ao criar não repete o envio — a tela
+pede para atualizar a lista antes, porque a Meta pode ter criado o modelo.
 
 O adapter pagina templates por cursor na Graph API, sem seguir `paging.next`
 para outro domínio. Template e remetente são congelados no rascunho e revalidados
@@ -225,6 +236,7 @@ Sem processo de worker ativo, envios confirmados continuam aguardando na base.
 
 - `access.ts`, `connection.ts`: acesso e integração.
 - `import.ts`, `phone.ts`, `template.ts`: leitura, normalização e conteúdo.
+- `template-draft.ts` + `src/app/(dashboard)/disparos/modelos/`: criar modelo e acompanhar a aprovação.
 - `schedule.ts`, `queue.ts`, `worker.ts`, `send.ts`: horário, distribuição e envio protegido.
 - `receipts.ts`, `outcomes.ts`, `recent.ts`: retorno, atribuição e frequência.
 - `queries.ts`, `csv.ts`, `health.ts`: histórico, exportação e diagnóstico.

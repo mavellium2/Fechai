@@ -10,6 +10,12 @@ import {
   type BroadcastTemplate,
   type MetaTemplateRecord,
 } from "@/modules/broadcasts/template";
+import {
+  managedTemplate,
+  type ManagedTemplate,
+  type MetaManagedTemplateRecord,
+  type TemplatePayload,
+} from "@/modules/broadcasts/template-draft";
 
 /**
  * Credenciais de uma conta na WhatsApp Cloud API oficial.
@@ -31,6 +37,8 @@ type MetaErrorBody = {
     type?: string;
     code?: number;
     error_subcode?: number;
+    error_user_title?: string;
+    error_user_msg?: string;
   };
 };
 
@@ -72,20 +80,67 @@ export class MetaCloudProvider implements WhatsAppProvider {
     );
   }
 
-  /** Pagina usando cursor, nunca seguindo uma URL externa com nosso token. */
+  /** Templates aprovados no formato que Disparos e lembretes sabem enviar. */
   async listBroadcastTemplates(): Promise<BroadcastTemplate[]> {
+    return this.listTemplates<MetaTemplateRecord, BroadcastTemplate>(
+      "id,name,language,status,parameter_format,components",
+      supportedTemplate,
+    );
+  }
+
+  /** Todos os modelos da conta, inclusive em análise e recusados (`/disparos/modelos`). */
+  async listManagedTemplates(): Promise<ManagedTemplate[]> {
+    return this.listTemplates<MetaManagedTemplateRecord, ManagedTemplate>(
+      "id,name,language,status,category,rejected_reason,components",
+      managedTemplate,
+    );
+  }
+
+  /**
+   * Envia um modelo novo para a Meta analisar. A Meta responde na hora com o
+   * status inicial (quase sempre `PENDING`) e decide depois. Recusa explícita
+   * vira `MetaTemplateRejected` com uma frase para a tela; o corpo bruto da
+   * resposta nunca sai daqui.
+   */
+  async createMessageTemplate(
+    payload: TemplatePayload,
+  ): Promise<{ id: string; status: string; category: string | null }> {
+    const waba = this.requireWaba();
+    const response = await fetch(graphUrl(`${waba}/message_templates`), {
+      method: "POST",
+      headers: this.headers(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as MetaErrorBody;
+      throw new MetaTemplateRejected(templateErrorMessage(response.status, body));
+    }
+    const data = (await response.json()) as { id?: string; status?: string; category?: string };
+    if (!data.id) throw new Error("A Meta não confirmou o identificador do modelo.");
+    return { id: data.id, status: data.status ?? "PENDING", category: data.category ?? null };
+  }
+
+  private requireWaba(): string {
     const waba = this.credentials.businessAccountId;
     if (!waba)
       throw new Error(
         "Configure o ID da conta WhatsApp Business em Integrações.",
       );
-    const templates: BroadcastTemplate[] = [];
+    return waba;
+  }
+
+  /** Pagina usando cursor, nunca seguindo uma URL externa com nosso token. */
+  private async listTemplates<Raw, Item>(
+    fields: string,
+    map: (raw: Raw) => Item | null,
+  ): Promise<Item[]> {
+    const waba = this.requireWaba();
+    const templates: Item[] = [];
     let after: string | undefined;
     for (let page = 0; page < 20; page++) {
-      const query = new URLSearchParams({
-        fields: "id,name,language,status,parameter_format,components",
-        limit: "100",
-      });
+      const query = new URLSearchParams({ fields, limit: "100" });
       if (after) query.set("after", after);
       const response = await fetch(
         `${graphUrl(`${waba}/message_templates`)}?${query}`,
@@ -100,11 +155,11 @@ export class MetaCloudProvider implements WhatsAppProvider {
           "Não foi possível consultar os templates na Meta. Confira as permissões do token em Integrações.",
         );
       const data = (await response.json()) as {
-        data?: MetaTemplateRecord[];
+        data?: Raw[];
         paging?: { next?: string; cursors?: { after?: string } };
       };
       for (const raw of data.data ?? []) {
-        const template = supportedTemplate(raw);
+        const template = map(raw);
         if (template) templates.push(template);
       }
       if (!data.paging?.next) return templates;
@@ -369,3 +424,25 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
 /** Resposta negativa explícita; timeout/rede são resultado desconhecido. */
 export class MetaBroadcastRejected extends Error {}
+
+/** A Meta recusou criar o modelo; `message` já é a frase para a tela. */
+export class MetaTemplateRejected extends Error {}
+
+/**
+ * A recusa da Meta em uma frase para a clínica. `error_user_msg` é escrito pela
+ * Meta para o usuário final (vem no idioma da conta), então pode ir à tela —
+ * curto e em uma linha. O resto da resposta (ids de rastreio, tipo, código cru)
+ * fica de fora.
+ */
+export function templateErrorMessage(status: number, body: MetaErrorBody): string {
+  if (status >= 500) return "A Meta não respondeu agora. Tente de novo em alguns minutos.";
+  const error = body.error;
+  if (error?.code === 190) return "O token da Meta expirou ou foi revogado. Atualize as credenciais em Integrações.";
+  // Conta do WhatsApp sem autorização para gerir modelos: não é o texto, é a
+  // conta. Nenhum ajuste no formulário resolve; só o suporte da Meta.
+  if (error?.error_subcode === 2494160)
+    return "A Meta não autoriza esta conta do WhatsApp a criar modelos. Peça a liberação ao suporte da Meta.";
+  const fromMeta = error?.error_user_msg?.replace(/\s+/g, " ").trim();
+  if (fromMeta && fromMeta.length <= 200) return fromMeta;
+  return "A Meta recusou o modelo. Revise o nome e o texto e tente de novo.";
+}

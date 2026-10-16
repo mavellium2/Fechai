@@ -21,6 +21,11 @@ export default async function DisparosPage() {
         eyebrow="WhatsApp · API oficial"
         title="Disparos"
         description="Uma lista de contatos, uma mensagem aprovada e cada envio acompanhado de perto."
+        actions={
+          <ButtonLink href="/disparos/modelos" variant="outline" size="sm">
+            Modelos de mensagem
+          </ButtonLink>
+        }
       />
       {!connection && (
         <Alert tone="warn" title="Conecte seu número pela Meta">
