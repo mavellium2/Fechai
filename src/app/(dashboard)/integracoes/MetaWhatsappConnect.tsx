@@ -9,8 +9,12 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { reconnectMetaWhatsapp, saveMetaWhatsapp } from "./actions";
 import { AgentRepliesControl, DisconnectControl } from "./WhatsappControls";
+import { MetaEmbeddedSignup } from "./MetaEmbeddedSignup";
+import type { EmbeddedSignupPublicConfig } from "@/modules/whatsapp/embedded-signup-config";
 
 type Props = {
+  embeddedSignup: EmbeddedSignupPublicConfig | null;
+  usesEmbeddedSignup: boolean;
   connected: boolean;
   /** O agente responde por este número; desligado, a Meta fica só para Disparos. */
   agentReplies: boolean;
@@ -63,6 +67,7 @@ export function MetaWhatsappConnect(props: Props) {
 
   return (
     <div className="space-y-5">
+      <MetaEmbeddedSignup config={props.embeddedSignup} hasCredentials={props.hasCredentials} disabled={pending} />
       {!props.encryptionConfigured && (
         <Alert tone="warn" title="Criptografia não configurada">
           O servidor precisa de ENCRYPTION_KEY para guardar o token e o App Secret com segurança.
@@ -79,7 +84,9 @@ export function MetaWhatsappConnect(props: Props) {
               Conectado diretamente pela WhatsApp Business Platform da Meta.
             </p>
           </div>
-          <WebhookSetup {...props} />
+          {props.usesEmbeddedSignup ? (
+            <p className="text-sm text-white/60">O recebimento de novas mensagens foi configurado automaticamente pela conexão com a Meta.</p>
+          ) : <WebhookSetup {...props} />}
         </div>
       ) : props.hasCredentials ? (
         <div className="space-y-5">

@@ -175,6 +175,15 @@ describe("Rotas de API: autenticação", () => {
       "x-hub-signature-256",
       "timingSafeEqual",
     ],
+    // Callback compartilhado da Meta: handshake por segredo e POST por HMAC;
+    // comportamento e isolamento executados em meta-shared-webhook.test.ts.
+    "src/app/api/webhooks/whatsapp/meta/route.ts": [
+      "verifyMetaWebhookSignature",
+      "x-hub-signature-256",
+      "timingSafeEqual",
+      "META_APP_SECRET",
+      "META_WEBHOOK_VERIFY_TOKEN",
+    ],
     "src/app/api/webhooks/stripe/route.ts": ["constructEvent"],
     "src/app/api/widget/[tenantId]/message/route.ts": ["isRateLimited", "isIpRateLimited"],
     "src/app/api/register/route.ts": ["rateLimit"],

@@ -62,6 +62,8 @@ const channel = (over: Record<string, unknown> = {}) =>
 const meta = (over: Record<string, unknown> = {}) =>
   render(
     createElement(MetaWhatsappConnect, {
+      embeddedSignup: null,
+      usesEmbeddedSignup: false,
       connected: true,
       agentReplies: true,
       encryptionConfigured: true,
@@ -122,6 +124,14 @@ describe("Cartão do QR code (conta com as duas conexões)", () => {
 });
 
 describe("Cartão da API oficial da Meta", () => {
+  it("oferece refazer a conexão e preserva o celular, sem expor o segredo do callback compartilhado", () => {
+    const html = meta({ embeddedSignup: { appId: "123456", configId: "654321", version: "v26.0" }, usesEmbeddedSignup: true });
+    expect(html).toContain("Refazer conexão pela Meta");
+    expect(html).toContain("confirme no celular");
+    expect(html).toContain("histórico antigo continua no celular");
+    expect(html).not.toContain("token-de-verificacao");
+    expect(html).not.toContain("api/webhooks/whatsapp/meta/tenant-1");
+  });
   it("conectado: mostra o número, o webhook, o verify token e o desconectar da Meta", () => {
     const html = meta();
     expect(html).toContain("+55 14 99999-0000");

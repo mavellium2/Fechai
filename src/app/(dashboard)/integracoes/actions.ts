@@ -8,6 +8,7 @@ import { payloadTooLarge } from "@/lib/rate-limit";
 import { randomBytes } from "node:crypto";
 import { getWhatsAppProvider } from "@/modules/whatsapp";
 import { MetaCloudProvider } from "@/modules/whatsapp/meta";
+import { hasPendingCoexistence } from "@/modules/whatsapp/coexistence-sync";
 import {
   getWhatsAppProviderForInstance,
   metaWebhookUrl,
@@ -108,6 +109,9 @@ export async function saveMetaWhatsapp(formData: FormData): Promise<MetaConnectR
   const current = await prisma.whatsappInstance.findUnique({
     where: instanceKey(tenantId, "meta"),
   });
+  if (hasPendingCoexistence(current?.metaCoexistenceSync, phoneNumberId)) {
+    return { ok: false, error: "A conexão pelo WhatsApp Business ainda não foi concluída. Use o botão de conexão pela Meta para continuar." };
+  }
   const provider = new MetaCloudProvider({ phoneNumberId, businessAccountId, accessToken });
   try {
     const profile = await provider.getPhoneProfile(phoneNumberId);
@@ -187,10 +191,13 @@ export async function reconnectMetaWhatsapp(): Promise<MetaConnectResult> {
   }
   const instance = await prisma.whatsappInstance.findUnique({
     where: instanceKey(tenantId, "meta"),
-    select: { id: true, status: true, metaDisplayPhone: true, ...WHATSAPP_PROVIDER_SELECT },
+    select: { id: true, status: true, metaDisplayPhone: true, metaCoexistenceSync: true, ...WHATSAPP_PROVIDER_SELECT },
   });
   if (!instance) {
     return { ok: false, error: "Configure primeiro a API oficial da Meta." };
+  }
+  if (hasPendingCoexistence(instance.metaCoexistenceSync, instance.metaPhoneNumberId ?? "")) {
+    return { ok: false, error: "A conexão pelo WhatsApp Business ainda não foi concluída. Use o botão de conexão pela Meta para continuar." };
   }
   const provider = getWhatsAppProviderForInstance(instance);
   if (!provider.isConfigured() || !(provider instanceof MetaCloudProvider)) {

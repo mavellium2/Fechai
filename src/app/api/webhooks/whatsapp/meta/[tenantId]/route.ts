@@ -1,20 +1,12 @@
-import { recordReminderReceipt } from "@/modules/scheduling/reminder-dispatch";
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
-  getWhatsAppProviderForInstance,
   readMetaWebhookSecrets,
   verifyMetaWebhookSignature,
   WHATSAPP_PROVIDER_SELECT,
 } from "@/modules/whatsapp/meta-config";
-import { processIncomingWhatsapp } from "@/modules/whatsapp/process-incoming";
-import {
-  parseMetaMessages,
-  parseMetaStatuses,
-} from "@/modules/whatsapp/meta-events";
-import { receiveBroadcastReceipt } from "@/modules/broadcasts/receipts";
-import { recordBroadcastResponse } from "@/modules/broadcasts/outcomes";
+import { handleMetaWebhook } from "@/modules/whatsapp/meta-webhook-handler";
 
 function sameSecret(received: string, expected: string): boolean {
   const a = Buffer.from(received);
@@ -93,43 +85,6 @@ export async function POST(
       return null;
     }
   })();
-  const provider = getWhatsAppProviderForInstance(instance);
-  let failed = false;
-  const receipts = parseMetaStatuses(payload).filter(
-    (r) => r.phoneNumberId === instance.metaPhoneNumberId,
-  );
-  for (const receipt of receipts) {
-    try {
-      await receiveBroadcastReceipt(tenantId, receipt);
-      await recordReminderReceipt(tenantId, "meta", receipt.messageId, receipt.status, receipt.occurredAt);
-    } catch {
-      failed = true;
-    }
-  }
-  const messages =
-    instance.status === "connected"
-      ? parseMetaMessages(payload).filter(
-          (m) => m.instanceExternalId === instance.metaPhoneNumberId,
-        )
-      : [];
-  // Um evento com falha não impede os demais. A reentrega usa o id de cada mensagem.
-  for (const incoming of messages) {
-    try {
-      const result = await processIncomingWhatsapp(incoming, provider);
-      if ((result.status ?? 200) >= 400) failed = true;
-      else if (!incoming.isReaction && incoming.messageKeyId)
-        await recordBroadcastResponse(
-          tenantId,
-          incoming.fromPhone,
-          incoming.messageKeyId,
-          incoming.occurredAt,
-        );
-    } catch {
-      failed = true;
-    }
-  }
-  return NextResponse.json(
-    { ok: !failed, messages: messages.length, receipts: receipts.length },
-    { status: failed ? 500 : 200 },
-  );
+  const result = await handleMetaWebhook(tenantId, instance, payload);
+  return NextResponse.json(result, { status: result.ok ? 200 : 500 });
 }

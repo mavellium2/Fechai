@@ -11,18 +11,22 @@ function timestamp(v: unknown): Date | undefined {
   const date = new Date(seconds * 1000);
   return Number.isFinite(date.getTime()) && seconds > 0 ? date : undefined;
 }
-function values(payload: unknown) {
+function values(payload: unknown, field = "messages") {
   const p = object(payload);
   if (p.object !== "whatsapp_business_account") return [];
   return array(p.entry)
     .flatMap((e) => array(object(e).changes))
     .map(object)
-    .filter((c) => c.field === "messages")
+    .filter((c) => c.field === field)
     .map((c) => object(c.value));
 }
 
 /** Cada mudança tem seu remetente e seus contatos; não misturar tenants do lote. */
 export function parseMetaMessages(payload: unknown): IncomingMessage[] {
+  return [...liveMessages(payload), ...parseMetaAppEchoes(payload)];
+}
+
+function liveMessages(payload: unknown): IncomingMessage[] {
   return values(payload).flatMap((value) => {
     const instanceExternalId = text(object(value.metadata).phone_number_id);
     return array(value.messages).flatMap((raw) => {
@@ -59,6 +63,23 @@ export function parseMetaMessages(payload: unknown): IncomingMessage[] {
           occurredAt: timestamp(m.timestamp),
         },
       ];
+    });
+  });
+}
+
+/** Mensagem nova escrita no celular pela equipe; nunca é fala de um lead. */
+export function parseMetaAppEchoes(payload: unknown): IncomingMessage[] {
+  return values(payload, "smb_message_echoes").flatMap(value => {
+    const phone = text(object(value.metadata).phone_number_id);
+    return array(value.message_echoes).flatMap(raw => {
+      const m = object(raw), to = text(m.to), messageId = text(m.id);
+      const hasAudio = m.type === "audio" && Boolean(text(object(m.audio).id));
+      const isReaction = m.type === "reaction";
+      const content = isReaction ? text(object(m.reaction).emoji) : text(object(m.text).body);
+      if (!phone || !to || !messageId || (!content && !hasAudio)) return [];
+      return [{ instanceExternalId: phone, fromPhone: to, messageKeyId: messageId,
+        text: content, isGroup: false, isFromMe: true, isReaction, hasAudio,
+        mediaId: text(object(m.audio).id) || undefined, occurredAt: timestamp(m.timestamp) }];
     });
   });
 }

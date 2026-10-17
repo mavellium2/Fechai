@@ -253,14 +253,21 @@ export class MetaCloudProvider implements WhatsAppProvider {
     externalId: string,
   ): Promise<{ status: WhatsAppStatus; exists: boolean; reachable: boolean }> {
     try {
-      const fields = "id,display_phone_number,verified_name,quality_rating";
+      const fields = "id,platform_type,status";
       const res = await fetch(
         `${graphUrl(externalId)}?fields=${encodeURIComponent(fields)}`,
         {
           headers: this.headers(false),
+          cache: "no-store",
+          signal: AbortSignal.timeout(12_000),
         },
       );
-      if (res.ok) return { status: "connected", exists: true, reachable: true };
+      if (res.ok) {
+        const data = await res.json() as { id?: string; platform_type?: string; status?: string };
+        if (data.id !== externalId || !data.platform_type || !data.status)
+          return { status: "disconnected", exists: true, reachable: false };
+        return { status: data.platform_type === "CLOUD_API" && data.status === "CONNECTED" ? "connected" : "disconnected", exists: true, reachable: true };
+      }
       // A Meta respondeu: rede está de pé, mas o id/token não dá acesso ao
       // número. Para o produto isto é desconectado (e não indisponibilidade).
       return {
@@ -277,11 +284,13 @@ export class MetaCloudProvider implements WhatsAppProvider {
     displayPhone: string | null;
     verifiedName: string | null;
   }> {
-    const fields = "id,display_phone_number,verified_name";
+    const fields = "id,display_phone_number,verified_name,platform_type,status";
     const res = await fetch(
       `${graphUrl(externalId)}?fields=${encodeURIComponent(fields)}`,
       {
         headers: this.headers(false),
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
       },
     );
     if (!res.ok) throw await metaError("Meta Cloud API", res);
@@ -289,9 +298,13 @@ export class MetaCloudProvider implements WhatsAppProvider {
       id?: string;
       display_phone_number?: string;
       verified_name?: string;
+      platform_type?: string;
+      status?: string;
     };
     if (data.id !== externalId)
       throw new Error("A Meta devolveu um Phone Number ID diferente.");
+    if (data.platform_type !== "CLOUD_API" || data.status !== "CONNECTED")
+      throw new Error("O número ainda não está conectado à API oficial. Use a conexão pela Meta e confirme no WhatsApp Business do celular.");
     return {
       displayPhone: data.display_phone_number ?? null,
       verifiedName: data.verified_name ?? null,

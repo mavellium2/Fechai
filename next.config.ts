@@ -38,12 +38,12 @@ const securityHeaders = [
  */
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.posthog.com https://js.stripe.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.posthog.com https://js.stripe.com https://connect.facebook.net",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://*.posthog.com https://api.stripe.com",
-  "frame-src https://js.stripe.com https://hooks.stripe.com",
+  "connect-src 'self' https://*.posthog.com https://api.stripe.com https://www.facebook.com https://graph.facebook.com",
+  "frame-src https://js.stripe.com https://hooks.stripe.com https://www.facebook.com https://web.facebook.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

@@ -133,6 +133,29 @@ um lugar só (`instances.ts`):
 
 ## Webhook oficial da Meta
 
+### Conexão pelo botão da Meta (coexistência)
+
+`MetaEmbeddedSignup` em `/integracoes` abre o Cadastro Incorporado v4 com
+`featureType: whatsapp_business_app_onboarding`. O código OAuth é trocado
+imediatamente no servidor; IDs do evento são conferidos na Graph API. A conta
+só fica conectada com `CLOUD_API`, `is_on_biz_app=true` e `CONNECTED`. O app do
+celular permanece ativo; nunca chamar register/deregister nesse fluxo.
+
+Configuração, deploy e links do app estão em
+[`docs/META_COEXISTENCIA.md`](../../../docs/META_COEXISTENCIA.md). Arquivos:
+`embedded-signup*.ts`, `/api/integrations/meta/signup`, callback compartilhado
+`/api/webhooks/whatsapp/meta` e `meta-webhook-handler.ts`. O callback antigo por
+tenant permanece disponível. No compartilhado, assinatura + WABA + telefone
+delimitam a conta; o segredo do app salvo precisa corresponder ao parceiro.
+
+`metaCoexistenceSync` registra pedidos únicos de sincronização (db push +
+generate na web/worker). Resultado `unknown` nunca é repetido. O histórico e
+contatos antigos são reconhecidos, sem importação nem turno de IA. Ecos novos
+do celular entram como humano, pausam o agente e não atribuem resposta a
+campanha. Eventos de remoção desconectam só a Meta, preservando credenciais.
+Consulta de perfil 200 não prova conexão: o adapter também verifica plataforma
+e status ao salvar/reconectar e na checagem de saúde.
+
 Cada tenant recebe uma Callback URL própria:
 
 `/api/webhooks/whatsapp/meta/{tenantId}`

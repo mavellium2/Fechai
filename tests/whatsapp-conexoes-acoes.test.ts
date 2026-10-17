@@ -208,6 +208,15 @@ describe("Reconectar a Meta com credenciais guardadas (reconnectMetaWhatsapp)", 
     metaPhoneNumberId: "109876543210", metaDisplayPhone: "+55 14 99999-0000", ...over,
   });
 
+  it("a reconexão manual não pula a conclusão da coexistência", async () => {
+    mocks.findUnique.mockResolvedValue(guardada({ metaCoexistenceSync: { phoneNumberId: "109876543210", contacts: { status: "unknown" } } }));
+    expect((await reconnectMetaWhatsapp()).ok).toBe(false);
+    expect((await saveMetaWhatsapp(credenciais())).ok).toBe(false);
+    expect(mocks.getPhoneProfile).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+
   it("religa só a linha da Meta, com a Evolution intocada", async () => {
     mocks.findUnique.mockResolvedValue(guardada());
 

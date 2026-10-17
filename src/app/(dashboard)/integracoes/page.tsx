@@ -27,6 +27,7 @@ import { ClinicorpCard, type ClinicorpState } from "./ClinicorpCard";
 import { listBlockedNumbers } from "@/modules/whatsapp/blocklist";
 import { WhatsappConnect } from "./WhatsappConnect";
 import { MetaWhatsappConnect } from "./MetaWhatsappConnect";
+import { embeddedSignupPublicConfig } from "@/modules/whatsapp/embedded-signup-config";
 import { AttendanceControls } from "./WhatsappControls";
 import { WhatsappBlocklist } from "./WhatsappBlocklist";
 import { SnippetBox } from "./SnippetBox";
@@ -318,6 +319,8 @@ export default async function IntegracoesPage({
             </CardTitle>
 
             <MetaWhatsappConnect
+              embeddedSignup={embeddedSignupPublicConfig()}
+              usesEmbeddedSignup={Boolean(metaRow?.metaCoexistenceSync)}
               key={metaStatus}
               connected={metaConnected}
               agentReplies={metaRow?.agentReplies !== false}
