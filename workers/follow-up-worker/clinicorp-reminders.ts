@@ -22,7 +22,7 @@ import {
   pickWhatsappChannel,
   setConversationChannel,
 } from "../../src/modules/whatsapp/instances";
-import { dueReminders, loadAccountScheduleConfigs } from "./reminders";
+import { dueReminders, isReminderSendDay, loadAccountScheduleConfigs, staleReminders } from "./reminders";
 
 /**
  * Confirmações das consultas diretas do Clinicorp. Mesmo calendário de regras
@@ -161,13 +161,24 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
   const legacy = await prisma.clinicorpReminder.findUnique({ where: { tenantId_clinicorpAppointmentId: { tenantId, clinicorpAppointmentId: item.id } } });
   const moved = Boolean(legacy && legacy.startsAt.getTime() !== item.startsAt.getTime());
   const already = legacy && !moved ? legacy.remindersSent : [];
+  const expired = staleReminders({ status: "scheduled", startsAt: item.startsAt, remindersSent: already }, cfg.reminders, now, cfg.timezone)
+    .map((r) => r.minutesBefore);
   const due = dueReminders({ status: "scheduled", startsAt: item.startsAt, remindersSent: options.operation ? [] : already }, cfg.reminders, now, cfg.timezone);
-  // Manual sends may bring the next configured reminder forward. They consume that exact rule.
-  const rules = options.operation ? due.length ? due : cfg.reminders : due;
+  // Envio explícito pode antecipar o horário, mas nunca mudar o dia do modelo.
+  // Registrar algo já tratado pela equipe não envia mensagem e preserva esse registro.
+  const available = options.operation === "send"
+    ? cfg.reminders.filter((r) => isReminderSendDay(item.startsAt, r, now, cfg.timezone)) : cfg.reminders;
+  const rules = options.operation ? due.length ? due : available : due;
   const toSend = [...rules].sort((a, b) => options.operation && !due.length ? b.minutesBefore - a.minutesBefore : a.minutesBefore - b.minutesBefore)[0];
-  if (!toSend) return { sent: false, reason: already.length ? "handled" : "waiting" };
+  if (!toSend) {
+    if (expired.length) await markSent(tenantId, item, already, expired, null, moved);
+    return { sent: false, reason: options.operation === "send" ? "outside_window" : already.length ? "handled" : "waiting" };
+  }
   if (already.includes(toSend.minutesBefore)) return { sent: false, reason: "handled" };
-  const closing = due.length ? due.map((r) => r.minutesBefore) : [toSend.minutesBefore];
+  const closing = [...new Set([
+    ...expired,
+    ...(due.length ? due.map((r) => r.minutesBefore) : [toSend.minutesBefore]),
+  ])];
   const key: ReminderKey = { tenantId, sourceKey: `clinicorp:${item.id}`, startsAt: item.startsAt, minutesBefore: toSend.minutesBefore };
   const fetched = options.category === undefined && item.categoryId ? await listClinicorpCategories(tenantId) : null;
   const category = options.category !== undefined ? options.category : fetched ? fetched.ok ? fetched.data.find((c) => c.id === item.categoryId)?.name : null : item.category;

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
+  $transaction: vi.fn(),
+  appointmentReschedule: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn() },
   tenantAction: { findFirst: vi.fn(), findUnique: vi.fn() },
   appointment: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   conversation: { update: vi.fn(), updateMany: vi.fn() },
@@ -29,6 +31,7 @@ const appointment = {
   id: "consulta-1", tenantId: ctx.tenantId, leadId: ctx.leadId, status: "scheduled",
   startsAt: new Date("2026-09-17T13:00:00Z"), endsAt: new Date("2026-09-17T13:30:00Z"),
   title: "Consulta", notes: null, googleEventId: "google-antigo", clinicorpAppointmentId: "123",
+  remindersSent: [1440], reminderSentAt: new Date("2026-09-16T11:00:00Z"),
 };
 const cancel = (args = {}) => runToolHandler("cancel_meeting", ctx, { appointmentId: appointment.id, confirmed: true, ...args });
 const reschedule = (args = {}) => runToolHandler("reschedule_meeting", ctx, { appointmentId: appointment.id, date: "2026-09-18", time: "14:00", confirmed: true, ...args });
@@ -43,6 +46,9 @@ beforeEach(() => {
   db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id && where.tenantId === ctx.tenantId && where.leadId === ctx.leadId ? { ...appointment } : null);
   db.appointment.findMany.mockResolvedValue([appointment]);
   db.appointment.updateMany.mockResolvedValue({ count: 1 });
+  db.$transaction.mockImplementation((work: (tx: typeof db) => Promise<unknown>) => work(db));
+  db.appointmentReschedule.create.mockResolvedValue({ id: "historico-1" });
+  db.appointmentReschedule.deleteMany.mockResolvedValue({ count: 1 });
   db.lead.findFirst.mockResolvedValue({ name: "Cliente", phone: "5511999999999" });
   mirrors.googleDelete.mockResolvedValue(true);
   mirrors.clinicorpCancel.mockResolvedValue(true);
@@ -131,7 +137,8 @@ describe("agenda externa sem disponibilidade confirmada", () => {
       expect(mirrors.googlePush).not.toHaveBeenCalled();
     } else {
       expect(db.appointment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-        data: { startsAt: appointment.startsAt, endsAt: appointment.endsAt },
+        data: expect.objectContaining({ startsAt: appointment.startsAt, endsAt: appointment.endsAt,
+          remindersSent: { set: appointment.remindersSent }, reminderSentAt: appointment.reminderSentAt }),
       }));
       expect(mirrors.clinicorpPush).toHaveBeenLastCalledWith(ctx.tenantId, expect.objectContaining({ startsAt: appointment.startsAt, endsAt: appointment.endsAt }));
     }
@@ -207,6 +214,45 @@ describe("cancelamento", () => {
 });
 
 describe("reagendamento", () => {
+  it("guarda o dia original com a nova data e as observações na mesma transação", async () => {
+    db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id ? { ...appointment, notes: "Observação anterior" } : null);
+    expect(await reschedule()).toContain("reagendada");
+    expect(db.$transaction).toHaveBeenCalledOnce();
+    expect(db.appointmentReschedule.create).toHaveBeenCalledWith({ data: {
+      tenantId: ctx.tenantId, appointmentId: appointment.id,
+      startsAt: appointment.startsAt, endsAt: appointment.endsAt,
+      nextStartsAt: new Date("2026-09-18T17:00:00Z"), nextEndsAt: new Date("2026-09-18T17:30:00Z"),
+      notes: "Observação anterior", clinicorpAppointmentId: "123", createdAt: new Date(),
+    } });
+    expect(db.appointment.create).not.toHaveBeenCalled();
+    expect(db.appointment.updateMany.mock.calls[0][0].data).toMatchObject({ remindersSent: { set: [] }, reminderSentAt: null });
+  });
+  it("não chama os espelhos quando não consegue preservar o histórico", async () => {
+    db.appointmentReschedule.create.mockRejectedValueOnce(new Error("Histórico indisponível"));
+    expect(await reschedule()).toContain("Consulte a agenda antes de afirmar");
+    expect(mirrors.clinicorpCancel).not.toHaveBeenCalled();
+    expect(mirrors.googleDelete).not.toHaveBeenCalled();
+  });
+  it("não cria histórico quando outra operação já mudou a consulta", async () => {
+    db.appointment.updateMany.mockResolvedValueOnce({ count: 0 });
+    expect(await reschedule()).toContain("mudou");
+    expect(db.appointmentReschedule.create).not.toHaveBeenCalled();
+  });
+  it("uma nova troca preserva também a data intermediária", async () => {
+    await reschedule();
+    const intermediate = { ...appointment, startsAt: new Date("2026-09-18T17:00:00Z"), endsAt: new Date("2026-09-18T17:30:00Z") };
+    db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id ? intermediate : null);
+    await reschedule({ date: "2026-09-21", time: "14:00" });
+    expect(db.appointmentReschedule.create).toHaveBeenCalledTimes(2);
+    expect(db.appointmentReschedule.create).toHaveBeenLastCalledWith({ data: expect.objectContaining({
+      startsAt: intermediate.startsAt, nextStartsAt: new Date("2026-09-21T17:00:00Z"),
+    }) });
+  });
+  it("recusa externa por conflito não deixa uma remarcação falsa no histórico", async () => {
+    mirrors.clinicorpPush.mockResolvedValueOnce({ status: "failed", reason: "conflict", error: "ocupado" });
+    expect(await reschedule()).toContain("ocupado");
+    expect(db.appointmentReschedule.deleteMany).toHaveBeenCalledWith({ where: { id: "historico-1", tenantId: ctx.tenantId, appointmentId: appointment.id } });
+  });
   it("preserva ID e duração original, liberando os espelhos anteriores", async () => {
     expect(await reschedule()).toContain("reagendada");
     expect(db.appointment.create).not.toHaveBeenCalled();

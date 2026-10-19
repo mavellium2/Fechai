@@ -282,5 +282,5 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
     ctx.replyOverride = `Ainda não consegui confirmar a mudança da sua consulta para ${when} na agenda da clínica. A reserva precisa ser conferida pela equipe antes da confirmação.`;
     return ctx.replyOverride;
   }
-  return `Consulta reagendada para ${when}${cfg.location ? ` (${cfg.location})` : ""}. O horário anterior foi liberado.`;
+  return `Consulta reagendada para ${when}${cfg.location ? ` (${cfg.location})` : ""}. O horário anterior foi liberado e permanece na data original no histórico do Fechai como remarcado, com a nova data.`;
 }

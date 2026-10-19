@@ -249,6 +249,60 @@ describe("pelo Evolution", () => {
 });
 
 describe("regras de envio", () => {
+  it.each(["meta", "evolution"] as const)("consulta para hoje não recebe confirmação da véspera por %s", async (kind) => {
+    provider(kind);
+    db.lead.findFirst.mockResolvedValue({ phone: "5514991406457", conversation: { id: "c", lastInboundAt: AGORA, whatsappProvider: kind } });
+    clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta({ startsAt: new Date("2026-09-28T18:00:00Z") })] });
+    expect(await scanAndSendClinicorpReminders(AGORA)).toMatchObject({ sent: 0 });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(evolution.sendMessage).not.toHaveBeenCalled();
+    expect(db.message.create).not.toHaveBeenCalled();
+    expect(upserts()[0]).toMatchObject({ create: { remindersSent: [UM_DIA], reminderSentAt: null } });
+  });
+
+  it("remarcação do Clinicorp para hoje dispensa a véspera e limpa a indicação do envio antigo", async () => {
+    db.clinicorpReminder.findMany.mockResolvedValue([{
+      clinicorpAppointmentId: consulta().id, startsAt: consulta().startsAt, remindersSent: [UM_DIA], reminderSentAt: AGORA,
+    }]);
+    clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta({ startsAt: new Date("2026-09-28T18:00:00Z") })] });
+    expect(await scanAndSendClinicorpReminders(AGORA)).toMatchObject({ sent: 0 });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(upserts()[0]).toMatchObject({ update: { remindersSent: { set: [UM_DIA] }, reminderSentAt: null } });
+  });
+
+  it.each(["2026-09-28T18:00:00Z", "2026-09-30T18:00:00Z"])("envio manual não usa modelo da véspera fora do dia previsto: %s", async (startsAt) => {
+    const result = await sendClinicorpConfirmation(CONTA, consulta({ startsAt: new Date(startsAt) }), parseScheduleConfig(config),
+      { now: AGORA, operation: "send", userId: "u" });
+    expect(result).toMatchObject({ sent: false, reason: "outside_window" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(evolution.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("envio manual pode antecipar a hora na própria véspera", async () => {
+    config.reminders = [{ minutesBefore: UM_DIA, sendTime: "16:00", template: "É amanhã." }];
+    expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA, operation: "send", userId: "u" }))
+      .toMatchObject({ sent: true });
+    expect(meta.sendBroadcastTemplate).toHaveBeenCalledOnce();
+  });
+
+  it("permite registrar a confirmação já feita pela equipe no próprio dia sem enviar mensagem", async () => {
+    const result = await sendClinicorpConfirmation(CONTA, consulta({ startsAt: new Date("2026-09-28T18:00:00Z") }), parseScheduleConfig(config),
+      { now: AGORA, operation: "manual", userId: "u" });
+    expect(result).toMatchObject({ sent: false, reason: "manual" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(evolution.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("mantém o lembrete de duas horas no próprio dia, fechando o da véspera sem enviar", async () => {
+    config.reminders = [{ minutesBefore: UM_DIA, template: "É amanhã." }, { minutesBefore: 120, template: "Hoje às {{hora}}." }];
+    provider("evolution");
+    db.lead.findFirst.mockResolvedValue({ phone: "5514991406457", conversation: { id: "c", lastInboundAt: AGORA, whatsappProvider: "evolution" } });
+    clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta({ startsAt: new Date("2026-09-28T14:00:00Z") })] });
+    expect(await scanAndSendClinicorpReminders(AGORA)).toMatchObject({ sent: 1 });
+    expect(evolution.sendMessage).toHaveBeenCalledWith("inst-1", "5514991406457", "Hoje às 11:00.");
+    expect(upserts()[0]).toMatchObject({ create: { remindersSent: [UM_DIA, 120], reminderSentAt: AGORA } });
+  });
+
   it("pula a consulta que o próprio fechai espelhou no Clinicorp", async () => {
     db.appointment.findMany.mockResolvedValue([{ clinicorpAppointmentId: "4791226171916288" }]);
     await scanAndSendClinicorpReminders(AGORA);

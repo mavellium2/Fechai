@@ -312,7 +312,7 @@ export async function findLeadAppointment(tenantId: string, leadId: string, id: 
   return prisma.appointment.findFirst({ where: { id, tenantId, leadId } });
 }
 
-/** Mantém o ID da consulta. O horário local só muda depois de validar conflitos. */
+/** Mantém o ID ativo e guarda o horário anterior na mesma transação. */
 export async function rescheduleAppointment(input: {
   tenantId: string; leadId: string; id: string; startsAt: Date; timezone: string;
 }) {
@@ -323,12 +323,25 @@ export async function rescheduleAppointment(input: {
   if (await hasConflictAnywhere(input.tenantId, input.startsAt, endsAt, input.timezone, previous.id, previous.clinicorpAppointmentId ?? undefined)) {
     return { status: "conflict" } as const;
   }
-  const changed = await prisma.appointment.updateMany({
-    where: { id: previous.id, tenantId: input.tenantId, leadId: input.leadId, status: "scheduled", startsAt: previous.startsAt, endsAt: previous.endsAt },
-    // A confirmação era do horário antigo: o paciente ainda não confirmou este.
-    data: { startsAt: input.startsAt, endsAt, rescheduledAt: new Date(), confirmedAt: null, confirmationSource: null },
+  const changedAt = new Date();
+  const history = await prisma.$transaction(async (tx) => {
+    const changed = await tx.appointment.updateMany({
+      where: { id: previous.id, tenantId: input.tenantId, leadId: input.leadId, status: "scheduled", startsAt: previous.startsAt, endsAt: previous.endsAt,
+        notes: previous.notes, rescheduledAt: previous.rescheduledAt },
+      // Confirmação e lembretes enviados eram do horário antigo.
+      data: { startsAt: input.startsAt, endsAt, rescheduledAt: changedAt, confirmedAt: null, confirmationSource: null,
+        remindersSent: { set: [] }, reminderSentAt: null },
+    });
+    if (!changed.count) return null;
+    return tx.appointmentReschedule.create({ data: {
+      tenantId: input.tenantId, appointmentId: previous.id,
+      startsAt: previous.startsAt, endsAt: previous.endsAt,
+      nextStartsAt: input.startsAt, nextEndsAt: endsAt,
+      notes: previous.notes, clinicorpAppointmentId: previous.clinicorpAppointmentId,
+      createdAt: changedAt,
+    } });
   });
-  if (!changed.count) return { status: "unavailable" } as const;
+  if (!history) return { status: "unavailable" } as const;
 
   // A alteração local já está confirmada. Espelhos são opcionais e nunca lançam.
   const [googleRemoved, clinicorpRemoved] = await Promise.all([
@@ -358,14 +371,18 @@ export async function rescheduleAppointment(input: {
   if (clinicorpSync.status === "failed" && "reason" in clinicorpSync && clinicorpSync.reason === "conflict") {
     // A clínica recusou o novo horário. Reponha o original, que já havia sido
     // combinado, e deixe o agente consultar alternativas para uma nova escolha.
-    const reverted = await prisma.appointment.updateMany({
-      where: { id: previous.id, tenantId: input.tenantId, status: "scheduled", startsAt: input.startsAt, endsAt },
-      // Reposto por inteiro: a remarcação não aconteceu, então nem conta como
-      // remarcada nem perde a confirmação do horário original.
-      data: {
-        startsAt: previous.startsAt, endsAt: previous.endsAt, rescheduledAt: previous.rescheduledAt,
-        confirmedAt: previous.confirmedAt, confirmationSource: previous.confirmationSource,
-      },
+    const reverted = await prisma.$transaction(async (tx) => {
+      const changed = await tx.appointment.updateMany({
+        where: { id: previous.id, tenantId: input.tenantId, status: "scheduled", startsAt: input.startsAt, endsAt, rescheduledAt: changedAt },
+        // A remarcação recusada não pode perder a confirmação nem seus lembretes.
+        data: {
+          startsAt: previous.startsAt, endsAt: previous.endsAt, rescheduledAt: previous.rescheduledAt,
+          confirmedAt: previous.confirmedAt, confirmationSource: previous.confirmationSource,
+          remindersSent: { set: previous.remindersSent }, reminderSentAt: previous.reminderSentAt,
+        },
+      });
+      if (changed.count) await tx.appointmentReschedule.deleteMany({ where: { id: history.id, tenantId: input.tenantId, appointmentId: previous.id } });
+      return changed;
     });
     if (!reverted.count) return { status: "unavailable" } as const;
     const newGoogleRemoved = googleRemoved && googleEventId
@@ -392,7 +409,7 @@ export async function rescheduleAppointment(input: {
     return { status: "conflict" } as const;
   }
   await prisma.appointment.updateMany({
-    where: { id: previous.id, tenantId: input.tenantId, status: "scheduled", startsAt: input.startsAt, endsAt },
+    where: { id: previous.id, tenantId: input.tenantId, status: "scheduled", startsAt: input.startsAt, endsAt, rescheduledAt: changedAt },
     data: {
       googleEventId, clinicorpAppointmentId,
     },
@@ -464,6 +481,16 @@ const withLead = {
   lead: { select: { id: true, name: true, phone: true, status: true } },
   agent: { select: { id: true, name: true } },
 } as const;
+
+/** Horários antigos, inclusive quando o agendamento atual já está em outro mês. */
+export async function listMonthAppointmentReschedules(tenantId: string, year: number, month: number, timezone: string) {
+  const { start, end } = monthRangeUtc(year, month, timezone);
+  return prisma.appointmentReschedule.findMany({
+    where: { tenantId, appointment: { tenantId }, startsAt: { gte: start, lt: end } },
+    orderBy: [{ startsAt: "asc" }, { createdAt: "asc" }],
+    include: { appointment: { include: withLead } },
+  });
+}
 
 /** Compromissos de um mês (do fuso do tenant), já agrupados por dia local. */
 export async function listMonthAppointments(

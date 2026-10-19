@@ -1000,6 +1000,7 @@ model Appointment {
   /// 4791226171916288) — fora do alcance seguro do Number do JS.
   clinicorpAppointmentId String?
   clinicorpSync          ClinicorpAppointmentSync?
+  rescheduleHistory      AppointmentReschedule[]
   /// Antecedências (em minutos) dos lembretes que JÁ foram enviados para esta
   /// consulta. Fica aqui, e não em `Conversation` como `followUpSentAt`,
   /// porque é lembrete POR CONSULTA: o mesmo paciente marca de novo no mês
@@ -1028,6 +1029,25 @@ model Appointment {
   /// disparos ainda faltam é decidido em memória (`remindersSent` é uma
   /// lista, que um índice não ajudaria a filtrar).
   @@index([status, startsAt])
+}
+
+/// Histórico visual dos horários anteriores. Não é consulta ativa nem entra
+/// em conflito, lembrete ou relatório como novo agendamento.
+model AppointmentReschedule {
+  id                    String      @id @default(cuid())
+  tenantId              String
+  appointmentId         String
+  appointment           Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  startsAt              DateTime
+  endsAt                DateTime
+  nextStartsAt          DateTime
+  nextEndsAt            DateTime
+  notes                 String?
+  clinicorpAppointmentId String?
+  createdAt             DateTime    @default(now())
+
+  @@index([tenantId, startsAt])
+  @@index([appointmentId])
 }
 
 /// Envio durável ao Clinicorp. A consulta é preservada durante falhas externas;

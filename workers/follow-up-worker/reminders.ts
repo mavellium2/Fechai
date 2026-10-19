@@ -14,7 +14,7 @@ import {
 import { parseReminderOverride } from "../../src/modules/scheduling/reminder-override";
 import { parseConversationVariables } from "../../src/modules/agent-engine/variables";
 import { isPhoneBlocked } from "../../src/modules/whatsapp/blocklist";
-import { dateInZone, partsInZone, timeInZone, zonedTimeToUtc } from "../../src/modules/scheduling/time";
+import { dateInZone, dayKeyInZone, partsInZone, timeInZone, zonedTimeToUtc } from "../../src/modules/scheduling/time";
 
 /**
  * Lembretes pré-consulta. Rodam no mesmo worker do follow-up (mesma varredura
@@ -42,13 +42,26 @@ export function reminderDueAt(startsAt: Date, rule: ReminderRule, timezone: stri
   return zonedTimeToUtc(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), hour, minute, timezone);
 }
 
+/** Lembretes de dias/semanas só valem no dia local previsto, inclusive no envio manual. */
+export function isReminderSendDay(startsAt: Date, rule: ReminderRule, now: Date, timezone: string): boolean {
+  return rule.minutesBefore < 1440 ||
+    dayKeyInZone(now, timezone) === dayKeyInZone(reminderDueAt(startsAt, rule, timezone), timezone);
+}
+
+function reminderExpiresAt(startsAt: Date, rule: ReminderRule, timezone: string): Date {
+  if (rule.minutesBefore < 1440) return startsAt;
+  const day = partsInZone(reminderDueAt(startsAt, rule, timezone), timezone);
+  return zonedTimeToUtc(day.year, day.month, day.day + 1, 0, 0, timezone);
+}
+
 /**
  * Quais disparos estão vencidos agora, do mais distante para o mais próximo.
  *
  * A janela começa em `reminderDueAt` (antecedência exata ou horário local fixo)
- * e termina em `startsAt`. O limite de cima importa: um worker parado por duas horas não pode acordar e
- * mandar "sua consulta é amanhã" para quem já foi atendido. Quem ficou para
- * trás é marcado como enviado sem enviar (ver `scanAndSendReminders`), senão
+ * e termina no fim do dia local previsto para lembretes de dias/semanas,
+ * ou em `startsAt` para os de minutos/horas. Não recuperamos a confirmação
+ * da véspera no dia da consulta, mesmo que ela ainda não tenha começado.
+ * Quem ficou para trás é fechado sem enviar (ver `scanAndSendReminders`), senão
  * a mesma consulta seria reavaliada em todo ciclo para sempre.
  */
 export function dueReminders(
@@ -63,6 +76,7 @@ export function dueReminders(
   return reminders
     .filter((r) => !sent.has(r.minutesBefore))
     .filter((r) => now.getTime() >= reminderDueAt(appt.startsAt, r, timezone).getTime())
+    .filter((r) => now.getTime() < reminderExpiresAt(appt.startsAt, r, timezone).getTime())
     .sort((a, b) => b.minutesBefore - a.minutesBefore);
 }
 
@@ -78,11 +92,12 @@ export function staleReminders(
   appt: ReminderCandidate,
   reminders: ReminderRule[],
   now: Date,
+  timezone = "America/Sao_Paulo",
 ): ReminderRule[] {
   const sent = new Set(appt.remindersSent);
   const pending = reminders.filter((r) => !sent.has(r.minutesBefore));
-  if (appt.status !== "scheduled" || appt.startsAt.getTime() < now.getTime()) return pending;
-  return [];
+  if (appt.status !== "scheduled" || appt.startsAt.getTime() <= now.getTime()) return pending;
+  return pending.filter((r) => now.getTime() >= reminderExpiresAt(appt.startsAt, r, timezone).getTime());
 }
 
 /**
@@ -199,7 +214,7 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
   for (const appt of overdue) {
     const cfg = configByTenant.get(appt.tenantId);
     if (!cfg) continue;
-    const pending = staleReminders(appt, remindersFor(appt, cfg), now);
+    const pending = staleReminders(appt, remindersFor(appt, cfg), now, cfg.timezone);
     if (pending.length === 0) continue;
     await markSent(appt.id, appt.remindersSent, pending.map((r) => r.minutesBefore), null);
   }
@@ -216,9 +231,16 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     const rules = remindersFor(appt, cfg);
     if (rules.length === 0) continue;
 
+    const expired = staleReminders(appt, rules, now, cfg.timezone).map((r) => r.minutesBefore);
     const dueNow = dueReminders(target ? { ...appt, remindersSent: [] } : appt, rules, now, cfg.timezone);
-    const due = target && !dueNow.length ? rules : dueNow;
-    if (due.length === 0) continue;
+    const available = target?.operation === "send"
+      ? rules.filter((r) => isReminderSendDay(appt.startsAt, r, now, cfg.timezone)) : rules;
+    const due = target && !dueNow.length ? available : dueNow;
+    if (due.length === 0) {
+      if (expired.length) await markSent(appt.id, appt.remindersSent, expired, null);
+      if (target?.operation === "send") return { scanned: appointments.length, sent, reason: "outside_window" as const };
+      continue;
+    }
 
     // Vários disparos vencidos de uma vez (worker parado, ou dois lembretes
     // muito próximos): manda só o MAIS PRÓXIMO da consulta e fecha os outros.
@@ -226,7 +248,10 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     // duas horas" chegariam juntas, todas desatualizadas menos a última.
     const [toSend] = [...due].sort((a, b) => target && !dueNow.length ? b.minutesBefore - a.minutesBefore : a.minutesBefore - b.minutesBefore);
     if (target && appt.remindersSent.includes(toSend.minutesBefore)) continue;
-    const closing = target && !dueNow.length ? [toSend.minutesBefore] : due.map((r) => r.minutesBefore);
+    const closing = [...new Set([
+      ...expired,
+      ...(target && !dueNow.length ? [toSend.minutesBefore] : due.map((r) => r.minutesBefore)),
+    ])];
     const dispatchKey = { tenantId: appt.tenantId, sourceKey: reminderSource(appt.id, appt.clinicorpAppointmentId), startsAt: appt.startsAt, minutesBefore: toSend.minutesBefore };
     const handled = await reminderAlreadyHandled(dispatchKey);
     if (handled) { await markSent(appt.id, appt.remindersSent, closing, handled.acceptedAt); continue; }

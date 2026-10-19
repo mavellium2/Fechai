@@ -353,9 +353,9 @@ describe("Quais disparos estão vencidos (dueReminders)", () => {
   });
 
   it("dispara só os que já entraram na janela", () => {
-    // Consulta daqui a 20h: a de 1 semana e a de 1 dia venceram, a de 2h não.
+    // Consulta daqui a 20h: a de 1 semana expirou, a de 1 dia vale hoje, a de 2h não venceu.
     const due = dueReminders(consulta("2026-09-17T08:00:00.000Z"), regras, AGORA);
-    expect(due.map((r) => r.minutesBefore)).toEqual([UMA_SEMANA, UM_DIA]);
+    expect(due.map((r) => r.minutesBefore)).toEqual([UM_DIA]);
   });
 
   it("não repete um disparo já enviado", () => {
@@ -369,10 +369,36 @@ describe("Quais disparos estão vencidos (dueReminders)", () => {
     expect(due.map((r) => r.minutesBefore)).toEqual([UM_DIA]);
   });
 
-  it("não dispara antes da janela abrir", () => {
-    // Daqui a 3 dias: só o de 1 semana venceu.
+  it("não recupera o de uma semana três dias antes nem antecipa os seguintes", () => {
     const due = dueReminders(consulta("2026-09-19T12:00:00.000Z"), regras, AGORA);
-    expect(due.map((r) => r.minutesBefore)).toEqual([UMA_SEMANA]);
+    expect(due).toEqual([]);
+  });
+
+  it.each([undefined, "08:30"])("confirmação da véspera expira à meia-noite local (horário fixo: %s)", (sendTime) => {
+    const startsAt = new Date("2026-09-17T18:00:00Z");
+    const rule = { minutesBefore: UM_DIA, template: "É amanhã", ...(sendTime ? { sendTime } : {}) };
+    const appt = { status: "scheduled", startsAt, remindersSent: [] };
+    const before = new Date("2026-09-17T02:59:59Z"); // 23:59:59 da véspera
+    const midnight = new Date("2026-09-17T03:00:00Z"); // 00:00 da consulta
+    expect(dueReminders(appt, [rule], before)).toEqual([rule]);
+    expect(staleReminders(appt, [rule], before)).toEqual([]);
+    expect(dueReminders(appt, [rule], midnight)).toEqual([]);
+    expect(staleReminders(appt, [rule], midnight)).toEqual([rule]);
+  });
+
+  it("usa o fuso da clínica na virada do mês, sem confundir o dia UTC", () => {
+    const appt = consulta("2026-10-01T02:00:00Z"); // 30/09, 21h em Rio Branco
+    const now = new Date("2026-09-30T04:30:00Z"); // ainda 29/09, 23h30
+    expect(dueReminders(appt, [regras[1]], now, "America/Rio_Branco")).toEqual([regras[1]]);
+    expect(dueReminders(appt, [regras[1]], now, "America/Sao_Paulo")).toEqual([]);
+    expect(staleReminders(appt, [regras[1]], now, "America/Rio_Branco")).toEqual([]);
+    expect(staleReminders(appt, [regras[1]], now, "America/Sao_Paulo")).toEqual([regras[1]]);
+  });
+
+  it("preserva o lembrete de duas horas no dia da consulta e dispensa os antigos", () => {
+    const appt = consulta("2026-09-16T14:00:00Z");
+    expect(dueReminders(appt, regras, AGORA)).toEqual([regras[2]]);
+    expect(staleReminders(appt, regras, AGORA)).toEqual([regras[0], regras[1]]);
   });
 
   it("não lembra de consulta que já passou", () => {
@@ -394,8 +420,8 @@ describe("Quais disparos estão vencidos (dueReminders)", () => {
     expect(pendentes.map((r) => r.minutesBefore)).toEqual([UM_DIA, 120]);
   });
 
-  it("consulta futura não tem nada a fechar", () => {
-    expect(staleReminders(consulta("2026-09-17T08:00:00.000Z"), regras, AGORA)).toEqual([]);
+  it("consulta futura fecha só o lembrete cujo dia já passou", () => {
+    expect(staleReminders(consulta("2026-09-17T08:00:00.000Z"), regras, AGORA)).toEqual([regras[0]]);
   });
 });
 
@@ -476,9 +502,7 @@ describe("Varredura (scanAndSendReminders)", () => {
     expect(provider.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("manda o disparo MAIS PRÓXIMO da consulta e fecha os outros vencidos", async () => {
-    // Dois venceram de uma vez (worker parado). Mandar os dois faria chegarem
-    // juntas "falta uma semana" e "é amanhã" — a primeira já mentindo.
+  it("envia o disparo válido de hoje e fecha o da semana que perdeu o dia", async () => {
     acaoConfigurada();
     consultas([consultaAmanha()]);
 
@@ -495,6 +519,71 @@ describe("Varredura (scanAndSendReminders)", () => {
         data: expect.objectContaining({ remindersSent: { set: [UMA_SEMANA, UM_DIA] } }),
       }),
     );
+  });
+
+  it.each(["marcada hoje", "remarcada para hoje", "worker voltou hoje"])("%s: dispensa a confirmação da véspera sem envio", async (scenario) => {
+    acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, template: "É amanhã às {{hora}}." }] });
+    consultas([{
+      ...consultaAmanha(), startsAt: new Date("2026-09-16T18:00:00Z"),
+      createdAt: scenario === "marcada hoje" ? AGORA : new Date("2026-09-10T12:00:00Z"),
+      rescheduledAt: scenario === "remarcada para hoje" ? AGORA : null,
+    }]);
+    expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 0 });
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+    expect(db.message.create).not.toHaveBeenCalled();
+    expect(db.appointment.update).toHaveBeenCalledWith({
+      where: { id: "appt-1" }, data: { remindersSent: { set: [UM_DIA] } },
+    });
+  });
+
+  it("envio manual não recupera o modelo da véspera no dia da consulta", async () => {
+    acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, template: "É amanhã." }] });
+    consultas([{ ...consultaAmanha(), startsAt: new Date("2026-09-16T18:00:00Z") }]);
+    expect(await scanAndSendReminders(AGORA, { tenantId: CONTA, id: "appt-1", operation: "send", userId: "u" }))
+      .toMatchObject({ sent: 0, reason: "outside_window" });
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("a equipe ainda pode registrar uma confirmação feita por fora no próprio dia", async () => {
+    acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, template: "É amanhã." }] });
+    consultas([{ ...consultaAmanha(), startsAt: new Date("2026-09-16T18:00:00Z") }]);
+    expect(await scanAndSendReminders(AGORA, { tenantId: CONTA, id: "appt-1", operation: "manual", userId: "u" }))
+      .toMatchObject({ sent: 0 });
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+    expect(db.appointment.update).toHaveBeenCalledWith({
+      where: { id: "appt-1" }, data: { remindersSent: { set: [UM_DIA] } },
+    });
+  });
+
+  it("envio manual não antecipa um modelo de amanhã para dois dias antes", async () => {
+    acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, template: "É amanhã." }] });
+    consultas([{ ...consultaAmanha(), startsAt: new Date("2026-09-18T18:00:00Z") }]);
+    expect(await scanAndSendReminders(AGORA, { tenantId: CONTA, id: "appt-1", operation: "send", userId: "u" }))
+      .toMatchObject({ sent: 0, reason: "outside_window" });
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("envio manual pode antecipar o horário dentro da própria véspera", async () => {
+    acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, sendTime: "16:00", template: "É amanhã." }] });
+    consultas([consultaAmanha()]);
+    expect(await scanAndSendReminders(AGORA, { tenantId: CONTA, id: "appt-1", operation: "send", userId: "u" }))
+      .toMatchObject({ sent: 1 });
+    expect(provider.sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("lembrete próprio de duas horas continua saindo hoje sem enviar o da véspera", async () => {
+    acaoConfigurada();
+    consultas([{
+      ...consultaAmanha({ reminderOverride: [
+        { minutesBefore: UM_DIA, template: "É amanhã." },
+        { minutesBefore: 120, template: "Sua consulta é hoje às {{hora}}." },
+      ] }), startsAt: new Date("2026-09-16T14:00:00Z"),
+    }]);
+    expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 1 });
+    expect(provider.sendMessage).toHaveBeenCalledWith("inst-1", "5511999990000", "Sua consulta é hoje às 11:00.");
+    expect(db.appointment.update).toHaveBeenCalledWith({
+      where: { id: "appt-1" }, data: { remindersSent: { set: [UM_DIA, 120] }, reminderSentAt: AGORA },
+    });
   });
 
   it("inclui consulta noturna na busca e envia às 08:30 da véspera", async () => {

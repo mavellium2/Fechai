@@ -20,7 +20,7 @@ import {
   type ClinicorpAgenda,
   type ClinicorpAgendaItem,
 } from "@/modules/scheduling/clinicorp";
-import { listMonthAppointments } from "@/modules/scheduling/repository";
+import { listMonthAppointments, listMonthAppointmentReschedules } from "@/modules/scheduling/repository";
 import { loadAppointmentOriginHours } from "@/modules/reports/origin-hours";
 import { clockInZone, dayKeyInZone, todayInZone } from "@/modules/scheduling/time";
 import { agendaVersion, monthDays, warmNeighborMonths } from "@/modules/scheduling/agenda-pulse";
@@ -118,7 +118,15 @@ export default async function AgendaPage({
   const clinicorpAgenda: Promise<ClinicorpAgenda> = clinicorpActive
     ? listClinicorpAgenda(tenantId, from, to, config.timezone)
     : Promise.resolve({ status: "off" });
-  const { rows: monthRows, byDay } = await listMonthAppointments(tenantId, year, month, config.timezone);
+  const [{ rows: monthRows, byDay }, reschedules] = await Promise.all([
+    listMonthAppointments(tenantId, year, month, config.timezone),
+    listMonthAppointmentReschedules(tenantId, year, month, config.timezone),
+  ]);
+  const historyByDay = new Map<string, typeof reschedules>();
+  for (const row of reschedules) {
+    const key = dayKeyInZone(row.startsAt, config.timezone);
+    historyByDay.set(key, [...(historyByDay.get(key) ?? []), row]);
+  }
   const confirmationRange = monthRangeUtc(year, month, config.timezone);
   const confirmationRows = await prisma.reminderDispatch.findMany({ where: { tenantId,
     startsAt: { gte: confirmationRange.start, lt: confirmationRange.end } },
@@ -197,6 +205,8 @@ export default async function AgendaPage({
   };
 
   const local = {
+    historyCount: reschedules.length,
+    historyUpdate: reschedules.reduce<Date | null>((max, row) => !max || row.createdAt > max ? row.createdAt : max, null),
     reminderUpdate: confirmationRows.reduce<Date | null>((max, row) => !max || row.updatedAt > max ? row.updatedAt : max, null),
     count: monthRows.length,
     lastUpdate: monthRows.reduce<Date | null>((max, row) => (!max || row.updatedAt > max ? row.updatedAt : max), null),
@@ -220,7 +230,7 @@ export default async function AgendaPage({
   const monthView = (agenda: ClinicorpAgenda | null, reminderSentAt: Map<string, Date>) => {
     // O que o fechai já espelhou lá aparece uma vez só: como o nosso
     // compromisso, que tem lembretes e ações.
-    const mirrored = new Set(monthRows.map((row) => row.clinicorpAppointmentId).filter(Boolean));
+    const mirrored = new Set([...monthRows, ...reschedules].map((row) => row.clinicorpAppointmentId).filter(Boolean));
     const clinicorpByDay = new Map<string, ClinicorpAgendaItem[]>();
     if (agenda?.status === "ok") {
       for (const item of agenda.items) {
@@ -231,13 +241,14 @@ export default async function AgendaPage({
     }
 
     const countByDay = new Map<string, number>();
-    for (const [key, rows] of [...byDay, ...clinicorpByDay]) {
+    for (const [key, rows] of [...byDay, ...clinicorpByDay, ...historyByDay]) {
       countByDay.set(key, (countByDay.get(key) ?? 0) + rows.length);
     }
 
     const entries: DayEntry[] = selectedKey
       ? [
           ...(byDay.get(selectedKey) ?? []).map((appointment) => ({ kind: "fechai" as const, at: appointment.startsAt, appointment })),
+          ...(historyByDay.get(selectedKey) ?? []).map((history) => ({ kind: "reschedule" as const, at: history.startsAt, history })),
           ...(clinicorpByDay.get(selectedKey) ?? []).map((item) => ({ kind: "clinicorp" as const, at: item.startsAt, item })),
         ].sort((a, b) => a.at.getTime() - b.at.getTime())
       : [];

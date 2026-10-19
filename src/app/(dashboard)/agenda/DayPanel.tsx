@@ -6,9 +6,10 @@ import { CalendarX2, User } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { phoneLabel } from "@/lib/format";
 import type { ClinicorpAgendaItem } from "@/modules/scheduling/clinicorp";
 import type { ReminderRule } from "@/modules/scheduling/config";
-import type { listMonthAppointments } from "@/modules/scheduling/repository";
+import type { listMonthAppointments, listMonthAppointmentReschedules } from "@/modules/scheduling/repository";
 import { parseReminderOverride } from "@/modules/scheduling/reminder-override";
 import { timeInZone } from "@/modules/scheduling/time";
 import {
@@ -29,6 +30,7 @@ import { AppointmentActions } from "./AppointmentActions";
 import { AppointmentClassification } from "./AppointmentClassification";
 import { AppointmentReminders } from "./AppointmentReminders";
 import { ClinicorpAppointmentItem } from "./ClinicorpAppointmentItem";
+import { AppointmentRescheduleItem } from "./AppointmentRescheduleItem";
 import { NewAppointmentDialog } from "./NewAppointmentDialog";
 
 type MonthAppointment = Awaited<ReturnType<typeof listMonthAppointments>>["rows"][number];
@@ -36,6 +38,7 @@ type MonthAppointment = Awaited<ReturnType<typeof listMonthAppointments>>["rows"
 /** Um item da lista do dia: compromisso do fechai ou consulta lida do Clinicorp. */
 export type DayEntry =
   | { kind: "fechai"; at: Date; appointment: MonthAppointment }
+  | { kind: "reschedule"; at: Date; history: Awaited<ReturnType<typeof listMonthAppointmentReschedules>>[number] }
   | { kind: "clinicorp"; at: Date; item: ClinicorpAgendaItem };
 
 /**
@@ -79,7 +82,7 @@ export function DayPanel({
   now: Date;
   dialog: Omit<ComponentProps<typeof NewAppointmentDialog>, "triggerLabel">;
 }) {
-  const dayStatuses = entries.map((entry) => {
+  const dayStatuses = entries.filter((entry) => entry.kind !== "reschedule").map((entry) => {
     const source = entry.kind === "clinicorp" ? `clinicorp:${entry.item.id}` : entry.appointment.clinicorpAppointmentId ? `clinicorp:${entry.appointment.clinicorpAppointmentId}` : `appointment:${entry.appointment.id}`;
     return confirmationStatuses.get(`${source}|${entry.at.getTime()}`);
   });
@@ -102,7 +105,7 @@ export function DayPanel({
             )}
           </div>
           <p className="mt-0.5 font-mono text-micro uppercase tracking-wider text-white/45">
-            {entries.length} {entries.length === 1 ? "compromisso marcado" : "compromissos marcados"}
+            {entries.length} {entries.length === 1 ? "registro na agenda" : "registros na agenda"}
             {clinicorpCount > 0 && ` · ${clinicorpCount} no Clinicorp`}
             {clinicorpLoading && " · buscando no Clinicorp…"}
           </p>
@@ -131,6 +134,7 @@ export function DayPanel({
           {agentReminders.length > 0 && <p className="mb-3 text-xs text-white/60">Confirmações: {handledCount} tratadas · {attentionCount} exigem conferência. Os demais aguardam o horário ou a seleção de categoria.</p>}
           <ul className="space-y-3">
             {entries.map((entry) => {
+              if (entry.kind === "reschedule") return <AppointmentRescheduleItem key={`reschedule-${entry.history.id}`} history={entry.history} timezone={timezone} />;
               if (entry.kind === "clinicorp") {
                 return (
                   <ClinicorpAppointmentItem
@@ -224,7 +228,7 @@ export function DayPanel({
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/60">
                           <span className="flex items-center gap-1 font-mono text-micro uppercase tracking-wider text-white/70">
                             <User size={12} aria-hidden className="text-white/40" />
-                            Contato: {appointment.lead.name || appointment.lead.phone}
+                            Contato: {appointment.lead.name ? `${appointment.lead.name} · ` : ""}{phoneLabel(appointment.lead.phone)}
                           </span>
                           <Link
                             href={`/conversas?q=${encodeURIComponent(appointment.lead.phone)}`}

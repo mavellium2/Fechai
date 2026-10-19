@@ -655,6 +655,8 @@ export async function pushAppointmentToClinicorp(
     const patientName = input.patientName?.trim() || input.lead?.name?.trim() || input.title;
     // O telefone do contato pode ser da pessoa que marcou para outra. Nesse
     // caso não vincule o prontuário encontrado pelo telefone ao paciente novo.
+    // Essa cautela é só do Patient_PersonId: nome diferente (inclusive perfil
+    // curto x nome completo) não apaga o telefone para contato da consulta.
     const samePerson = !input.patientName || patientName.localeCompare(input.lead?.name?.trim() ?? "", "pt-BR", { sensitivity: "base" }) === 0;
     const testPatient = isTest ? await resolveTestPatientId(integration) : null;
     if (testPatient && !testPatient.ok) return await failed(testPatient.error);
@@ -675,7 +677,7 @@ export async function pushAppointmentToClinicorp(
       input.notes?.trim(),
       input.referenceId ? `[fechai:${input.referenceId}]` : null,
     ].filter(Boolean).join("\n");
-    const mobilePhone = !isTest && samePerson && input.lead?.phone
+    const mobilePhone = !isTest && input.lead?.phone
       ? clinicorpPhone(input.lead.phone) : undefined;
 
     const res = await call<unknown>(integration, "/appointment/create_appointment_by_api", {

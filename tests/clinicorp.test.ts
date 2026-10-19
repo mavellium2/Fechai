@@ -152,9 +152,46 @@ describe("envio de agendamentos ao Clinicorp", () => {
     const body = JSON.parse(String(init.body));
     expect(body.PatientName).toBe("Maria Souza");
     expect(body.Patient_PersonId).toBeUndefined();
-    expect(body.MobilePhone).toBeUndefined();
+    expect(body.MobilePhone).toBe("11999990000");
     expect(body.Procedures).toBe("Primeira consulta");
     expect(body).not.toHaveProperty("Notes");
+  });
+
+  it.each([
+    ["Ana", "Ana Carolina Almeida de Souza"],
+    ["Lúcia", "Lúcia Helena Rodrigues"],
+    [null, "Ana Carolina Almeida de Souza"],
+  ])("preserva o telefone quando o nome do contato é %s e o paciente é %s", async (contactName, patientName) => {
+    const lead = { name: contactName, phone: event.lead.phone };
+    expect(await pushAppointmentToClinicorp("tenant-1", { ...event, lead, patientName }))
+      .toEqual({ status: "synced", appointmentId: "987654321" });
+    const [, init] = fetchMock.mock.calls.find(([url]) => url.pathname.endsWith("/create_appointment_by_api"))! as unknown as [URL, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({ PatientName: patientName, MobilePhone: "11999990000" });
+    // Telefone para contato não prova que esse prontuário pertence ao paciente.
+    expect(body).not.toHaveProperty("Patient_PersonId");
+    expect(fetchMock.mock.calls.some(([url]) => url.pathname.includes("/patient/"))).toBe(false);
+    expect(lead).toEqual({ name: contactName, phone: event.lead.phone });
+    expect(db.lead.update).not.toHaveBeenCalled();
+  });
+
+  it("reconcilia o envio com nome completo e telefone mesmo quando o perfil tem só o primeiro nome", async () => {
+    const original = fetchMock.getMockImplementation()!;
+    let posted = false;
+    const patientName = "Ana Carolina Almeida de Souza";
+    fetchMock.mockImplementation(async (url: URL, init: RequestInit) => {
+      if (url.pathname.endsWith("/appointment/list")) return json(posted ? [{ ...externalRow, PatientName: patientName }] : []);
+      if (url.pathname.endsWith("/create_appointment_by_api")) {
+        expect(JSON.parse(String(init.body))).toMatchObject({ PatientName: patientName, MobilePhone: "11999990000" });
+        posted = true;
+        return new Response("", { status: 200 });
+      }
+      return original(url);
+    });
+    const input = { ...event, lead: { ...event.lead, name: "Ana" }, patientName, referenceId: "envio-nome-completo" };
+    expect(await pushAppointmentToClinicorp("tenant-1", input)).toEqual({ status: "synced", appointmentId: "987654321" });
+    expect(await pushAppointmentToClinicorp("tenant-1", input)).toEqual({ status: "synced", appointmentId: "987654321" });
+    expect(fetchMock.mock.calls.filter(([url]) => url.pathname.endsWith("/create_appointment_by_api"))).toHaveLength(1);
   });
 
   it.each([

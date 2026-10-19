@@ -96,6 +96,14 @@ Regras que não são óbvias:
   não pode acordar e avisar "sua consulta é amanhã" para quem já foi atendido.
   Os disparos pendentes dela são marcados **sem enviar nada**, senão seriam
   reavaliados em todo ciclo para sempre.
+- **Lembrete de dias/semanas só sai no dia local previsto.** Antecedências de
+  1 dia ou mais expiram no fim do dia de `reminderDueAt`, no fuso da agenda.
+  Marcar/remarcar para hoje não dispara a confirmação de ontem, e reiniciar o
+  worker hoje não a recupera. São fechadas sem mensagem e sem `reminderSentAt`.
+  Vale também no Clinicorp e em "Enviar confirmação agora" (que ainda pode
+  antecipar a hora dentro do dia correto). "Já enviei pelo WhatsApp" só registra
+  o atendimento da equipe e continua disponível. Lembretes menores que 1 dia
+  preservam a janela até a consulta.
 - **`reminderSentAt` só é gravado quando uma mensagem saiu.** A tela mostra
   "lembrete enviado há X" a partir dele; um disparo fechado sem envio (consulta
   passada, contato sem telefone) faria essa frase mentir. `remindersSent` é

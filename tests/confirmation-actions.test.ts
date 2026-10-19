@@ -18,3 +18,13 @@ it("consulta fora do tenant não envia", async () => { mocks.agenda.mockResolved
 it("horário antigo após remarcação não envia", async () => { mocks.agenda.mockResolvedValue({ status: "ok", items: [{ id: "123", startsAt: new Date("2030-01-02T15:00:00Z") }] }); expect((await appointmentConfirmationAction(null, form())).ok).toBe(false); expect(mocks.send).not.toHaveBeenCalled(); });
 it("manual usa mesmo serviço e registra usuário", async () => { const f = form(); f.set("operation", "manual"); mocks.send.mockResolvedValue({ sent: false, reason: "manual" }); expect((await appointmentConfirmationAction(null, f)).ok).toBe(true); expect(mocks.send.mock.calls[0][3]).toMatchObject({ operation: "manual", userId: "u" }); });
 it("resultado incerto não informa sucesso", async () => { mocks.send.mockResolvedValue({ sent: false, reason: "unknown" }); expect((await appointmentConfirmationAction(null, form())).ok).toBe(false); });
+it("explica quando a confirmação externa está fora do dia previsto", async () => {
+  mocks.send.mockResolvedValue({ sent: false, reason: "outside_window" });
+  expect(await appointmentConfirmationAction(null, form())).toMatchObject({ ok: false, code: "validation", error: expect.stringContaining("véspera") });
+});
+it("explica a dispensa local antes de consultar um status antigo de envio", async () => {
+  const f = form(); f.set("source", "appointment");
+  mocks.appointment.findFirst.mockResolvedValue({ id: "123", remindersSent: [] });
+  mocks.local.mockResolvedValue({ scanned: 1, sent: 0, reason: "outside_window" });
+  expect(await appointmentConfirmationAction(null, f)).toMatchObject({ ok: false, code: "validation", error: expect.stringContaining("véspera") });
+});

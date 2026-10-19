@@ -39,6 +39,7 @@ export async function appointmentConfirmationAction(_previous: ActionResult | nu
         if (result.reason === "manual") return { ok: true, info: "Confirmação registrada. O automático deste momento foi dispensado." };
         const messages: Record<string, string> = { handled: "Este lembrete já foi tratado ou exige conferência do envio anterior.",
           busy: "Este lembrete está sendo enviado. Atualize o status antes de agir.", type: "Esta categoria não foi autorizada para confirmação.",
+          outside_window: "Esta confirmação só pode ser enviada no dia previsto. A confirmação da véspera não é enviada no dia da consulta.",
           phone: "Confira o telefone e a lista de bloqueados.", stop: "Este contato não pode receber a confirmação.", channel: "Conecte o canal do paciente ou habilite as confirmações do Clinicorp pelo QR.",
           unknown: "O envio ficou sem confirmação. Confira o WhatsApp antes de enviar novamente." };
         return { ok: false, error: messages[result.reason] ?? "Não foi possível enviar esta confirmação. Confira o status na agenda.", code: "validation" };
@@ -46,8 +47,9 @@ export async function appointmentConfirmationAction(_previous: ActionResult | nu
     }
     const appt = await prisma.appointment.findFirst({ where: { id: localId!, tenantId, startsAt, status: "scheduled", lead: { isTest: false } }, select: { id: true, clinicorpAppointmentId: true, remindersSent: true, reminderSentAt: true } });
     if (!appt) return { ok: false, error: "A consulta foi alterada ou não pode receber confirmação.", code: "validation" };
-    await scanAndSendReminders(new Date(), { tenantId, id: appt.id, operation: input.operation, userId: session.user.id });
+    const result = await scanAndSendReminders(new Date(), { tenantId, id: appt.id, operation: input.operation, userId: session.user.id });
     revalidatePath("/agenda");
+    if (result.reason === "outside_window") return { ok: false, error: "Esta confirmação só pode ser enviada no dia previsto. A confirmação da véspera não é enviada no dia da consulta.", code: "validation" };
     const sourceKey = appt.clinicorpAppointmentId ? `clinicorp:${appt.clinicorpAppointmentId}` : `appointment:${appt.id}`;
     const status = await prisma.reminderDispatch.findFirst({ where: { tenantId, sourceKey, startsAt }, orderBy: { updatedAt: "desc" }, select: { state: true, reason: true } });
     if (status?.state === "sent") return { ok: true, info: "Envio aceito pelo WhatsApp. Acompanhe a entrega na agenda." };

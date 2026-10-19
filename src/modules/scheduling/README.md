@@ -220,6 +220,18 @@ worker amplia o teto da busca em até um dia para incluir consultas noturnas
 cujo lembrete fixo vence na manhã da véspera. `remindersSent` continua usando
 `minutesBefore` como identidade do disparo.
 
+**Confirmação da véspera não sai no dia da consulta** (19/10/2026).
+Lembretes com antecedência de 1 dia ou mais expiram à meia-noite que encerra
+o dia local de `reminderDueAt`, no fuso da agenda. Se a consulta foi marcada
+ou remarcada para hoje, ou o worker só voltou hoje, a confirmação da véspera
+é fechada sem mensagem e sem gravar `reminderSentAt`. A regra é compartilhada
+com as consultas diretas do Clinicorp. Lembretes de minutos/horas (menos de
+1 dia) continuam válidos até o início da consulta. "Enviar confirmação agora"
+pode antecipar a hora dentro do dia previsto, mas não enviar o modelo em
+outro dia; "Já enviei pelo WhatsApp" continua permitindo registrar o que a
+equipe fez, pois não envia mensagem. Prefira `{{data}}` e `{{hora}}` nos textos
+para deixar explícito o horário da consulta.
+
 **Configs antigas continuam valendo.** Antes o lembrete era um só, em
 `reminderMinutesBefore` + `reminderTemplate`. `parseScheduleConfig` lê os dois
 formatos e converte na leitura, dando preferência à lista. **Não remova esse
@@ -309,15 +321,30 @@ na agenda local. Uma atualização concorrente impede a alteração.
 Se remover o espelho antigo falhar, não cria uma segunda cópia nesse serviço e
 preserva o ID antigo para uma tentativa posterior de cancelamento.
 
+**A data original nunca desaparece na remarcação** (19/10/2026).
+`AppointmentReschedule` guarda o horário anterior, a nova data, as observações
+e o ID espelhado anterior, na mesma transação que muda a consulta ativa.
+O calendário lê esses registros pelo mês **do horário antigo**, mesmo quando a
+consulta foi para outro mês, e mostra "Remarcado", a data escolhida e quando
+a troca aconteceu, sem ações de envio/cancelamento. Cada troca guarda uma linha;
+rejeição explícita por conflito desfaz a alteração e seu histórico juntos.
+A consulta ativa mantém o ID, limpa confirmação/lembretes do horário anterior,
+e só ela entra nas filas, conflitos e cálculos de relatórios. O pulso considera
+o histórico, e o ID externo antigo é deduplicado da leitura do Clinicorp.
+Cancelar já mantém `Appointment` na data original com `status: canceled` e
+observação; não excluir registros para cancelar nem criar uma consulta ativa
+fictícia na data antiga. Registros anteriores sem histórico não são inferidos
+do texto das conversas. Schema novo: `db push` + `generate` em web e worker
+antes de publicar; não há reconstrução ou reenvio de consultas antigas.
+
 `schedule_meeting` recusa duplicar uma consulta existente, salvo pedido de uma
 consulta adicional (`additionalAppointment: true`); trocar data usa reagendamento.
 O agente exige `patientName`: quem conversa no WhatsApp pode marcar para outra
 pessoa. Esse nome vai em `Appointment.patientName`, no título da agenda e em
 `PatientName` no Clinicorp; `Lead.name` continua sendo o nome do contato. Quando
 os dois nomes diferem, a integração não associa o prontuário encontrado pelo
-telefone do contato à paciente nem grava esse telefone como sendo dela. Se o
-Clinicorp exigir telefone do paciente, o espelho pode falhar; a consulta local
-permanece e a falha aparece no painel. Reagendar preserva o nome salvo na consulta.
+telefone do contato à paciente; o número continua sendo enviado como contato
+da consulta. Reagendar preserva o nome salvo na consulta.
 Regressões: `tests/agendamento-config.test.ts` e `tests/agendamento-tools.test.ts`.
 
 ## Onde cada coisa acontece
@@ -443,6 +470,14 @@ Base: `https://api.clinicorp.com/rest/v1`. Quase todo endpoint pede
 - **A data vai como dia local, não instante UTC.** `fromTime`/`toTime` são hora
   local (`HH:mm`) e `date` é o dia local em ISO com `T00:00:00.000Z`. Mandar o
   instante UTC cru jogaria horários da manhã no Brasil para o dia anterior.
+- **Telefone de contato e prontuário são coisas separadas** (19/10/2026).
+  Consultas reais enviam `MobilePhone` do contato vinculado mesmo quando
+  `patientName` difere de `Lead.name` (perfil curto x nome completo, ou outra
+  pessoa marcando). A diferença de nomes impede apenas buscar/criar e vincular
+  um prontuário pelo telefone (`Patient_PersonId`), nunca apaga o número da
+  consulta. Não deduza identidade por nome parcial/apelido. O sandbox continua
+  omitindo telefone sintético. A agenda mostra nome **e** telefone do contato.
+  Não há migração nem reenvio de consultas já sincronizadas.
 - **Chat de teste marca em todas as integrações**, como um contato real — é assim
   que o dono vê o fluxo inteiro. Só muda o paciente: o telefone do sandbox é
   sintético (`sandbox:<agente>`), então o envio vai **sem telefone**, vinculado
