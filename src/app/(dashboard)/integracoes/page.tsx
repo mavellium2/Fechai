@@ -74,6 +74,7 @@ export default async function IntegracoesPage({
         widgetEnabled: true,
         whatsappIgnoreGroups: true,
         metaWhatsappEnabled: true,
+        evolutionWhatsappEnabled: true,
       },
     }),
     prisma.agent.findFirst({
@@ -145,8 +146,14 @@ export default async function IntegracoesPage({
   // admin, nem o cartão da Meta nem um status conectado residual ficam expostos.
   const metaRow = metaEnabled ? (instances.find((i) => i.provider === "meta") ?? null) : null;
 
+  // QR desligado pelo admin: a linha segue `connected` no banco (a sessão do
+  // aparelho não é derrubada), mas para a conta o número está fora. Falha
+  // fechado — sem status conectado, sem QR e sem "Conectar". O cartão só
+  // aparece, com o aviso, para quem já usou o QR; quem nunca conectou não vê nada.
+  const evolutionEnabled = tenant?.evolutionWhatsappEnabled ?? true;
+  const evolutionDisabledNotice = !evolutionEnabled && Boolean(evolutionRow?.externalId);
   const evolutionConfigured = getWhatsAppProvider("evolution").isConfigured();
-  const evolutionStatus = evolutionRow?.status ?? "disconnected";
+  const evolutionStatus = evolutionEnabled ? (evolutionRow?.status ?? "disconnected") : "disconnected";
   const metaStatus = metaRow?.status ?? "disconnected";
   const evolutionConnected = evolutionStatus === "connected";
   const metaConnected = metaStatus === "connected";
@@ -158,10 +165,31 @@ export default async function IntegracoesPage({
   // ela, cada conexão ganha o seu cartão. Gerar o QR sozinho ao abrir a tela só
   // vale para quem usa (ou pode usar) o QR: conta que só tem a Meta não cria uma
   // instância na Evolution por visitar a página.
-  const autoStartQr = !metaEnabled || Boolean(evolutionRow?.externalId);
+  const autoStartQr = evolutionEnabled && (!metaEnabled || Boolean(evolutionRow?.externalId));
   const agentName = agent?.name ?? "Agente";
   const agentEnabled = agent?.enabled ?? false;
   const ignoreGroups = tenant?.whatsappIgnoreGroups ?? true;
+
+  // Sem WhatsappConnect de propósito: nada de QR nem de botão de conectar.
+  const evolutionDisabledCard = (
+    <Card className="md:p-8">
+      <CardTitle
+        as="h3"
+        hintLabel="WhatsApp por QR code"
+        hint="Esta conexão foi desativada pelo administrador."
+        action={<StatusDot tone="neutral">Desativado</StatusDot>}
+      >
+        <span className="inline-flex items-center gap-2">
+          <MessageCircle size={18} aria-hidden className="text-white/40" />
+          Número por QR code
+        </span>
+      </CardTitle>
+      <p className="mt-3 max-w-prose text-sm text-white/60">
+        Desativado pelo administrador. O agente não recebe nem envia mensagens por este número
+        enquanto isso. Para reativar, fale com o suporte.
+      </p>
+    </Card>
+  );
 
   return (
     <div className="w-full space-y-8">
@@ -241,7 +269,7 @@ export default async function IntegracoesPage({
 
       {tab === "canais" && (
         <>
-      {!evolutionConfigured && (
+      {evolutionEnabled && !evolutionConfigured && (
         <Alert tone="warn" title="Conexão indisponível neste ambiente">
           A Evolution API não está configurada neste ambiente.{" "}
           <ButtonLink href="/conversas" variant="ghost" size="sm" className="ml-1 underline">
@@ -263,43 +291,48 @@ export default async function IntegracoesPage({
               Números de WhatsApp
             </h2>
             <p className="max-w-prose text-sm text-white/60">
-              Os dois números podem ficar conectados ao mesmo tempo. O agente responde pelo número
-              em que o contato escreveu, e os Disparos saem sempre pelo oficial.
+              {evolutionEnabled
+                ? "Os dois números podem ficar conectados ao mesmo tempo. O agente responde pelo número em que o contato escreveu, e os Disparos saem sempre pelo oficial."
+                : "O agente responde pelo número em que o contato escreveu, e os Disparos saem sempre pelo oficial."}
             </p>
           </div>
 
-          <Card className="md:p-8">
-            <CardTitle
-              as="h3"
-              hintLabel="WhatsApp por QR code"
-              hint={
-                evolutionConnected
-                  ? "Este é o número que seus clientes usam para falar com o agente."
-                  : "Conecte lendo o código no celular — leva menos de um minuto."
-              }
-              action={<StatusDot tone={evolutionLabel.tone}>{evolutionLabel.label}</StatusDot>}
-            >
-              <span className="inline-flex items-center gap-2">
-                <MessageCircle size={18} aria-hidden className="text-success" />
-                Número por QR code
-              </span>
-            </CardTitle>
+          {evolutionEnabled ? (
+            <Card className="md:p-8">
+              <CardTitle
+                as="h3"
+                hintLabel="WhatsApp por QR code"
+                hint={
+                  evolutionConnected
+                    ? "Este é o número que seus clientes usam para falar com o agente."
+                    : "Conecte lendo o código no celular — leva menos de um minuto."
+                }
+                action={<StatusDot tone={evolutionLabel.tone}>{evolutionLabel.label}</StatusDot>}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <MessageCircle size={18} aria-hidden className="text-success" />
+                  Número por QR code
+                </span>
+              </CardTitle>
 
-            {/* key={status}: quando desconecta, o componente remonta no estado
-                novo (o status é estado local dele e não se atualizaria sozinho). */}
-            <WhatsappConnect
-              key={evolutionStatus}
-              layout="channel"
-              initialStatus={evolutionStatus}
-              configured={evolutionConfigured}
-              autoStart={autoStartQr}
-              connectedSince={
-                evolutionConnected && evolutionRow?.updatedAt
-                  ? dateLabel(evolutionRow.updatedAt)
-                  : undefined
-              }
-            />
-          </Card>
+              {/* key={status}: quando desconecta, o componente remonta no estado
+                  novo (o status é estado local dele e não se atualizaria sozinho). */}
+              <WhatsappConnect
+                key={evolutionStatus}
+                layout="channel"
+                initialStatus={evolutionStatus}
+                configured={evolutionConfigured}
+                autoStart={autoStartQr}
+                connectedSince={
+                  evolutionConnected && evolutionRow?.updatedAt
+                    ? dateLabel(evolutionRow.updatedAt)
+                    : undefined
+                }
+              />
+            </Card>
+          ) : (
+            evolutionDisabledNotice && evolutionDisabledCard
+          )}
 
           <Card className="md:p-8">
             <CardTitle
@@ -357,6 +390,11 @@ export default async function IntegracoesPage({
             <WhatsappBlocklist blocked={blocked} as="h3" />
           </Card>
         </section>
+      ) : !evolutionEnabled ? (
+        // Sem a Meta e com o QR desligado a conta não tem número nenhum: nada de
+        // controles do atendimento, só o aviso (e nenhum aviso para quem nunca
+        // conectou o QR).
+        evolutionDisabledNotice && evolutionDisabledCard
       ) : (
         /*
           A tela tem uma missão só e ela muda com o estado: desconectada, o código

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getWhatsAppProviderForInstance } from "@/modules/whatsapp/meta-config";
 import {
   channelProvider,
+  isEvolutionEnabled,
   isReadyChannel,
   isWhatsappProviderName,
   listWhatsappChannels,
@@ -181,6 +182,14 @@ export async function sendManualReply(
     const channels = await listWhatsappChannels(tenantId);
     const instance = pickWhatsappChannel(channels, conversation.whatsappProvider);
     if (!instance?.externalId) {
+      // "Reconecte em Integrações" seria enganoso: o QR foi desligado pelo admin
+      // e a conta não consegue religá-lo sozinha.
+      if (conversation.whatsappProvider !== "meta" && !(await isEvolutionEnabled(tenantId))) {
+        return {
+          ok: false,
+          error: "O WhatsApp por QR code foi desativado pelo administrador para esta conta. Fale com o suporte.",
+        };
+      }
       return { ok: false, error: noChannelMessage(channels, conversation.whatsappProvider) };
     }
     try {

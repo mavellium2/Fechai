@@ -30,7 +30,12 @@ async function main() {
   }
 
   const instances = await prisma.whatsappInstance.findMany({
-    where: { provider: "evolution", externalId: { not: null } },
+    // QR desligado pelo admin: reapontar o webhook seria religar o que foi bloqueado.
+    where: {
+      provider: "evolution",
+      externalId: { not: null },
+      tenant: { evolutionWhatsappEnabled: true },
+    },
     select: { externalId: true, tenantId: true, status: true },
   });
 

@@ -201,6 +201,22 @@ describe("Varredura (scanWhatsappHealth)", () => {
     expect(db.whatsappInstance.update).not.toHaveBeenCalled();
   });
 
+  it("QR desligado pelo admin não é consultado, religado nem avisado — a Meta da mesma conta segue", async () => {
+    db.whatsappInstance.findMany.mockResolvedValue([
+      { tenantId: "tenant-1", provider: "evolution", tenant: tenant({ evolutionWhatsappEnabled: false }) },
+      { tenantId: "tenant-1", provider: "meta", tenant: tenant({ evolutionWhatsappEnabled: false }) },
+    ]);
+    linhas({ evolution: { status: "connected" }, meta: { status: "connected" } });
+
+    await scanWhatsappHealth(NOW);
+
+    expect(qr.getConnectionState).not.toHaveBeenCalled();
+    expect(qr.ensureWebhook).not.toHaveBeenCalled();
+    expect(db.whatsappInstance.update).not.toHaveBeenCalled();
+    expect(mail.sendMail).not.toHaveBeenCalled();
+    expect(meta.getConnectionState).toHaveBeenCalledOnce();
+  });
+
   it("o aviso de quebra diz qual conexão caiu", async () => {
     db.whatsappInstance.findMany.mockResolvedValue([
       { tenantId: "tenant-1", provider: "meta", tenant: tenant() },

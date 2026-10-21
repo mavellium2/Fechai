@@ -33,6 +33,7 @@ import { addCredential, clearCooldown, deleteCredential } from "@/modules/ai/cre
 import { saveChain } from "@/modules/ai/chain";
 import { isEncryptionConfigured } from "@/lib/crypto";
 import { recordAudit, recordChange } from "@/modules/audit/log";
+import { closeWhatsappIncidents } from "@/modules/whatsapp/incidents";
 import { revertAuditLog } from "@/modules/audit/revert";
 import { deleteAuditLog } from "@/modules/audit/delete";
 import { requestContext } from "@/modules/auth/attempts";
@@ -402,6 +403,63 @@ export async function setTenantMetaWhatsappEnabled(
       : disconnectingMeta
         ? "API oficial ocultada e conexão Meta interrompida. As credenciais foram preservadas."
         : "API oficial da Meta ocultada para esta conta.",
+  };
+}
+
+export type TenantEvolutionWhatsappAccessResult = TenantMetaWhatsappAccessResult;
+
+/**
+ * Liga ou desliga o WhatsApp por QR (Evolution) de uma conta.
+ *
+ * Desligar só muda a flag: a sessão do QR e a linha `WhatsappInstance` ficam
+ * como estão (nada de logout, nada de apagar credencial), então reativar volta
+ * na hora, sem novo QR. O bloqueio é aplicado na leitura
+ * (`listWhatsappChannels`), no webhook, no monitor de saúde e nas ações de
+ * conexão. A linha da Meta não é tocada.
+ */
+export async function setTenantEvolutionWhatsappEnabled(
+  tenantId: string,
+  enabled: boolean,
+): Promise<TenantEvolutionWhatsappAccessResult> {
+  await requireSuperadmin();
+  if (typeof enabled !== "boolean") {
+    return { ok: false, error: "Estado inválido para o WhatsApp por QR." };
+  }
+
+  const before = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { name: true, evolutionWhatsappEnabled: true },
+  });
+  if (!before) return { ok: false, error: "Conta não encontrada." };
+
+  if (before.evolutionWhatsappEnabled !== enabled) {
+    await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { evolutionWhatsappEnabled: enabled },
+    });
+
+    // Desligar por decisão do admin não é queda: fecha a em aberto, como o
+    // "Desconectar" do painel, para o relatório mensal não contá-la como falha.
+    if (!enabled) await closeWhatsappIncidents(tenantId, "evolution");
+
+    await recordChange({
+      event: "admin.evolution_whatsapp_access_changed",
+      target: { type: "Tenant", id: tenantId, label: before.name },
+      before: { evolutionWhatsappEnabled: before.evolutionWhatsappEnabled },
+      after: { evolutionWhatsappEnabled: enabled },
+      tenantId,
+    });
+  }
+
+  revalidatePath("/admin/contas");
+  revalidatePath("/admin/logs");
+  revalidatePath("/integracoes");
+  revalidatePath("/inicio");
+  return {
+    ok: true,
+    info: enabled
+      ? "WhatsApp por QR liberado para esta conta."
+      : "WhatsApp por QR desligado. A sessão foi mantida e volta ao reativar.",
   };
 }
 

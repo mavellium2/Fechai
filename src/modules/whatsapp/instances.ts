@@ -47,13 +47,34 @@ export function channelProvider(row: { provider?: string | null }): WhatsAppProv
   return row.provider === "meta" ? "meta" : "evolution";
 }
 
+/**
+ * Linhas Evolution de contas que o admin desligou (`Tenant.evolutionWhatsappEnabled`).
+ * A sessão do QR continua de pé no provedor e a linha continua `connected` no
+ * banco — por isso o bloqueio mora na leitura, não no status. Sem a linha na
+ * lista, o envio espera como em qualquer conexão fora do ar e **nunca cai para a
+ * Meta** (contato do QR pela Meta seria primeiro contato).
+ */
+export const EVOLUTION_DISABLED_ROW = {
+  provider: { not: "meta" },
+  tenant: { evolutionWhatsappEnabled: false },
+} as const;
+
 /** As conexões da conta, no máximo uma por provedor (`@@unique([tenantId, provider])`). */
 export async function listWhatsappChannels(tenantId: string): Promise<WhatsappChannel[]> {
   return prisma.whatsappInstance.findMany({
-    where: { tenantId },
+    where: { tenantId, NOT: EVOLUTION_DISABLED_ROW },
     select: WHATSAPP_CHANNEL_SELECT,
     orderBy: { provider: "asc" },
   });
+}
+
+/** O admin liberou o QR (Evolution) para esta conta? Conta inexistente vale como liberada. */
+export async function isEvolutionEnabled(tenantId: string): Promise<boolean> {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { evolutionWhatsappEnabled: true },
+  });
+  return tenant?.evolutionWhatsappEnabled !== false;
 }
 
 /** Conectada e com identificador: a linha que existe mas está parada não envia. */
@@ -104,7 +125,10 @@ export function summarizeWhatsappStatus(rows: readonly { status: string }[]): Wh
 /** O estado da conta em uma palavra, direto do banco (ver `summarizeWhatsappStatus`). */
 export async function getWhatsappStatus(tenantId: string): Promise<WhatsappStatus> {
   return summarizeWhatsappStatus(
-    await prisma.whatsappInstance.findMany({ where: { tenantId }, select: { status: true } }),
+    await prisma.whatsappInstance.findMany({
+      where: { tenantId, NOT: EVOLUTION_DISABLED_ROW },
+      select: { status: true },
+    }),
   );
 }
 

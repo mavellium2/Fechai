@@ -21,6 +21,7 @@ import {
   impersonateUser,
   deleteTenantAccount,
   setTenantMetaWhatsappEnabled,
+  setTenantEvolutionWhatsappEnabled,
 } from "../../actions";
 
 type Props = {
@@ -31,6 +32,8 @@ type Props = {
   whatsappStatus: string;
   /** Se o superadmin liberou a alternativa oficial da Meta para esta conta. */
   metaWhatsappEnabled: boolean;
+  /** Se o WhatsApp por QR (Evolution) está liberado; o admin desliga para bloquear a conta. */
+  evolutionWhatsappEnabled: boolean;
   /** Cota de mensagens/mês fixada fora do padrão do plano (null = usa o plano). */
   messageLimitOverride: number | null;
   priceCentsOverride: number | null;
@@ -105,6 +108,8 @@ export function TenantRow(t: Props) {
   const [impError, setImpError] = useState<string | null>(null);
   const [metaAccessError, setMetaAccessError] = useState<string | null>(null);
   const [metaAccessInfo, setMetaAccessInfo] = useState<string | null>(null);
+  const [evolutionAccessError, setEvolutionAccessError] = useState<string | null>(null);
+  const [evolutionAccessInfo, setEvolutionAccessInfo] = useState<string | null>(null);
 
   // Exclusão definitiva: diálogo próprio (em vez de ConfirmButton) porque aqui
   // não basta um "confirmar" — o admin digita o nome da conta. A lista tem
@@ -183,6 +188,16 @@ export function TenantRow(t: Props) {
     });
   }
 
+  function toggleEvolutionAccess(enabled: boolean) {
+    setEvolutionAccessError(null);
+    setEvolutionAccessInfo(null);
+    start(async () => {
+      const result = await setTenantEvolutionWhatsappEnabled(t.id, enabled);
+      if (!result.ok) setEvolutionAccessError(result.error ?? "Não foi possível alterar o acesso.");
+      else setEvolutionAccessInfo(result.info ?? null);
+    });
+  }
+
   // Reabre sempre com o que está gravado: um valor digitado e não salvo numa
   // visita anterior não pode reaparecer como se fosse o estado da conta.
   function openPanel() {
@@ -251,6 +266,11 @@ export function TenantRow(t: Props) {
           />
           {WHATSAPP_PT[t.whatsappStatus] ?? t.whatsappStatus}
         </span>
+        {!t.evolutionWhatsappEnabled && (
+          <span className="ml-1.5 font-mono text-micro uppercase tracking-wide text-signal">
+            QR desligado
+          </span>
+        )}
       </td>
 
       <td className="px-4 py-2.5">
@@ -660,6 +680,24 @@ export function TenantRow(t: Props) {
                 />
               </div>
               <FormFeedback error={metaAccessError} info={metaAccessInfo} />
+              <div className="mt-3 flex items-start justify-between gap-4 rounded-control border border-white/10 bg-white/[0.03] p-3">
+                <div>
+                  <p className="text-sm font-medium text-white/85">WhatsApp por QR code (Evolution)</p>
+                  <p id={`${t.id}-evolution-whatsapp-help`} className="mt-1 text-sm text-white/50">
+                    Ao desligar, a conta para de receber e enviar pelo número do QR e não consegue
+                    gerar novo QR. A sessão é mantida: ao ligar de novo, volta sem ler o QR outra vez.
+                    A conexão Meta não é afetada.
+                  </p>
+                </div>
+                <Switch
+                  checked={t.evolutionWhatsappEnabled}
+                  onCheckedChange={toggleEvolutionAccess}
+                  loading={pending}
+                  label={`${t.evolutionWhatsappEnabled ? "Desligar" : "Ligar"} WhatsApp por QR para ${t.name}`}
+                  describedBy={`${t.id}-evolution-whatsapp-help`}
+                />
+              </div>
+              <FormFeedback error={evolutionAccessError} info={evolutionAccessInfo} />
             </section>
           </div>
         </SidePanel>

@@ -877,6 +877,10 @@ IDs resolvidos no Clinicorp (`clinicorpReminderCategoryIds`) e declaração da
 clínica registrada em `clinicorpQrConsentAt`. Configura-se em Agentes → Agendar
 horário, junto dos lembretes. Não libera Disparos ou follow-up de desconhecidos.
 Quem já está na Meta continua na Meta; falta de canal não troca de número.
+**O bloqueio do admin vence a exceção:** com `Tenant.evolutionWhatsappEnabled`
+desligado não há canal QR (`listWhatsappChannels` exclui a linha), então nada
+sai por ele mesmo com `clinicorpQrEnabled` ligado, e ativar a opção é recusado
+(`agentes/actions.ts`). Ver `whatsapp/README.md`, "QR desligado pelo admin".
 
 `ReminderDispatch` identifica tenant + origem + horário + antecedência. Consulta
 espelhada usa `clinicorp:<id>` também na fila local. Claim condicional precede o

@@ -95,6 +95,12 @@ model Tenant {
   // continua sendo o provedor disponível por padrão.
   metaWhatsappEnabled Boolean @default(false)
 
+  // Liberação do WhatsApp por QR (Evolution). Ao contrário da Meta, nasce LIGADA:
+  // o superadmin só a desliga para bloquear a conta. Desligar não faz logout nem
+  // apaga a sessão (reativar volta sem novo QR): apenas para de receber, enviar
+  // e religar (ver modules/whatsapp/instances.ts).
+  evolutionWhatsappEnabled Boolean @default(true)
+
   // Último alerta de conexão de WhatsApp quebrada enviado para esta conta
   // (ver modules/whatsapp/health.ts). Serve só de cooldown: sem ele, uma conta
   // com o número fora do ar receberia um e-mail a cada varredura do worker até

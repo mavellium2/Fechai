@@ -14,7 +14,11 @@ import {
   metaWebhookUrl,
   WHATSAPP_PROVIDER_SELECT,
 } from "@/modules/whatsapp/meta-config";
-import { isWhatsappProviderName, stampLegacyConversations } from "@/modules/whatsapp/instances";
+import {
+  isEvolutionEnabled,
+  isWhatsappProviderName,
+  stampLegacyConversations,
+} from "@/modules/whatsapp/instances";
 import { closeWhatsappIncidents } from "@/modules/whatsapp/incidents";
 import {
   MAX_BLOCKED_NUMBERS,
@@ -68,6 +72,9 @@ async function tenantCanUseMetaWhatsapp(tenantId: string): Promise<boolean> {
 
 const META_WHATSAPP_NOT_ENABLED =
   "A API oficial da Meta ainda não foi habilitada pelo administrador para esta conta.";
+
+const EVOLUTION_WHATSAPP_NOT_ENABLED =
+  "A conexão por QR code foi desativada pelo administrador para esta conta.";
 
 /**
  * A conexão de um provedor da conta. Cada provedor tem a sua linha
@@ -231,6 +238,9 @@ export async function reconnectMetaWhatsapp(): Promise<MetaConnectResult> {
 
 export async function connectWhatsapp(): Promise<ConnectResult> {
   const { tenantId } = await requireTenant();
+  if (!(await isEvolutionEnabled(tenantId))) {
+    return { ok: false, error: EVOLUTION_WHATSAPP_NOT_ENABLED };
+  }
   const provider = getWhatsAppProvider("evolution");
 
   if (!provider.isConfigured()) {
@@ -336,6 +346,11 @@ export async function connectWhatsapp(): Promise<ConnectResult> {
 
 export async function refreshWhatsappStatus(): Promise<ConnectResult> {
   const { tenantId } = await requireTenant();
+  // Pedir o QR gasta o `QRCODE_LIMIT` da Evolution: com o QR desligado pelo
+  // admin nem pergunta ao provedor.
+  if (!(await isEvolutionEnabled(tenantId))) {
+    return { ok: false, error: EVOLUTION_WHATSAPP_NOT_ENABLED };
+  }
   // Só a linha da Evolution: a Meta não usa código QR e tem a sua própria.
   const instance = await prisma.whatsappInstance.findUnique({
     where: instanceKey(tenantId, "evolution"),
@@ -488,6 +503,9 @@ export async function setWhatsappAgentReplies(
   }
   if (requested === "meta" && !(await tenantCanUseMetaWhatsapp(tenantId))) {
     return { ok: false, error: META_WHATSAPP_NOT_ENABLED };
+  }
+  if (requested === "evolution" && !(await isEvolutionEnabled(tenantId))) {
+    return { ok: false, error: EVOLUTION_WHATSAPP_NOT_ENABLED };
   }
   const updated = await prisma.whatsappInstance.updateMany({
     where: { tenantId, provider: requested },

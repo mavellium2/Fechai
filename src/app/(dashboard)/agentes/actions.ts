@@ -37,6 +37,7 @@ import {
   type MetaReminderTemplate,
 } from "@/modules/scheduling/meta-reminder";
 import { getBroadcastConnection } from "@/modules/broadcasts/connection";
+import { isEvolutionEnabled } from "@/modules/whatsapp/instances";
 import { sameBroadcastTemplate, type BroadcastTemplate } from "@/modules/broadcasts/template";
 import {
   MAX_FOLLOWUP_DELAY_MINUTES,
@@ -1089,6 +1090,11 @@ export async function saveScheduleConfigAction(
   let qrRiskAcceptance = previousReminderSettings.clinicorpQrRiskAcceptance;
   let newQrRiskAcceptance = false;
   if (qrEnabled) {
+    // O bloqueio do admin vence a exceção: sem o QR liberado não há canal por
+    // onde confirmar, e o aceite de risco seria registrado para nada.
+    if (!previousReminderSettings.clinicorpQrEnabled && !(await isEvolutionEnabled(tenantId))) {
+      return { ok: false, error: "O WhatsApp por QR foi desativado pelo administrador para esta conta." };
+    }
     // A forged POST cannot activate without the current terms/name. Ordinary
     // saves retain a valid acceptance; reactivation always requires a new one.
     if (!previousReminderSettings.clinicorpQrEnabled || formData.has("clinicorpQrRiskAccepted")) {

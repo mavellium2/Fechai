@@ -369,6 +369,35 @@ falso ou desfazer decisão de gente:
   segue válido; perguntar à Meta e sincronizar colocaria de volta no ar o que
   alguém desligou. A Meta só desce para `disconnected` aqui, nunca sobe.
 - **Meta de conta sem a liberação do admin não é consultada.**
+- **QR desligado pelo admin não é consultado, religado nem avisado.** Ver a seção
+  abaixo.
+
+### QR desligado pelo admin (`Tenant.evolutionWhatsappEnabled`)
+
+O superadmin liga/desliga o WhatsApp por QR de cada conta em `/admin/contas`
+(`setTenantEvolutionWhatsappEnabled`). Ao contrário da Meta, **nasce ligado**.
+
+- **Só bloqueia: a sessão do aparelho e a linha `WhatsappInstance` ficam como
+  estão** (sem logout, sem apagar nada). Reativar volta na hora, sem novo QR. A
+  linha segue `connected` no banco, então o bloqueio mora na **leitura**:
+  `listWhatsappChannels` e `getWhatsappStatus` excluem a linha Evolution da conta
+  desligada (`EVOLUTION_DISABLED_ROW`). Tudo que envia passa por elas, e a regra de
+  sempre vale: **sem canal, o envio espera e nunca cai para a Meta**.
+- **Entrada:** `processIncomingWhatsapp` devolve 200 `ignored` para a Evolution
+  desligada (a sessão ainda entrega eventos; erro faria o provedor reentregar). A
+  mensagem recebida nesse intervalo se perde — não há fila.
+- **Monitor:** `scanWhatsappHealth` pula a linha, então não religa webhook, não
+  sincroniza status, não manda e-mail e não abre `WhatsappIncident`. Ao desligar,
+  a queda em aberto do QR é fechada (decisão do admin não é falha de
+  disponibilidade do relatório mensal).
+- **Cliente:** `connectWhatsapp`, `refreshWhatsappStatus` (gasta `QRCODE_LIMIT`) e
+  `setWhatsappAgentReplies("evolution")` recusam; `disconnectWhatsapp` continua
+  permitido. Em `/integracoes` só aparece o aviso "Desativado pelo administrador"
+  (sem QR nem botão) para quem **já conectou** o QR; quem nunca conectou não vê o
+  cartão. Sem Meta e com o QR desligado a tela não mostra os controles do
+  atendimento (não há número).
+- Ligar `clinicorpQrEnabled` é recusado com o QR desligado; o bloqueio do admin
+  vence a exceção das confirmações.
 
 `connectWhatsapp()` também consulta o estado vivo antes de decidir: instância
 apagada no provedor (`exists: false`) é **recriada** em vez de receber um pedido

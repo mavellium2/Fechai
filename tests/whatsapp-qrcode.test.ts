@@ -40,6 +40,8 @@ vi.mock("@/lib/prisma", () => ({
       upsert: mocks.upsert,
       update: mocks.update,
     },
+    // QR liberado pelo admin: é o estado de toda conta que não foi bloqueada.
+    tenant: { findUnique: vi.fn(async () => ({ evolutionWhatsappEnabled: true })) },
     conversation: { updateMany: mocks.updateMany },
     agent: { findFirst: vi.fn(async () => null) },
     lead: { findFirst: vi.fn(async () => null) },

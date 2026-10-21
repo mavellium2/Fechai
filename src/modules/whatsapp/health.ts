@@ -310,6 +310,7 @@ export async function scanWhatsappHealth(now = new Date()): Promise<{
           name: true,
           status: true,
           metaWhatsappEnabled: true,
+          evolutionWhatsappEnabled: true,
           whatsappHealthAlertAt: true,
           users: { select: { email: true }, take: 1 },
         },
@@ -326,6 +327,9 @@ export async function scanWhatsappHealth(now = new Date()): Promise<{
     if (row.tenant?.status !== "active") continue;
     // Meta sem liberação do admin não atende (a linha só guarda credenciais).
     if (channelProvider(row) === "meta" && !row.tenant.metaWhatsappEnabled) continue;
+    // QR desligado pelo admin: não é queda, e religar o webhook ou sincronizar o
+    // status desfaria a decisão (a sessão segue de pé no provedor).
+    if (channelProvider(row) === "evolution" && row.tenant.evolutionWhatsappEnabled === false) continue;
 
     try {
       const health = await checkTenantWhatsapp(row.tenantId, now, channelProvider(row));

@@ -74,11 +74,16 @@ export async function processIncomingWhatsapp(
       tenantId: true,
       status: true,
       agentReplies: true,
-      tenant: { select: { whatsappIgnoreGroups: true } },
+      tenant: { select: { whatsappIgnoreGroups: true, evolutionWhatsappEnabled: true } },
     },
   });
   if (!instance || (instance.status && instance.status !== "connected")) {
     return ok({ ignored: "instância desconhecida ou desconectada" });
+  }
+  // QR desligado pelo admin: a sessão segue de pé no provedor e ainda entrega
+  // eventos. 200 `ignored`, como o resto — erro faria a Evolution reentregar.
+  if (provider.name === "evolution" && instance.tenant?.evolutionWhatsappEnabled === false) {
+    return ok({ ignored: "whatsapp por QR desligado pelo administrador" });
   }
 
   if (incoming.isGroup && instance.tenant?.whatsappIgnoreGroups)

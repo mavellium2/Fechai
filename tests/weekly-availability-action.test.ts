@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ save: vi.fn(), owned: vi.fn(), saved: vi.fn(), audit: vi.fn(), categories: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/session", () => ({ requireTenant: vi.fn(async () => ({ tenantId: "conta-logada", session: { user: { id: "usuario-logado" } } })) }));
-vi.mock("@/lib/prisma", () => ({ prisma: { tenantAction: { findUnique: mocks.saved } } }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    tenantAction: { findUnique: mocks.saved },
+    // QR liberado pelo admin: ativar as confirmações pelo QR exige o canal.
+    tenant: { findUnique: vi.fn(async () => ({ evolutionWhatsappEnabled: true })) },
+  },
+}));
 vi.mock("@/lib/rate-limit", () => ({ payloadTooLarge: vi.fn(() => null) }));
 vi.mock("@/modules/agent-engine/agents", () => ({ getAgentOwned: mocks.owned }));
 vi.mock("@/modules/scheduling/repository", () => ({ saveScheduleConfig: mocks.save }));

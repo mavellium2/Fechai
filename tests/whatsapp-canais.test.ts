@@ -19,6 +19,8 @@ const db = vi.hoisted(() => ({
   whatsappInstance: { findMany: vi.fn() },
   conversation: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   message: { create: vi.fn() },
+  // QR liberado pelo admin, o estado de toda conta que não foi bloqueada.
+  tenant: { findUnique: vi.fn(async () => ({ evolutionWhatsappEnabled: true })) },
 }));
 const qr = vi.hoisted(() => ({
   name: "evolution",
@@ -133,8 +135,14 @@ describe("Estado da conta em uma palavra (summarizeWhatsappStatus)", () => {
   it("lê do banco pela conta", async () => {
     db.whatsappInstance.findMany.mockResolvedValue([{ status: "disconnected" }, { status: "connected" }]);
     await expect(getWhatsappStatus("tenant-1")).resolves.toBe("connected");
+    // A linha Evolution de conta desligada pelo admin não conta como conectada.
     expect(db.whatsappInstance.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { tenantId: "tenant-1" } }),
+      expect.objectContaining({
+        where: {
+          tenantId: "tenant-1",
+          NOT: { provider: { not: "meta" }, tenant: { evolutionWhatsappEnabled: false } },
+        },
+      }),
     );
   });
 });

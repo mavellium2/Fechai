@@ -259,6 +259,11 @@ export const AUDIT_EVENTS = {
     kind: "update",
     group: "admin",
   },
+  "admin.evolution_whatsapp_access_changed": {
+    label: "Alterou o acesso ao WhatsApp por QR (Evolution)",
+    kind: "update",
+    group: "admin",
+  },
   "admin.account_created": { label: "Criou uma conta pelo painel", kind: "create", group: "admin" },
   "admin.gap_responders_changed": { label: "Definiu quem responde a fila de perguntas", kind: "update", group: "admin" },
   "admin.tenant_export_requested": { label: "Solicitou download dos dados da conta", kind: "access", group: "admin" },
