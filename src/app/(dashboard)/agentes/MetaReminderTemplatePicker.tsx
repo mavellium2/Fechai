@@ -17,8 +17,9 @@ import { loadReminderTemplatesAction } from "./actions";
 const SAMPLE = { nome: "Maria Souza", data: "terça-feira, 29 de setembro", hora: "17:45" };
 
 /**
- * Qual template aprovado da Meta vai para quem nunca conversou com o número
- * (pacientes marcados direto no Clinicorp), e o que entra em cada `{{n}}`.
+ * Qual template aprovado da Meta vai para quem está fora da janela de 24h
+ * (inclusive quem nunca conversou com o número, como os pacientes marcados
+ * direto no Clinicorp), e o que entra em cada `{{n}}`.
  *
  * A lista vem da Meta no clique (`loadReminderTemplatesAction`), não no
  * carregamento da tela. O servidor confere de novo, ao salvar, se o template
@@ -76,12 +77,12 @@ export function MetaReminderTemplatePicker({
     <div className="space-y-3 rounded-control border border-white/10 p-4">
       <div>
         <p className="text-sm font-medium text-white/85">
-          Pacientes que nunca conversaram com seu número
+          Contatos fora da janela de 24h da Meta
         </p>
         <p className="mt-1 text-sm text-white/60">
-          Consultas marcadas direto no Clinicorp também recebem lembrete. Para quem nunca falou
-          com seu número, a Meta só aceita template aprovado — escolha qual usar. Sem template,
-          esses pacientes não recebem lembrete.
+          Para quem não falou com seu número nas últimas 24h (inclusive pacientes marcados direto
+          no Clinicorp), a Meta só aceita template aprovado — escolha qual usar. Sem template,
+          esses contatos não recebem lembrete.
         </p>
       </div>
 

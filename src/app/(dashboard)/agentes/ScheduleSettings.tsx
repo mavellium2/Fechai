@@ -63,8 +63,9 @@ export function ScheduleSettings({
    */
   clinicorpConnected?: boolean;
   /**
-   * WhatsApp pela API oficial da Meta. Só por ela sai o lembrete de quem nunca
-   * conversou com o número (os pacientes do Clinicorp), com template aprovado.
+   * WhatsApp pela API oficial da Meta. Fora da janela de 24h (inclusive quem
+   * nunca conversou com o número, como os pacientes do Clinicorp) o lembrete
+   * só sai por ela, com template aprovado.
    */
   metaReminders?: boolean;
 }) {
@@ -421,8 +422,8 @@ export function ScheduleSettings({
             {clinicorpQrEnabled && config.clinicorpQrRiskAcceptance && <p className="text-xs text-white/65">
               Aceite registrado por {config.clinicorpQrRiskAcceptance.responsibleName}.
             </p>}
-            {metaReminders && <MetaReminderTemplatePicker value={metaTemplate} onChange={setMetaTemplate} location={config.location} disabled={pending} />}
           </div>}
+          {metaReminders && <div className="mt-4"><MetaReminderTemplatePicker value={metaTemplate} onChange={setMetaTemplate} location={config.location} disabled={pending} /></div>}
 
         </div>
       </fieldset>

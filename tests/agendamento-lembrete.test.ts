@@ -32,8 +32,16 @@ const provider = vi.hoisted(() => ({
   }),
 }));
 
+const metaTemplateSend = vi.hoisted(() => vi.fn(async (...args: unknown[]) => {
+  void args;
+  return "wamid-template";
+}));
+
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
 vi.mock("../src/modules/whatsapp", () => ({ getWhatsAppProvider: () => provider }));
+vi.mock("../src/modules/broadcasts/connection", () => ({
+  getBroadcastConnection: async () => ({ provider: { sendBroadcastTemplate: metaTemplateSend } }),
+}));
 
 vi.mock("@/modules/scheduling/reminder-dispatch", () => ({
   blockReminder: vi.fn(), claimReminder: vi.fn(async () => ({ id: "dispatch", token: "token", tenantId: "tenant-1" })),
@@ -54,6 +62,7 @@ import {
   validateReminders,
 } from "@/modules/scheduling/config";
 import { parseReminderOverride, serializeReminderOverride } from "@/modules/scheduling/reminder-override";
+import { outsideMetaWindow } from "@/modules/scheduling/meta-reminder";
 import {
   dueReminders,
   reminderDueAt,
@@ -816,6 +825,17 @@ describe("Varredura (scanAndSendReminders)", () => {
   });
 });
 
+describe("Janela de 24h da Meta (outsideMetaWindow)", () => {
+  it("sem mensagem do contato está fora da janela", () => {
+    expect(outsideMetaWindow(null, AGORA)).toBe(true);
+    expect(outsideMetaWindow(undefined, AGORA)).toBe(true);
+  });
+  it("23h59 dentro, 24h fora", () => {
+    expect(outsideMetaWindow(new Date(AGORA.getTime() - (24 * 3_600_000 - 60_000)), AGORA)).toBe(false);
+    expect(outsideMetaWindow(new Date(AGORA.getTime() - 24 * 3_600_000), AGORA)).toBe(true);
+  });
+});
+
 describe("Lembretes com as duas conexões (QR e Meta)", () => {
   const QR = { provider: "evolution", externalId: "inst-qr", status: "connected" };
   const META = { provider: "meta", externalId: "phone-meta", status: "connected" };
@@ -864,7 +884,7 @@ describe("Lembretes com as duas conexões (QR e Meta)", () => {
   }
 
   it("o paciente que escreve pela Meta recebe o lembrete pela Meta, com o QR também de pé", async () => {
-    consulta({ variables: {}, whatsappProvider: "meta" });
+    consulta({ variables: {}, whatsappProvider: "meta", lastInboundAt: new Date(AGORA.getTime() - 2 * 3_600_000) });
     db.whatsappInstance.findMany.mockResolvedValue([QR, META]);
 
     const r = await scanAndSendReminders(AGORA);
@@ -874,12 +894,82 @@ describe("Lembretes com as duas conexões (QR e Meta)", () => {
   });
 
   it("consulta marcada à mão (sem conversationId) usa o canal da conversa do lead", async () => {
-    consulta(null, { whatsappProvider: "meta" });
+    consulta(null, { whatsappProvider: "meta", lastInboundAt: new Date(AGORA.getTime() - 2 * 3_600_000) });
     db.whatsappInstance.findMany.mockResolvedValue([QR, META]);
 
     await scanAndSendReminders(AGORA);
 
     expect(provider.sendMessage).toHaveBeenCalledWith("phone-meta", "5511999990000", expect.any(String));
+  });
+
+  describe("Meta fora da janela de 24h", () => {
+    const TEMPLATE = {
+      id: "t1", name: "lembrete_consulta", language: "pt_BR", body: "Olá {{1}}, consulta às {{2}}.",
+      header: "", footer: "", parameterCount: 2, variables: ["nome", "hora"],
+    };
+    const foraDaJanela = { variables: {}, whatsappProvider: "meta", lastInboundAt: new Date(AGORA.getTime() - 30 * 3_600_000) };
+
+    function comTemplate(template: unknown) {
+      db.tenantAction.findMany.mockResolvedValue([{
+        tenantId: CONTA,
+        agentId: AGENTE,
+        config: {
+          reminderEnabled: true, reminderAudience: "all", reminderTypes: [],
+          reminders: [{ minutesBefore: UM_DIA, template: "É amanhã, {{nome}}." }],
+          timezone: "America/Sao_Paulo",
+          ...(template ? { metaReminderTemplate: template } : {}),
+        },
+      }]);
+    }
+
+    it("manda o template aprovado, nunca texto livre", async () => {
+      comTemplate(TEMPLATE);
+      consulta(foraDaJanela);
+      db.whatsappInstance.findMany.mockResolvedValue([META]);
+
+      const r = await scanAndSendReminders(AGORA);
+
+      expect(r.sent).toBe(1);
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+      expect(metaTemplateSend).toHaveBeenCalledWith("5511999990000", expect.objectContaining({ name: "lembrete_consulta" }), ["Maria", "05:00"]);
+      expect(db.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ content: expect.stringContaining("Olá Maria") }),
+      });
+    });
+
+    it("sem template escolhido não envia e não troca de canal", async () => {
+      comTemplate(null);
+      consulta(foraDaJanela);
+      db.whatsappInstance.findMany.mockResolvedValue([QR, META]);
+
+      const r = await scanAndSendReminders(AGORA);
+
+      expect(r.sent).toBe(0);
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+      expect(metaTemplateSend).not.toHaveBeenCalled();
+    });
+
+    it("contato que nunca escreveu conta como fora da janela", async () => {
+      comTemplate(TEMPLATE);
+      consulta({ variables: {}, whatsappProvider: "meta", lastInboundAt: null });
+      db.whatsappInstance.findMany.mockResolvedValue([META]);
+
+      await scanAndSendReminders(AGORA);
+
+      expect(metaTemplateSend).toHaveBeenCalledTimes(1);
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("o QR segue em texto livre, com ou sem template", async () => {
+      comTemplate(TEMPLATE);
+      consulta({ variables: {}, whatsappProvider: "evolution", lastInboundAt: foraDaJanela.lastInboundAt });
+      db.whatsappInstance.findMany.mockResolvedValue([QR, META]);
+
+      await scanAndSendReminders(AGORA);
+
+      expect(provider.sendMessage).toHaveBeenCalledWith("inst-qr", "5511999990000", expect.any(String));
+      expect(metaTemplateSend).not.toHaveBeenCalled();
+    });
   });
 
   it("paciente do QR recebe pelo QR", async () => {

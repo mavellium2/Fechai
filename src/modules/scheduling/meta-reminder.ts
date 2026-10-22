@@ -1,12 +1,14 @@
 import type { BroadcastTemplate } from "@/modules/broadcasts/template";
 
 /**
- * Template aprovado da Meta para o lembrete de quem **nunca conversou** com o
- * número da clínica — hoje, os pacientes marcados direto no Clinicorp.
+ * Template aprovado da Meta para o lembrete de quem está **fora da janela de
+ * 24h** — quem nunca conversou com o número da clínica (como os pacientes
+ * marcados direto no Clinicorp) e quem sumiu há mais de um dia.
  *
  * Por que template, e não o texto do lembrete: fora da janela de 24h aberta
  * pelo cliente a Meta só aceita template aprovado, e um primeiro contato está
- * sempre fora dela. Por que só a Meta: o Evolution manda como se fosse o
+ * sempre fora dela. Dentro da janela o lembrete segue em texto livre
+ * (`outsideMetaWindow`). Por que só a Meta: o Evolution manda como se fosse o
  * aparelho, e mensagem de número desconhecido é o que mais leva o WhatsApp a
  * bloquear o número da clínica — quem perde é a clínica, com todos os outros
  * pacientes. Ver `workers/follow-up-worker/clinicorp-reminders.ts`.
@@ -18,6 +20,14 @@ import type { BroadcastTemplate } from "@/modules/broadcasts/template";
  *
  * Puro de propósito: a tela de agentes (cliente) importa este arquivo.
  */
+
+/** Janela em que a Meta aceita texto livre depois da última mensagem do contato. */
+export const META_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Fora da janela de 24h a Meta só aceita template; sem mensagem do contato, sempre fora. */
+export function outsideMetaWindow(lastInboundAt: Date | null | undefined, now: Date): boolean {
+  return !lastInboundAt || now.getTime() - lastInboundAt.getTime() >= META_SERVICE_WINDOW_MS;
+}
 
 /** O que um `{{n}}` do template pode receber — os mesmos dados do lembrete. */
 export const META_REMINDER_VARIABLES = [

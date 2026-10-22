@@ -45,7 +45,7 @@ export function ActionsToggles({
   handoffConfig: HandoffConfig;
   /** Clinicorp habilitado e conectado: libera trazer os tipos de atendimento de lá. */
   clinicorpConnected?: boolean;
-  /** API oficial da Meta ativa: libera o template do lembrete de primeiro contato. */
+  /** API oficial da Meta ativa: libera o template do lembrete fora da janela de 24h. */
   metaReminders?: boolean;
 }) {
   const [enabled, setEnabled] = useState<Set<string>>(

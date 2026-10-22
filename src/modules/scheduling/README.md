@@ -804,6 +804,12 @@ conversou com o número da clínica.
   (`ScheduleConfig.metaReminderTemplate`, `meta-reminder.ts`), escolhido em
   Agentes › Agendar horário › Lembretes. Fora da janela de 24h a Meta só aceita
   template. Sem template escolhido, a conta não manda nada a esses pacientes.
+  O seletor aparece sempre que a Meta está conectada, com ou sem Clinicorp: o
+  template também vale para o lembrete comum da agenda do Fechai
+  (`reminders.ts`) quando o contato fala pela Meta e está **fora das 24h**
+  (`outsideMetaWindow`; sem mensagem do contato conta como fora). Dentro das 24h
+  segue o texto livre do lembrete; fora, só o template — sem ele o disparo fecha
+  `blocked` com o motivo, sem texto livre e sem trocar de canal.
   O template é **congelado** na config e conferido com a Meta ao salvar quando
   muda (`readMetaReminderTemplate`), como nos Disparos. `variables` diz o que
   vai em cada `{{n}}` (nome, data, hora, local); parâmetro vazio a Meta recusa,

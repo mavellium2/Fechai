@@ -129,7 +129,7 @@ export function AgentWizard({
   planLimit: number;
   scheduleConfig: ScheduleConfig;
   clinicorpConnected: boolean;
-  /** API oficial da Meta ativa: libera o template do lembrete de primeiro contato. */
+  /** API oficial da Meta ativa: libera o template do lembrete fora da janela de 24h. */
   metaReminders?: boolean;
   followUpConfig: FollowUpConfig;
   handoffConfig: HandoffConfig;

@@ -54,8 +54,9 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
   // action confere a flag de novo no servidor.
   // `getClinicorpStatus` devolve null quando não há credencial salva.
   const clinicorpConnected = Boolean(calendarFeatures.clinicorpEnabled && clinicorp);
-  // API oficial da Meta ativa: só por ela sai o lembrete de quem nunca
-  // conversou com o número (pacientes do Clinicorp), com template aprovado.
+  // API oficial da Meta ativa: fora da janela de 24h (inclusive quem nunca
+  // conversou com o número, como os pacientes do Clinicorp) o lembrete só sai
+  // por ela, com template aprovado.
   const metaReminders = Boolean(metaConnection);
 
   // Desativadas temporariamente não contam como "ação ativa" no checklist.

@@ -15,6 +15,9 @@ import { parseReminderOverride } from "../../src/modules/scheduling/reminder-ove
 import { parseConversationVariables } from "../../src/modules/agent-engine/variables";
 import { isPhoneBlocked } from "../../src/modules/whatsapp/blocklist";
 import { dateInZone, dayKeyInZone, partsInZone, timeInZone, zonedTimeToUtc } from "../../src/modules/scheduling/time";
+import { metaReminderParameters, outsideMetaWindow } from "../../src/modules/scheduling/meta-reminder";
+import { getBroadcastConnection } from "../../src/modules/broadcasts/connection";
+import { renderBroadcast } from "../../src/modules/broadcasts/template";
 
 /**
  * Lembretes pré-consulta. Rodam no mesmo worker do follow-up (mesma varredura
@@ -193,8 +196,8 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     include: {
       // A consulta marcada à mão não guarda `conversationId`: o canal do
       // paciente também vem da conversa do lead.
-      lead: { include: { conversation: { select: { whatsappProvider: true } } } },
-      conversation: { select: { variables: true, whatsappProvider: true } },
+      lead: { include: { conversation: { select: { whatsappProvider: true, lastInboundAt: true } } } },
+      conversation: { select: { variables: true, whatsappProvider: true, lastInboundAt: true } },
     },
   });
 
@@ -308,6 +311,8 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     let keyId: string | null = null;
     let delivered = false;
     let sentProvider: string | undefined;
+    let sentText = text;
+    let blockedReason = "O canal do paciente está desconectado ou não foi configurado.";
     {
       // Pelo número em que o paciente escreveu: com as duas conexões, a dele
       // fora do ar espera (o disparo não é consumido), não troca de número.
@@ -319,9 +324,33 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
         try {
           const provider = getWhatsAppProviderForInstance(instance);
           if (provider.isConfigured()) {
-            keyId = await provider.sendMessage(instance.externalId, appt.lead.phone, text);
-            delivered = true;
-            sentProvider = instance.provider;
+            const lastInboundAt = appt.conversation?.lastInboundAt ?? appt.lead?.conversation?.lastInboundAt;
+            if (instance.provider === "meta" && outsideMetaWindow(lastInboundAt, now)) {
+              // Fora das 24h a Meta só aceita template aprovado; texto livre
+              // seria recusado. Sem template (ou com dado faltando) não envia.
+              const template = cfg.metaReminderTemplate;
+              const parameters = template ? metaReminderParameters(template, {
+                nome: appt.lead.name?.trim() ?? "",
+                data: dateInZone(appt.startsAt, cfg.timezone),
+                hora: timeInZone(appt.startsAt, cfg.timezone),
+                local: cfg.location,
+              }) : null;
+              const connection = template && parameters ? await getBroadcastConnection(appt.tenantId) : null;
+              if (template && parameters && connection) {
+                keyId = await connection.provider.sendBroadcastTemplate(appt.lead.phone, template, parameters);
+                sentText = renderBroadcast(template, parameters);
+                delivered = true;
+                sentProvider = instance.provider;
+              } else {
+                blockedReason = !template
+                  ? "Fora da janela de 24h da Meta: escolha um template aprovado em Lembretes."
+                  : "Fora da janela de 24h da Meta: o template precisa do nome do contato e do local preenchidos.";
+              }
+            } else {
+              keyId = await provider.sendMessage(instance.externalId, appt.lead.phone, text);
+              delivered = true;
+              sentProvider = instance.provider;
+            }
           }
         } catch (err) {
           console.error("[lembrete] envio não confirmado", appt.id, err);
@@ -333,7 +362,7 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     // Uma falha temporária de conexão não pode consumir o lembrete. Enquanto
     // a consulta ainda não começou, a próxima varredura tenta novamente.
     if (!delivered) {
-      await finishReminder(claim, "blocked", { reason: "O canal do paciente está desconectado ou não foi configurado." });
+      await finishReminder(claim, "blocked", { reason: blockedReason });
       continue;
     }
     if (!keyId) { await finishReminder(claim, "unknown", { provider: sentProvider, reason: "O WhatsApp respondeu sem identificar a mensagem. Confira o envio." }); continue; }
@@ -348,7 +377,7 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
         data: {
           conversationId: appt.conversationId,
           role: "assistant",
-          content: text,
+          content: sentText,
           whatsappMessageId: keyId ?? undefined,
         },
       });

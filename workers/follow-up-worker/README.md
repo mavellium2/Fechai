@@ -166,6 +166,8 @@ minuto seriam 1.440 chamadas por dia por clínica. Mesmas regras de tempo de
 O canal é o que muda, porque esse paciente quase nunca falou com o número:
 
 - **Meta**: template aprovado de `metaReminderTemplate`, mantendo o canal.
+  O mesmo template atende o lembrete comum (`reminders.ts`) de contato Meta
+  fora das 24h; dentro da janela sai o texto livre.
 - **Evolution**: histórico anterior ou opção QR específica, categoria por ID e
   declaração da clínica. Sem canal não envia, mas lê a agenda para registrar o
   impedimento. Aceite com ID precede histórico; incerto nunca repete.
