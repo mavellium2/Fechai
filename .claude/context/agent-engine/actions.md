@@ -1,7 +1,7 @@
 # Agent-engine — Escrita
 
 ## Módulo
-- `runAgentTurn(input)`: turno completo; grava msg do contato e resposta. Entradas extras: áudio (`incomingAudioUrl/Seconds/WasAudio/MessageKeyId`), `agentId?`, `skipUsageCheck`, `skipEnabledCheck` (só sandbox).
+- `runAgentTurn(input)`: turno completo; grava msg do contato e resposta. Entradas extras: áudio (`incomingAudioUrl/Seconds/WasAudio/MessageKeyId`), `agentId?`, `skipUsageCheck`, `skipEnabledCheck` e `dryRunScheduling` (só sandbox; agenda simulada, ver README).
 - `appendMessage(conversationId, role, content, ...)`: grava `Message`.
 - `sendManualReply(tenantId, conversationId, text, audio?)`: humano responde; `sentBy: "human"`, grava `needsHuman: false, agentPaused: true`.
 - `summarizeConversation(tenantId, conversationId)`: resumo + variáveis; mínimo `MIN_MESSAGES_TO_SUMMARIZE = 4`.
