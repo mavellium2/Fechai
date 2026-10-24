@@ -42,7 +42,10 @@ export type SurveyCandidate = {
   lastMessageAutomated: boolean;
   contactMessages: number;
   agentReplies: number;
-  /** A esteira de follow-up está andando para este contato (etapa pendente ou já enviada). */
+  /**
+   * A esteira de follow-up está andando para este contato (etapa pendente ou já
+   * enviada). Ignorada quando o motivo é `declined` (ver `evaluateSurvey`).
+   */
   followUpActive: boolean;
   /** Reativação (P-88). Ainda não existe no código: ponto de extensão. */
   inReactivation: boolean;
@@ -127,7 +130,10 @@ export function evaluateSurvey(
   if (c.followUpReason === "stop") return skip("opt_out");
   if (c.blocked) return skip("blocked");
   if (isInReactivation(c)) return skip("reactivation");
-  if (c.followUpActive) return skip("follow_up");
+  // Quem recusou agendar agora (`declined`) RECEBE a pesquisa mesmo com a esteira
+  // espaçada em dias: a guarda do follow-up encerra a esteira depois dela. Quem
+  // só sumiu, com etapa pendente ou já enviada, fica sem pesquisa.
+  if (c.followUpActive && c.followUpReason !== "declined") return skip("follow_up");
   if (c.hasOpenSurvey) return skip("open_survey");
   if (c.surveyCreatedAfterLastInbound) return skip("already_handled");
   if (c.lastReceivedAt && now.getTime() - c.lastReceivedAt.getTime() < SURVEY_COOLDOWN_DAYS * 86_400_000) return skip("cooldown");

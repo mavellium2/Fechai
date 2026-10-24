@@ -16,13 +16,15 @@ import type { IncomingMessage, WhatsAppProvider } from "@/modules/whatsapp/provi
  */
 
 const db = vi.hoisted(() => ({
-  conversation: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  conversation: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  tenantAction: { findMany: vi.fn() },
   satisfactionSurvey: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
-  satisfactionSurveySettings: { findUnique: vi.fn(), upsert: vi.fn() },
+  satisfactionSurveySettings: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
   agent: { findMany: vi.fn() },
   lead: { findFirst: vi.fn() },
   whatsappInstance: { findMany: vi.fn(), findFirst: vi.fn() },
-  message: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  message: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+  reportEvent: { count: vi.fn() },
 }));
 const blocked = vi.hoisted(() => ({ isPhoneBlocked: vi.fn(async (): Promise<boolean> => false) }));
 const provider = vi.hoisted(() => ({
@@ -76,13 +78,14 @@ import { handleSurveyReply } from "@/modules/satisfaction/capture";
 import { isSurveyOutbound } from "@/modules/satisfaction/echo";
 import { parseMetaMessages } from "@/modules/whatsapp/meta-events";
 import { processIncomingWhatsapp } from "@/modules/whatsapp/process-incoming";
-import { nextFollowUp } from "../workers/follow-up-worker/scan";
+import { nextFollowUp, scanAndSendFollowUps } from "../workers/follow-up-worker/scan";
+import { scanSatisfactionSurveys } from "../workers/follow-up-worker/satisfaction";
 import { DEFAULT_FOLLOWUP_CONFIG } from "@/modules/follow-up/config";
 import { parseTopics } from "@/modules/satisfaction/classify";
 import { cleanTopics } from "@/modules/satisfaction/categories";
 import { averageIsReliable, summarizeSurveys } from "@/modules/satisfaction/summary";
 import { saveSurveySettings, surveySettingsFormSchema } from "@/modules/satisfaction/settings-store";
-import { normalizeTestPhone, sendSurveyTest } from "@/modules/satisfaction/test-send";
+import { TEST_NEEDS_MESSAGE, normalizeTestPhone, sendSurveyTest } from "@/modules/satisfaction/test-send";
 import { loadSatisfaction } from "@/modules/satisfaction/queries";
 
 const TENANT = "tenant-1";
@@ -134,14 +137,14 @@ describe("parseRating", () => {
 
   it.each([
     ["4", 4], ["nota 4", 4], ["Nota: 5", 5], ["5 estrelas", 5], ["⭐⭐⭐⭐", 4],
-    ["4 ⭐⭐⭐⭐", 4], ["cinco", 5], ["três", 3], ["dou nota 2", 2], ["1 estrela", 1], ["5!", 5],
+    ["4 ⭐⭐⭐⭐", 4], ["⭐️⭐️⭐️⭐️⭐️", 5], ["5 ⭐️", 5], ["5/5", 5], ["4 / 5", 4], ["cinco", 5], ["três", 3], ["dou nota 2", 2], ["1 estrela", 1], ["5!", 5],
   ])("%s vira %i", (text, expected) => {
     expect(parseRating(text)).toBe(expected);
   });
 
   it.each([
     "0", "6", "10", "um", "preciso remarcar a consulta das 4", "5 pessoas vão comigo", "ok",
-    "4 ⭐⭐", "", "nota", "quero falar com a Maria sobre o orçamento de 3 consultas",
+    "4 ⭐⭐", "3/4", "6/5", "5/5 ⭐⭐", "", "nota", "quero falar com a Maria sobre o orçamento de 3 consultas",
   ])("%j não é nota", (text) => {
     expect(parseRating(text)).toBeNull();
   });
@@ -151,6 +154,12 @@ describe("parseRating", () => {
     expect(isOptOutText("sair")).toBe(true);
     expect(isOptOutText("não quero mais receber")).toBe(true);
     expect(isOptOutText("quero sair mais cedo amanhã, dá?")).toBe(false);
+    expect(isOptOutText("parar de receber mensagens")).toBe(true);
+    expect(isOptOutText("sair da lista")).toBe(true);
+    // Quem tem consulta marcada escreve "cancelar" para desmarcar: é assunto do agente.
+    expect(isOptOutText("cancelar")).toBe(false);
+    expect(isOptOutText("Cancelar")).toBe(false);
+    expect(isOptOutText("quero cancelar minha consulta")).toBe(false);
   });
 });
 
@@ -547,6 +556,88 @@ describe("follow-up depois da pesquisa", () => {
   });
 });
 
+describe("regras de quem recebe: declined e pesquisa de teste", () => {
+  it("quem recusou agendar (declined) RECEBE a pesquisa mesmo com a esteira andando", () => {
+    expect(evaluateSurvey(candidate({ followUpReason: "declined", followUpActive: true }), SETTINGS, NOW)).toEqual({ action: "send" });
+  });
+  it("quem só sumiu, com etapa de follow-up pendente, continua sem pesquisa", () => {
+    expect(evaluateSurvey(candidate({ followUpReason: null, followUpActive: true }), SETTINGS, NOW)).toEqual({ action: "skip", reason: "follow_up" });
+  });
+  it("'pare' continua excluindo mesmo para declined", () => {
+    expect(evaluateSurvey(candidate({ followUpReason: "stop", followUpActive: true }), SETTINGS, NOW)).toEqual({ action: "skip", reason: "opt_out" });
+  });
+  it("conversa sem canal gravado nunca recebe pelo envio (sem cair no QR)", async () => {
+    db.conversation.findFirst.mockResolvedValue({
+      id: "conv-1", agentId: "a", isTest: false, needsHuman: false, agentPaused: false, followUpReason: null,
+      whatsappProvider: null, lead: { phone: "5511999999999", isTest: false },
+    });
+    const res = await sendSurvey({ tenantId: TENANT, conversationId: "conv-1", settings: SETTINGS });
+    expect(res.status).toBe("skipped");
+    expect(db.satisfactionSurvey.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("rating: seletor de emoji", () => {
+  it("U+FE0F não atrapalha a leitura", () => {
+    const star = "⭐️";
+    expect(parseRating(star.repeat(5))).toBe(5);
+    expect(parseRating(`5 ${star}`)).toBe(5);
+    expect(parseRating(`4 ${star.repeat(4)}`)).toBe(4);
+  });
+});
+
+describe("varreduras do worker", () => {
+  it("a guarda do follow-up só considera pesquisa real (teste não encerra a esteira)", async () => {
+    db.tenantAction.findMany.mockResolvedValueOnce([{ tenantId: TENANT, agentId: "agent-1", config: null }]).mockResolvedValueOnce([]);
+    db.conversation.findMany.mockResolvedValue([]);
+    await scanAndSendFollowUps(NOW);
+    const arg = db.conversation.findMany.mock.calls[0][0] as { include: { satisfactionSurveys: { where: Record<string, unknown> } } };
+    expect(arg.include.satisfactionSurveys.where).toMatchObject({ isTest: false });
+  });
+
+  it("só olha conversas que já completaram a espera, as mais antigas primeiro", async () => {
+    db.satisfactionSurveySettings.findMany.mockResolvedValue([{ tenantId: TENANT, enabled: true, delayMinutes: 180 }]);
+    db.tenantAction.findMany.mockResolvedValue([]);
+    db.conversation.findMany.mockResolvedValue([]);
+    db.satisfactionSurvey.findMany.mockResolvedValue([]);
+    await scanSatisfactionSurveys(NOW);
+    const arg = db.conversation.findMany.mock.calls[0][0] as { where: { lastInboundAt: { gte: Date; lte: Date } }; orderBy: unknown };
+    expect(arg.where.lastInboundAt.lte).toEqual(new Date(NOW.getTime() - 180 * 60_000));
+    expect(arg.where.lastInboundAt.gte).toEqual(new Date(NOW.getTime() - 24 * 3_600_000));
+    expect(arg.orderBy).toEqual({ lastInboundAt: "asc" });
+  });
+
+  it("pesquisa de teste não segura a regra dos 30 dias nem o episódio", async () => {
+    db.satisfactionSurveySettings.findMany.mockResolvedValue([{ tenantId: TENANT, enabled: true, delayMinutes: 180 }]);
+    db.tenantAction.findMany.mockResolvedValue([]);
+    db.conversation.findMany.mockResolvedValue([{
+      id: "conv-1", agentId: "agent-1", isTest: false, needsHuman: false, agentPaused: false, whatsappProvider: "meta",
+      followUpReason: null, followUpSentAt: null, followUpStep: 0, lastInboundAt: ago(240),
+      agent: { enabled: true }, lead: { phone: "5511999999999", isTest: false, appointments: [] },
+    }]);
+    // Só uma pesquisa de teste recente; nenhuma real.
+    db.satisfactionSurvey.findMany.mockImplementation(async (arg: { where?: { conversationId?: string } }) =>
+      arg.where?.conversationId ? [{ status: "completed", sentAt: ago(10), createdAt: ago(10), isTest: true }] : []);
+    db.message.findMany.mockResolvedValue([
+      // Mais recente primeiro, como a consulta do worker.
+      { role: "assistant", sentBy: "agent", createdAt: ago(240) }, { role: "user", sentBy: null, createdAt: ago(250) },
+      { role: "assistant", sentBy: "agent", createdAt: ago(299) }, { role: "user", sentBy: null, createdAt: ago(300) },
+    ]);
+    db.reportEvent.count.mockResolvedValue(0);
+    db.conversation.findFirst.mockResolvedValue({
+      id: "conv-1", agentId: "agent-1", isTest: false, needsHuman: false, agentPaused: false, followUpReason: null,
+      whatsappProvider: "meta", lead: { phone: "5511999999999", isTest: false },
+    });
+    db.whatsappInstance.findMany.mockResolvedValue([{
+      provider: "meta", status: "connected", externalId: "meta-1", agentReplies: true,
+      metaPhoneNumberId: null, metaBusinessAccountId: null, metaAccessTokenEncrypted: null,
+    }]);
+    const res = await scanSatisfactionSurveys(NOW);
+    expect(res.sent).toBe(1);
+    expect(provider.sendRatingPrompt).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("classificação", () => {
   it("só aceita chaves do conjunto fechado", () => {
     expect(parseTopics('["demora","preco","xpto"]')).toEqual(["demora", "preco"]);
@@ -621,28 +712,81 @@ describe("envio de teste", () => {
     expect(normalizeTestPhone("12345")).toBeNull();
   });
 
-  it("não usa o número do chat de teste do painel", async () => {
-    db.lead.findFirst.mockResolvedValue({ phone: "sandbox", isTest: true });
-    const res = await sendSurveyTest(TENANT, "(11) 98765-4321");
-    expect(res.ok).toBe(false);
-    expect(engine.getOrCreateConversation).not.toHaveBeenCalled();
+  const FULL = {
+    id: "conv-1", agentId: "agent-1", isTest: false, needsHuman: false, agentPaused: false, followUpReason: null as string | null,
+    whatsappProvider: "meta" as string | null, lead: { phone: "5511987654321", isTest: false },
+  };
+  const lookup = (over: Record<string, unknown> = {}) => ({
+    id: "conv-1", isTest: false, whatsappProvider: "meta", lastInboundAt: new Date(Date.now() - 2 * 3_600_000), lead: { isTest: false }, ...over,
   });
-
-  it("grava a pesquisa de teste na conversa real do número", async () => {
-    db.lead.findFirst.mockResolvedValue({ phone: "5511987654321", isTest: false });
-    engine.getOrCreateConversation.mockResolvedValue({ conversation: { id: "conv-1" }, lead: { id: "lead-1" } });
+  function setup(found: unknown, full: Record<string, unknown> = {}) {
+    db.conversation.findFirst.mockReset();
+    db.conversation.findFirst.mockResolvedValueOnce(found).mockResolvedValueOnce({ ...FULL, ...full });
     db.satisfactionSurvey.findFirst.mockResolvedValue(null);
-    db.conversation.findFirst.mockResolvedValue({
-      id: "conv-1", agentId: "agent-1", isTest: false, needsHuman: false, agentPaused: false, followUpReason: null,
-      whatsappProvider: "meta", lead: { phone: "5511987654321", isTest: false },
-    });
     db.whatsappInstance.findMany.mockResolvedValue([{
       provider: "meta", status: "connected", externalId: "meta-1", agentReplies: true,
       metaPhoneNumberId: null, metaBusinessAccountId: null, metaAccessTokenEncrypted: null,
+    }, {
+      provider: "evolution", status: "connected", externalId: "evo-1", agentReplies: true,
+      metaPhoneNumberId: null, metaBusinessAccountId: null, metaAccessTokenEncrypted: null,
     }]);
+  }
+
+  it("número que nunca escreveu: recusa com orientação e não cria lead, conversa nem pesquisa", async () => {
+    setup(null);
+    const res = await sendSurveyTest(TENANT, "(11) 98765-4321");
+    expect(res).toEqual({ ok: false, error: TEST_NEEDS_MESSAGE });
+    expect(TEST_NEEDS_MESSAGE).toContain("Mande uma mensagem para o número da clínica");
+    expect(engine.getOrCreateConversation).not.toHaveBeenCalled();
+    expect(db.satisfactionSurvey.create).not.toHaveBeenCalled();
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+    expect(provider.sendRatingPrompt).not.toHaveBeenCalled();
+  });
+
+  it("conversa sem canal gravado ou sem mensagem do contato nas últimas 24h é recusada (nunca cai no QR)", async () => {
+    for (const found of [
+      lookup({ whatsappProvider: null }),
+      lookup({ lastInboundAt: null }),
+      lookup({ lastInboundAt: new Date(Date.now() - 25 * 3_600_000) }),
+    ]) {
+      setup(found);
+      expect(await sendSurveyTest(TENANT, "(11) 98765-4321")).toEqual({ ok: false, error: TEST_NEEDS_MESSAGE });
+    }
+    expect(db.satisfactionSurvey.create).not.toHaveBeenCalled();
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("não usa o número do chat de teste do painel", async () => {
+    setup(lookup({ isTest: true }));
+    const res = await sendSurveyTest(TENANT, "(11) 98765-4321");
+    expect(res.ok).toBe(false);
+    expect(db.satisfactionSurvey.create).not.toHaveBeenCalled();
+  });
+
+  it("o teste também respeita 'pare' e número bloqueado", async () => {
+    setup(lookup(), { followUpReason: "stop" });
+    expect((await sendSurveyTest(TENANT, "(11) 98765-4321")).ok).toBe(false);
+    setup(lookup());
+    blocked.isPhoneBlocked.mockResolvedValue(true);
+    expect((await sendSurveyTest(TENANT, "(11) 98765-4321")).ok).toBe(false);
+    expect(db.satisfactionSurvey.create).not.toHaveBeenCalled();
+    expect(provider.sendRatingPrompt).not.toHaveBeenCalled();
+  });
+
+  it("pesquisa já aberta no número: recusa", async () => {
+    setup(lookup());
+    db.satisfactionSurvey.findFirst.mockResolvedValue({ id: "open" });
+    expect((await sendSurveyTest(TENANT, "(11) 98765-4321")).ok).toBe(false);
+    expect(db.satisfactionSurvey.create).not.toHaveBeenCalled();
+  });
+
+  it("com conversa real nas últimas 24h, envia pelo canal gravado e grava isTest", async () => {
+    setup(lookup());
     const res = await sendSurveyTest(TENANT, "(11) 98765-4321");
     expect(res.ok).toBe(true);
-    expect(db.satisfactionSurvey.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isTest: true, conversationId: "conv-1" }) }));
+    expect(db.satisfactionSurvey.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isTest: true, conversationId: "conv-1", provider: "meta" }) }));
+    expect(provider.sendRatingPrompt).toHaveBeenCalledWith("meta-1", "5511987654321", expect.anything());
+    expect(engine.getOrCreateConversation).not.toHaveBeenCalled();
   });
 });
 

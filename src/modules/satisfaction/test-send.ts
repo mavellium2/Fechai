@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getOrCreateConversation } from "@/modules/agent-engine/conversation";
-import { OPEN_STATUSES } from "./eligibility";
+import { OPEN_STATUSES, SURVEY_WINDOW_HOURS } from "./eligibility";
 import { sendSurvey } from "./send";
 import { getSurveySettings } from "./settings-store";
 
@@ -10,6 +9,13 @@ import { getSurveySettings } from "./settings-store";
  * chega no próprio celular. A pesquisa grava `isTest` (fica fora do painel, do
  * alerta e do relatório); a conversa do número continua sendo a real, nunca
  * vira sandbox. Funciona com a pesquisa desligada, para testar antes de ligar.
+ *
+ * **Só para quem já escreveu para a clínica nas últimas 24h**, pelo número em
+ * que escreveu (`Conversation.whatsappProvider` gravado): é o mesmo limite da
+ * pesquisa de verdade. Sem isso o envio cairia no QR para um número que nunca
+ * falou com a clínica — primeiro contato, que leva ao bloqueio do número — ou
+ * seria recusado pela Meta fora da janela. Nunca cria Lead nem Conversa.
+ * Bloqueio e "pare" continuam valendo (`sendSurvey`).
  */
 
 /** "(11) 98765-4321" → "5511987654321"; null quando não parece um número. */
@@ -30,17 +36,30 @@ function phoneForms(phone: string): string[] {
 
 export type SurveyTestResult = { ok: true; info: string } | { ok: false; error: string };
 
-export async function sendSurveyTest(tenantId: string, rawPhone: string): Promise<SurveyTestResult> {
+export const TEST_NEEDS_MESSAGE =
+  "Mande uma mensagem para o número da clínica a partir desse celular e tente de novo em até 24h.";
+
+export async function sendSurveyTest(tenantId: string, rawPhone: string, now: Date = new Date()): Promise<SurveyTestResult> {
   const phone = normalizeTestPhone(rawPhone);
   if (!phone) return { ok: false, error: "Informe o número com DDD, ex.: (11) 98765-4321." };
 
-  const existing = await prisma.lead.findFirst({
-    where: { tenantId, phone: { in: phoneForms(phone) } },
-    select: { phone: true, isTest: true },
+  const conversation = await prisma.conversation.findFirst({
+    where: { tenantId, lead: { phone: { in: phoneForms(phone) } } },
+    orderBy: { lastInboundAt: { sort: "desc", nulls: "last" } },
+    select: { id: true, isTest: true, whatsappProvider: true, lastInboundAt: true, lead: { select: { isTest: true } } },
   });
-  if (existing?.isTest) return { ok: false, error: "Esse número é do chat de teste do painel. Use o seu WhatsApp." };
-
-  const { conversation } = await getOrCreateConversation(tenantId, existing?.phone ?? phone);
+  if (conversation && (conversation.isTest || conversation.lead.isTest)) {
+    return { ok: false, error: "Esse número é do chat de teste do painel. Use o seu WhatsApp." };
+  }
+  const windowMs = SURVEY_WINDOW_HOURS * 3_600_000;
+  if (
+    !conversation ||
+    !conversation.whatsappProvider ||
+    !conversation.lastInboundAt ||
+    now.getTime() - conversation.lastInboundAt.getTime() > windowMs
+  ) {
+    return { ok: false, error: TEST_NEEDS_MESSAGE };
+  }
 
   const open = await prisma.satisfactionSurvey.findFirst({
     where: { conversationId: conversation.id, status: { in: [...OPEN_STATUSES] } },
@@ -54,5 +73,5 @@ export async function sendSurveyTest(tenantId: string, rawPhone: string): Promis
   if (res.status === "unknown") {
     return { ok: false, error: "O WhatsApp não confirmou o envio. Confira o celular antes de tentar de novo." };
   }
-  return { ok: false, error: res.status === "waiting" || res.status === "skipped" ? res.reason : "Não foi possível enviar o teste." };
+  return { ok: false, error: "reason" in res ? res.reason : "Não foi possível enviar o teste." };
 }

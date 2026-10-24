@@ -54,13 +54,18 @@ export async function sendSurvey(input: {
   });
   if (!conv) return { status: "skipped", reason: "Conversa não encontrada." };
 
+  // Reconfere o que pode ter mudado entre a varredura e o envio. Pedido para
+  // parar e número bloqueado valem também para o envio de teste: a clínica não
+  // escreve a quem pediu para não receber.
+  if (conv.followUpReason === "stop") return { status: "skipped", reason: "O contato pediu para não receber mensagens." };
+  if (await isPhoneBlocked(tenantId, conv.lead.phone)) return { status: "skipped", reason: "Número bloqueado na conta." };
   if (!isTest) {
-    // Reconfere o que pode ter mudado entre a varredura e o envio.
     if (conv.isTest || conv.lead.isTest) return { status: "skipped", reason: "Conversa de teste." };
     if (conv.needsHuman || conv.agentPaused) return { status: "skipped", reason: "A conversa está com a equipe." };
-    if (conv.followUpReason === "stop") return { status: "skipped", reason: "O contato pediu para não receber mensagens." };
-    if (await isPhoneBlocked(tenantId, conv.lead.phone)) return { status: "skipped", reason: "Número bloqueado na conta." };
   }
+  // Sem canal gravado a escolha cairia no QR, e para quem nunca escreveu por ele
+  // seria primeiro contato (bloqueio do número da clínica).
+  if (!conv.whatsappProvider) return { status: "skipped", reason: "Não sabemos por qual número este contato fala com a clínica." };
 
   const instance = await findWhatsappChannel(tenantId, conv.whatsappProvider);
   if (!instance?.externalId) return { status: "waiting", reason: "O número deste contato está fora do ar." };
@@ -103,8 +108,9 @@ export async function sendSurvey(input: {
     return { status: "unknown", surveyId: survey.id };
   }
 
-  // Falhar aqui não desfaz o envio: a linha fica `sending` (a captura aceita a
-  // nota assim) e a limpeza do worker a fecha.
+  // Falhar aqui não desfaz o envio: a linha fica `sending` e a captura ainda
+  // aceita a nota assim. A limpeza do worker a vira `unknown` depois de 10 min,
+  // e só nesse intervalo a nota pode ser capturada.
   await prisma.satisfactionSurvey
     .update({
       where: { id: survey.id },

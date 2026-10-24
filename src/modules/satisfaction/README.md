@@ -41,7 +41,17 @@ o alerta de notas baixas no `/inicio` e o relatório mensal.
 - **Sem aprovação no sistema.** A clínica aprovar o texto é processo da
   Mavellium, fora do produto. Ligada, a pesquisa sai.
 - **Pare/sair** durante a pesquisa grava `followUpReason = "stop"` (regra
-  existente) e manda só uma confirmação curta.
+  existente) e manda só uma confirmação curta. Só pedido CLARO de parar (pare,
+  parar, stop, sair, "não quero receber mais mensagens"…): **"cancelar" não conta**
+  — quem tem consulta marcada escreve isso para desmarcar, e a mensagem segue ao
+  agente.
+- **Envio de teste** (`test-send.ts`): só para número que já tem conversa real
+  (não sandbox) com `whatsappProvider` gravado e mensagem do contato nas últimas
+  24h; senão a tela orienta a mandar uma mensagem para o número da clínica e
+  tentar de novo em até 24h. **Nunca cria Lead/Conversa** e nunca cai no QR para
+  quem não escreveu por ele (primeiro contato). Bloqueio e "pare" valem também no
+  teste. A pesquisa de teste (`isTest`) fica fora do painel, do alerta, do
+  relatório, da regra dos 30 dias e da guarda do follow-up.
 
 ## Quem recebe (`eligibility.ts`, regra pura)
 
@@ -52,17 +62,23 @@ agente desligado, transferido para a equipe/prioridade (`needsHuman`,
 parar, número bloqueado (rechecado antes de cada envio), reativação (P-88 não
 existe: ponto de extensão `isInReactivation`), follow-up em andamento (etapa
 pendente ou já enviada), última fala do agente que foi Disparo/lembrete/follow-up,
-pesquisa aberta, quem **recebeu** pesquisa nos últimos 30 dias.
+pesquisa aberta, quem **recebeu** pesquisa nos últimos 30 dias. Exceção: quem
+recusou agendar agora (`followUpReason = "declined"`) **recebe** a pesquisa mesmo
+com a esteira espaçada em dias; quem só sumiu, com etapa pendente, não.
 
-O follow-up tem prioridade e nunca sai depois da pesquisa
-(`FollowUpCandidate.lastSurveySentAt`).
+O follow-up nunca sai depois da pesquisa (`FollowUpCandidate.lastSurveySentAt`,
+só pesquisa real): a pesquisa encerra a esteira de quem a recebeu. A varredura só
+olha conversas que já completaram a espera (`lastInboundAt <= agora − espera`),
+das mais antigas para as mais novas, para um lote cheio não deixar vencidas
+passarem do prazo.
 
 ## Classificação (`classify.ts`)
 
 `SURVEY_TOPICS` é fechado (demora, não entendeu, informação errada, preço, queria
 pessoa, agendamento difícil, tom robótico, outro). A IA em segundo plano
 (`completeBackgroundText`, fora da cota de mensagens, uso em `AiUsageDaily`) só
-devolve **chaves**. Correção humana (`classifiedBy: "human"`) nunca é sobrescrita.
+devolve **chaves**. Correção humana (`classifiedBy: "human"`) nunca é sobrescrita
+pela IA e **substitui as chaves da IA por uma só** (ou por nenhuma, "só elogio").
 `praiseTopics` está no schema reservado para elogios; hoje nada o preenche.
 
 ## Painel, alerta e relatório

@@ -34,7 +34,11 @@ const MAX_SENDS_PER_TENANT = 20;
 const MAX_CANDIDATES_PER_TENANT = 300;
 /** Janela do "conversou de verdade" quando o contato nunca recebeu pesquisa. */
 const EPISODE_LOOKBACK_DAYS = 7;
-/** Envio que não confirmou em tanto tempo deixa de ser "enviando". */
+/**
+ * Envio que não confirmou em tanto tempo deixa de ser "enviando" e vira
+ * `unknown`. Até lá a captura ainda aceita a nota (a linha pode ter ficado em
+ * `sending` por falha ao gravar o id); depois, não.
+ */
 const SENDING_STALE_MINUTES = 10;
 
 const AUTOMATED_KINDS = ["contact_campaign", "contact_reminder", "contact_followup"];
@@ -71,7 +75,7 @@ async function followUpConfigs(tenantId: string): Promise<Map<string, FollowUpCo
 
 type Conv = Awaited<ReturnType<typeof loadConversations>>[number];
 
-function loadConversations(tenantId: string, since: Date) {
+function loadConversations(tenantId: string, since: Date, notAfter: Date) {
   return prisma.conversation.findMany({
     where: {
       tenantId,
@@ -81,7 +85,11 @@ function loadConversations(tenantId: string, since: Date) {
       needsHuman: false,
       agentPaused: false,
       agent: { enabled: true },
-      lastInboundAt: { gte: since },
+      // Já completou a espera: a última fala do agente é depois da do contato, então
+      // quem escreveu depois de `notAfter` ainda não está vencido. Filtrar aqui
+      // evita que as conversas novas ocupem o lote e as vencidas passem do prazo.
+      // As mais antigas primeiro: são as mais perto de expirar.
+      lastInboundAt: { gte: since, lte: notAfter },
     },
     orderBy: { lastInboundAt: "asc" },
     take: MAX_CANDIDATES_PER_TENANT,
@@ -110,12 +118,15 @@ async function buildCandidate(
     where: { conversationId: c.id },
     orderBy: { sentAt: "desc" },
     take: 10,
-    select: { status: true, sentAt: true, createdAt: true },
+    select: { status: true, sentAt: true, createdAt: true, isTest: true },
   });
+  // Pesquisa de teste só vale como "aberta" (a captura pegaria a resposta dela);
+  // não segura a regra dos 30 dias nem conta como pesquisa deste episódio.
+  const real = surveys.filter((s) => !s.isTest);
   const received = (RECEIVED_STATUSES as readonly string[]);
-  const lastReceivedAt = surveys.find((s) => received.includes(s.status))?.sentAt ?? null;
+  const lastReceivedAt = real.find((s) => received.includes(s.status))?.sentAt ?? null;
   const hasOpenSurvey = surveys.some((s) => (OPEN_STATUSES as readonly string[]).includes(s.status));
-  const surveyCreatedAfterLastInbound = surveys.some((s) => c.lastInboundAt && s.createdAt >= c.lastInboundAt);
+  const surveyCreatedAfterLastInbound = real.some((s) => c.lastInboundAt && s.createdAt >= c.lastInboundAt);
 
   // O episódio começa na última pesquisa recebida (ou há 7 dias): conversa
   // antiga já avaliada não "conta" para a próxima.
@@ -178,7 +189,8 @@ async function buildCandidate(
 async function scanTenant(tenantId: string, settings: SurveySettings, now: Date) {
   const result = { scanned: 0, sent: 0, expired: 0, waiting: 0 };
   const since = new Date(now.getTime() - SURVEY_WINDOW_HOURS * HOUR);
-  const [conversations, followUps] = await Promise.all([loadConversations(tenantId, since), followUpConfigs(tenantId)]);
+  const notAfter = new Date(now.getTime() - settings.delayMinutes * 60_000);
+  const [conversations, followUps] = await Promise.all([loadConversations(tenantId, since, notAfter), followUpConfigs(tenantId)]);
 
   for (const c of conversations) {
     result.scanned++;

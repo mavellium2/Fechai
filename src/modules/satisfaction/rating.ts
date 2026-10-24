@@ -21,7 +21,8 @@ export function parseRating(text: string, replyId?: string | null): number | nul
     const m = /^rating_([1-5])$/.exec(replyId.trim());
     if (m) return Number(m[1]);
   }
-  const raw = (text ?? "").trim();
+  // U+FE0F (seletor de emoji) acompanha "⭐️" em vários teclados e não é conteúdo.
+  const raw = (text ?? "").replace(/\uFE0F/g, "").trim();
   if (!raw || raw.length > MAX_LENGTH) return null;
 
   const stars = (raw.match(STAR) ?? []).length;
@@ -32,6 +33,10 @@ export function parseRating(text: string, replyId?: string | null): number | nul
 
   if (!rest) return stars >= 1 && stars <= 5 ? stars : null;
 
+  // "5/5", "4 / 5"
+  const outOf = /^([1-5]) ?\/ ?5$/.exec(rest);
+  if (outOf && !stars) return Number(outOf[1]);
+
   // "nota 4", "4", "4 estrelas", "dou nota 5", "nota: 4 estrelas"
   const m = /^(?:(?:eu )?(?:dou |daria |foi )?nota )?([1-5]|um|uma|dois|duas|tres|quatro|cinco)(?: estrelas?)?$/.exec(rest);
   if (!m) return null;
@@ -39,14 +44,19 @@ export function parseRating(text: string, replyId?: string | null): number | nul
   const value = /^[1-5]$/.test(token) ? Number(token) : WORDS[token];
   // "um"/"uma" sozinhos são artigo, não nota: exigem "nota" ou "estrela".
   if ((token === "um" || token === "uma") && !/nota|estrela/.test(rest)) return null;
-  // "4 ⭐⭐" (número e estrelas que não batem) é ambíguo.
-  if (stars && stars !== value) return null;
+  // "4 ⭐⭐" (número e estrelas que não batem) é ambíguo; uma estrela só ao lado
+  // do número ("5 ⭐") é enfeite.
+  if (stars && stars !== value && stars !== 1) return null;
   return value;
 }
 
-/** "pare", "sair", "não quero receber" durante a pesquisa. */
+/**
+ * Pedido CLARO de parar de receber mensagens, durante a pesquisa. "Cancelar" não
+ * está aqui de propósito: quem tem consulta marcada escreve "cancelar" para
+ * desmarcar, e isso é assunto do agente (não pode virar `followUpReason: stop`).
+ */
 export function isOptOutText(text: string): boolean {
   const t = normalize(text ?? "").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
   if (!t || t.length > 40) return false;
-  return /^(pare|parar|pare de (me )?(enviar|mandar)( mensagens?)?|sair|stop|cancelar|nao quero (mais )?(receber|mensagens?)|nao me (envie|mande) (mais )?mensagens?)$/.test(t);
+  return /^(pare|parar|pare de (me )?(enviar|mandar)( mensagens?)?|parar de receber( mensagens?)?|sair|sair da lista|stop|nao quero (mais )?(receber|mensagens?)|nao me (envie|mande) (mais )?mensagens?)$/.test(t);
 }

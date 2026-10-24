@@ -221,7 +221,8 @@ export async function scanAndSendFollowUps(now: Date = new Date()) {
       },
       // Pesquisa de satisfação que o contato recebeu (ver `lastSurveySentAt`).
       satisfactionSurveys: {
-        where: { status: { in: ["sending", "awaiting_rating", "awaiting_comment", "completed", "no_reply", "unknown"] } },
+        // Teste da clínica não encerra a esteira de um lead real.
+        where: { isTest: false, status: { in: ["sending", "awaiting_rating", "awaiting_comment", "completed", "no_reply", "unknown"] } },
         orderBy: { sentAt: "desc" },
         take: 1,
         select: { sentAt: true },
