@@ -332,6 +332,45 @@ export class MetaCloudProvider implements WhatsAppProvider {
     return data.messages?.[0]?.id ?? null;
   }
 
+  /**
+   * Lista interativa (`interactive.type = "list"`): corpo até 1024 caracteres,
+   * botão até 20, no máximo 10 linhas com título de até 24. Só dentro das 24h
+   * abertas pelo contato — fora disso a Meta exige template.
+   */
+  async sendRatingPrompt(
+    externalId: string,
+    toPhone: string,
+    prompt: { body: string; button: string; rows: { id: string; title: string }[] },
+  ): Promise<string | null> {
+    const res = await fetch(graphUrl(`${externalId}/messages`), {
+      method: "POST",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: toPhone,
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: prompt.body.slice(0, 1024) },
+          action: {
+            button: prompt.button.slice(0, 20),
+            sections: [
+              {
+                title: "Nota",
+                rows: prompt.rows.slice(0, 10).map((r) => ({ id: r.id.slice(0, 200), title: r.title.slice(0, 24) })),
+              },
+            ],
+          },
+        },
+      }),
+    });
+    if (!res.ok) throw await metaError("Meta sendRatingPrompt", res);
+    const data = (await res.json()) as { messages?: { id?: string }[] };
+    return data.messages?.[0]?.id ?? null;
+  }
+
   async sendAudio(
     externalId: string,
     toPhone: string,

@@ -162,6 +162,8 @@ model Tenant {
   reportEvents      ReportEvent[]
   knowledgeGaps     KnowledgeGap[]
   knowledgeGapSettings KnowledgeGapSettings?
+  satisfactionSettings SatisfactionSurveySettings?
+  satisfactionSurveys  SatisfactionSurvey[]
   serviceArea       TenantServiceArea?
   conversationInsights ConversationInsight[]
   reportTrackingStartedAt DateTime @default(now())
@@ -264,6 +266,72 @@ model KnowledgeGapSettings {
   responders     String   @default("clinic") // clinic | mavellium | both
   lastDigestAt   DateTime?
   updatedAt      DateTime @updatedAt
+}
+
+/// Pesquisa de satisfação pós-conversa, por conta. Sem linha = desligada, com
+/// os padrões de `satisfaction/settings.ts`. Texto null = usa o padrão. Não é
+/// ação do catálogo: não come vaga do plano. Ver `src/modules/satisfaction/README.md`.
+model SatisfactionSurveySettings {
+  tenantId        String   @id
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled         Boolean  @default(false)
+  /// Silêncio do contato (depois da última fala do agente) para a conversa
+  /// contar como terminada. 30 a 1200 minutos.
+  delayMinutes    Int      @default(180)
+  windowStartHour Int      @default(8)
+  windowEndHour   Int      @default(20)
+  timezone        String   @default("America/Sao_Paulo")
+  ratingText      String?
+  lowText         String?
+  highText        String?
+  thanksText      String?
+  updatedAt       DateTime @updatedAt
+}
+
+/// Uma pesquisa enviada a um contato. NUNCA vira `Message`: o relatório conta
+/// contato atendido por mensagem, e uma mensagem do contato moveria
+/// `lastInboundAt` (perdeu por 72h, follow-up). Tudo da pesquisa mora aqui.
+/// `status`: sending | awaiting_rating | awaiting_comment | completed |
+/// no_reply | unknown | failed | expired.
+model SatisfactionSurvey {
+  id               String       @id @default(cuid())
+  tenantId         String
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// `SetNull`: apagar o agente não apaga a avaliação.
+  agentId          String?
+  agent            Agent?       @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  provider         String // evolution | meta
+  isTest           Boolean      @default(false)
+  status           String       @default("sending")
+  /// Hash dos textos efetivos que saíram, para saber o que foi enviado.
+  textHash         String?
+  sentAt           DateTime     @default(now())
+  rating           Int?
+  ratedAt          DateTime?
+  comment          String?
+  commentAudioUrl  String?
+  commentAt        DateTime?
+  /// ids de mensagem no WhatsApp: reconhecem o eco e a reentrega.
+  ratingMsgId      String?      @unique
+  followMsgId      String?      @unique
+  thanksMsgId      String?      @unique
+  ratingInboundId  String?      @unique
+  commentInboundId String?      @unique
+  /// Motivos de melhoria / elogios, do conjunto fechado `SURVEY_TOPICS`.
+  topics           String[]     @default([])
+  praiseTopics     String[]     @default([])
+  classifiedBy     String? // ai | human
+  classifiedAt     DateTime?
+  reviewedAt       DateTime?
+  reviewedById     String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([tenantId, ratedAt])
+  @@index([conversationId, sentAt])
+  @@index([status, sentAt])
 }
 
 /// Área de atendimento da clínica: a cidade-base e as outras cidades que ela
@@ -681,6 +749,7 @@ model Agent {
 
   knowledgeDocs KnowledgeDocument[]
   knowledgeGaps KnowledgeGap[]
+  satisfactionSurveys SatisfactionSurvey[]
   actions       TenantAction[]
   conversations Conversation[]
   appointments  Appointment[]
@@ -901,6 +970,7 @@ model Conversation {
   reportEvents ReportEvent[]
   knowledgeGapOccurrences KnowledgeGapOccurrence[]
   insight      ConversationInsight?
+  satisfactionSurveys SatisfactionSurvey[]
 
   @@index([tenantId])
   @@index([agentId])

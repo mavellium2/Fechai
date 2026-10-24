@@ -46,6 +46,13 @@ export type FollowUpCandidate = {
   hasActiveAppointment?: boolean;
   /** Chave geral do agente (`Agent.enabled`). Pausado não reengaja ninguém. */
   agentEnabled?: boolean;
+  /**
+   * Quando o contato recebeu a pesquisa de satisfação mais recente. Pesquisa
+   * enviada depois da última fala do contato encerra a esteira: "sumiu?" logo
+   * depois de "como foi o atendimento?" é cobrança, e o silêncio que sobra é de
+   * quem já foi atendido.
+   */
+  lastSurveySentAt?: Date | null;
 };
 
 /** A esteira que vale para a conversa; null quando nenhuma deve sair. */
@@ -90,6 +97,7 @@ export function nextFollowUp(conv: FollowUpCandidate, cfg: FollowUpConfig): Next
   // não uma cobrança genérica. Só consulta cancelada não conta.
   if (conv.hasActiveAppointment) return null;
   if (!conv.lastInboundAt) return null;
+  if (conv.lastSurveySentAt && conv.lastSurveySentAt >= conv.lastInboundAt) return null;
   // Só faz sentido se a última mensagem foi do agente (o contato ficou em
   // silêncio). A mensagem do contato ainda sem resposta é do atendimento.
   if (!conv.lastMessage || conv.lastMessage.role !== "assistant") return null;
@@ -211,6 +219,13 @@ export async function scanAndSendFollowUps(now: Date = new Date()) {
         take: 1,
         select: { role: true, createdAt: true },
       },
+      // Pesquisa de satisfação que o contato recebeu (ver `lastSurveySentAt`).
+      satisfactionSurveys: {
+        where: { status: { in: ["sending", "awaiting_rating", "awaiting_comment", "completed", "no_reply", "unknown"] } },
+        orderBy: { sentAt: "desc" },
+        take: 1,
+        select: { sentAt: true },
+      },
     },
   });
 
@@ -227,6 +242,7 @@ export async function scanAndSendFollowUps(now: Date = new Date()) {
       lastMessage: c.messages[0] ?? null,
       hasActiveAppointment: c.lead.appointments.length > 0,
       agentEnabled: c.agent?.enabled,
+      lastSurveySentAt: c.satisfactionSurveys?.[0]?.sentAt ?? null,
     }, config);
     if (!next || now < next.dueAt || isStale(next.dueAt, now)) continue;
 

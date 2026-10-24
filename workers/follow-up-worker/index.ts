@@ -2,6 +2,7 @@ import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { scanAndSendFollowUps } from "./scan";
 import { scanAndSendReminders } from "./reminders";
 import { scanAndSendClinicorpReminders } from "./clinicorp-reminders";
+import { scanSatisfactionSurveys } from "./satisfaction";
 import { scanWhatsappHealth } from "../../src/modules/whatsapp/health";
 import { scanBroadcasts } from "../../src/modules/broadcasts/worker";
 import { touchBroadcastWorker } from "../../src/modules/broadcasts/health";
@@ -29,6 +30,7 @@ const REMINDER_QUEUE = "appointment-reminders";
 const HEALTH_QUEUE = "whatsapp-health";
 const CLINICORP_REMINDER_QUEUE = "clinicorp-reminders";
 const KNOWLEDGE_GAP_QUEUE = "knowledge-gaps";
+const SATISFACTION_QUEUE = "satisfaction-surveys";
 const FOLLOWUP_EVERY_MS =
   Number(process.env.FOLLOWUP_SCAN_EVERY_MINUTES ?? 15) * 60_000;
 const REMINDER_EVERY_MS =
@@ -45,12 +47,20 @@ const CLINICORP_REMINDER_EVERY_MS =
 const KNOWLEDGE_GAP_EVERY_MS =
   Number(process.env.KNOWLEDGE_GAP_SCAN_EVERY_MINUTES ?? 2) * 60_000;
 
+// Pesquisa de satisfação: o atraso configurado é de horas, então 5 minutos de
+// granularidade bastam e mantêm leve a varredura das conversas recentes.
+const SATISFACTION_EVERY_MS =
+  Number(process.env.SATISFACTION_SCAN_EVERY_MINUTES ?? 5) * 60_000;
+
 async function main() {
   const followUpQueue = new Queue(FOLLOWUP_QUEUE, { connection });
   const reminderQueue = new Queue(REMINDER_QUEUE, { connection });
   const healthQueue = new Queue(HEALTH_QUEUE, { connection });
   const clinicorpReminderQueue = new Queue(CLINICORP_REMINDER_QUEUE, { connection });
   const knowledgeGapQueue = new Queue(KNOWLEDGE_GAP_QUEUE, { connection });
+  const satisfactionQueue = new Queue(SATISFACTION_QUEUE, { connection });
+  // Uma varredura por vez: duas ao mesmo tempo poderiam perguntar a nota duas vezes.
+  await satisfactionQueue.setGlobalConcurrency(1);
   const clinicorpSyncQueue = new Queue("clinicorp-appointment-sync", { connection });
   await clinicorpSyncQueue.setGlobalConcurrency(1);
   await clinicorpSyncQueue.upsertJobScheduler("clinicorp-sync-scheduler", { every: 30_000 }, { name: "clinicorp-sync" });
@@ -138,6 +148,12 @@ async function main() {
     { name: "scan-knowledge-gaps" },
   );
 
+  await satisfactionQueue.upsertJobScheduler(
+    "scan-scheduler",
+    { every: SATISFACTION_EVERY_MS },
+    { name: "scan-satisfaction" },
+  );
+
   const followUpWorker = new Worker(
     FOLLOWUP_QUEUE,
     async () => {
@@ -178,6 +194,17 @@ async function main() {
     },
     { connection },
   );
+  const satisfactionWorker = new Worker(
+    SATISFACTION_QUEUE,
+    async () => {
+      const r = await scanSatisfactionSurveys();
+      if (r.sent || r.expired || r.classified) {
+        console.log(`[pesquisa] contas=${r.tenants} conversas=${r.scanned} enviadas=${r.sent} expiradas=${r.expired} classificados=${r.classified}`);
+      }
+      return r;
+    },
+    { connection, concurrency: 1 },
+  );
   const healthWorker = new Worker(
     HEALTH_QUEUE,
     async () => {
@@ -205,11 +232,15 @@ async function main() {
   knowledgeGapWorker.on("failed", (job, err) =>
     console.error(`[perguntas] job ${job?.id} falhou`, err),
   );
+  satisfactionWorker.on("failed", (job, err) =>
+    console.error(`[pesquisa] job ${job?.id} falhou`, err),
+  );
   console.log(
     `[worker] online — follow-up a cada ${FOLLOWUP_EVERY_MS / 60000} min; ` +
       `lembretes a cada ${REMINDER_EVERY_MS / 60000} min; ` +
       `lembretes do Clinicorp a cada ${CLINICORP_REMINDER_EVERY_MS / 60000} min; ` +
       `avisos de perguntas sem resposta a cada ${KNOWLEDGE_GAP_EVERY_MS / 60000} min; ` +
+      `pesquisa de satisfação a cada ${SATISFACTION_EVERY_MS / 60000} min; ` +
       `saúde do WhatsApp a cada ${HEALTH_EVERY_MS / 60000} min`,
   );
 }

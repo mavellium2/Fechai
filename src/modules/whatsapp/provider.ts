@@ -33,6 +33,11 @@ export type IncomingMessage = {
   mediaId?: string;
   /** Instante original do evento; preserva atribuição quando a Meta reentrega. */
   occurredAt?: Date;
+  /**
+   * Id da opção escolhida numa mensagem interativa (lista ou botão da Meta).
+   * `text` leva o título da opção, para o resto do fluxo tratar como texto.
+   */
+  replyId?: string;
 };
 
 export type WhatsAppGroup = {
@@ -103,6 +108,16 @@ export interface WhatsAppProvider {
     externalId: string,
     groupId: string,
     text: string,
+  ): Promise<string | null>;
+  /**
+   * Envia uma lista interativa de escolha única (até 10 linhas) — a pesquisa de
+   * satisfação a usa para a nota. Opcional: só a Cloud API da Meta tem; no QR a
+   * pergunta vai como texto numerado. Devolve o id da mensagem; lança na falha.
+   */
+  sendRatingPrompt?(
+    externalId: string,
+    toPhone: string,
+    prompt: { body: string; button: string; rows: { id: string; title: string }[] },
   ): Promise<string | null>;
   /**
    * Grupos de que o número conectado participa, para a tela escolher o grupo da
