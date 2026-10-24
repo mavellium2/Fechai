@@ -1,6 +1,6 @@
 import type { LlmToolSchema } from "@/modules/ai";
 import { isWithinBusinessHours, type ScheduleConfig } from "@/modules/scheduling/config";
-import { cancelAppointment, findLeadAppointment, listFreeSlots, listUpcomingLeadAppointments, rescheduleAppointment } from "@/modules/scheduling/repository";
+import { cancelAppointment, findLeadAppointment, hasConflictAnywhere, listFreeSlots, listUpcomingLeadAppointments, rescheduleAppointment } from "@/modules/scheduling/repository";
 import { dayKeyInZone, formatInZone, parseLocalDateTime, partsInZone, timeInZone } from "@/modules/scheduling/time";
 import type { ToolContext } from "./tools";
 import { relativeDayLabel } from "./time-context";
@@ -250,6 +250,7 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
   if (args.confirmed !== true) return `Nenhuma alteração foi feita. Confirme com o cliente ${name === "cancel_meeting" ? "o cancelamento" : "a troca"} da consulta de ${previous} e espere a resposta clara antes de chamar novamente com confirmed=true.`;
 
   if (name === "cancel_meeting") {
+    if (ctx.dryRun) return `Simulação: a consulta de ${previous} seria cancelada. Nada foi alterado na agenda nem enviado ao Clinicorp, Google ou iCloud. Encerre com gentileza como se tivesse sido cancelada, sem dizer que é uma simulação.`;
     const canceled = await cancelAppointment(ctx.tenantId, appointment.id, ctx.leadId, {
       timezone: cfg.timezone, source: "agent", reason: typeof args.reason === "string" ? args.reason : undefined,
     });
@@ -273,6 +274,15 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
   if (startsAt.getTime() < Date.now() + cfg.minNoticeHours * 3_600_000) return "O novo horário já passou ou não respeita a antecedência mínima. O horário original continua reservado.";
   const durationMinutes = (appointment.endsAt.getTime() - appointment.startsAt.getTime()) / 60_000;
   if (!isWithinBusinessHours(startsAt, { ...cfg, durationMinutes })) return "O novo horário fica fora do expediente ou atravessa uma pausa. O horário original continua reservado. Combine outro horário.";
+  if (ctx.dryRun) {
+    // Mesma checagem de conflito da remarcação real (ignora a própria consulta
+    // e o espelho dela no Clinicorp), sem gravar nada.
+    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
+    if (await hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone, appointment.id, appointment.clinicorpAppointmentId ?? undefined)) {
+      return offerAlternativeSlots(ctx, cfg, startsAt, durationMinutes);
+    }
+    return `Simulação: a consulta de ${previous} seria remarcada para ${formatInZone(startsAt, cfg.timezone)}${cfg.location ? ` (${cfg.location})` : ""}. Nada foi alterado na agenda nem enviado ao Clinicorp, Google ou iCloud. Confirme com o contato como se tivesse sido remarcada, sem dizer que é uma simulação.`;
+  }
   const result = await rescheduleAppointment({ tenantId: ctx.tenantId, leadId: ctx.leadId, id: appointment.id, startsAt, timezone: cfg.timezone });
   if (result.status === "conflict") return offerAlternativeSlots(ctx, cfg, startsAt, durationMinutes);
   if (result.status === "unavailable") return "A consulta mudou ou não está mais disponível. Consulte os agendamentos novamente antes de confirmar qualquer alteração.";

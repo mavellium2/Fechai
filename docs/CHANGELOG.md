@@ -2,6 +2,16 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Simulação da agenda no chat de teste — 2026-10-24
+
+No chat de teste, marcar, remarcar e cancelar consulta só validam e descrevem o que
+aconteceria: não gravam `Appointment` e não espelham no Clinicorp, Google ou iCloud.
+A simulação não reserva horário; conflito, expediente, antecedência e confirmação do
+cliente seguem sendo checados. WhatsApp e widget seguem gravando normalmente. Sem
+schema, variável de ambiente ou flag: vale para `/api/sandbox` e o chat de teste de
+`/conversas`. Testes: `tests/agendamento-simulacao.test.ts` (10 casos). Card
+cmvml66yp000m01nx96cjcq4h, commit 09d465b. Contexto: [scheduling](../.claude/context/scheduling/_index.md).
+
 ## Aceite dos riscos da Evolution antes de ativar — 2026-10-09
 
 Modal obrigatório nas confirmações QR do Clinicorp: riscos da conexão não

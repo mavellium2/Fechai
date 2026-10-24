@@ -109,6 +109,40 @@ caminho de busca) e libera o telefone canônico para nascer vazio na próxima
 mensagem — a IA não recomeça vendo o histórico do teste anterior, mas nada é
 perdido do lado do usuário.
 
+#### O teste não ocupa a agenda real (`dryRunScheduling` / `ToolContext.dryRun`)
+
+Os dois caminhos de teste (`/api/sandbox` e `sendTestClientMessage`) passam
+`dryRunScheduling: true`, que o orquestrador põe em `ToolContext.dryRun`. Com
+a marca, `schedule_meeting`, `reschedule_meeting` e `cancel_meeting` fazem
+toda leitura e validação (antecedência, expediente, conflito em todas as
+agendas via `hasConflictAnywhere`; nas trocas e cancelamentos, também o
+`confirmed` do cliente — `schedule_meeting` não tem essa confirmação) mas
+**não gravam `Appointment` nem chamam Clinicorp, Google ou iCloud**. A gravação
+e os espelhos moram em `createAppointment`, `rescheduleAppointment` e
+`cancelAppointment` (`scheduling/repository.ts`), que o ramo simulado não
+alcança. Cada tool devolve uma frase "Simulação: ... seria marcado/remarcado/
+cancelada", que manda o agente seguir como se tivesse acontecido, sem dizer que
+é simulação. Sem a marca (WhatsApp, widget) nada muda. A futura rota MCP deve
+ligar a mesma flag.
+
+**Ativação:** nenhuma variável de ambiente, flag de painel, migração ou config.
+Vale para todo turno que passa pelas duas rotas de teste, e só para elas.
+
+**Limites da simulação:** não reserva o horário, então dois pedidos seguidos do
+mesmo horário recebem "livre" nos dois. Não enxerga corrida com outra marcação
+(o `unavailable` da remarcação real não se reproduz). Como não cria registro, a
+idempotência de `findOwnAppointment` não se aplica: repetir o pedido na mesma
+conversa simula de novo.
+
+**Como testar:**
+- Automático: `npx vitest run tests/agendamento-simulacao.test.ts` (10 casos:
+  simulação não grava nem espelha; simulação ainda recusa horário ocupado ou
+  fora do expediente, e exige `confirmed`; fluxo real sem a marca segue igual).
+- Manual, no chat de teste com a agenda e uma conta com Clinicorp/Google/iCloud
+  conectados: pedir um horário livre (resposta "Simulação"), remarcar e cancelar
+  (pedir confirmação antes). Conferir em `/agenda` e em `Appointment` que nada
+  mudou e que nenhum evento apareceu nos calendários conectados.
+
 #### O teste responde com o agente desligado (`skipEnabledCheck`)
 
 `Agent.enabled` é a chave geral, e desligada ela cala o agente **para o

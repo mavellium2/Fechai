@@ -383,6 +383,8 @@ export async function sendTestClientMessage(
     // chave geral cala o agente para o cliente, não para quem está ajustando.
     skipUsageCheck: true,
     skipEnabledCheck: true,
+    // Teste não pode ocupar a agenda real nem espelhar no Clinicorp/Google/iCloud.
+    dryRunScheduling: true,
   });
 
   revalidatePath("/conversas");

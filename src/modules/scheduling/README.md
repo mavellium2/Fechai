@@ -411,6 +411,17 @@ gasta uma chamada de rede.
 Sobreposição é `início < fimExistente && fim > inícioExistente`. Encostar não é
 conflito: 14:00–15:00 e 15:00–16:00 convivem.
 
+### Simulação (chat de teste) não escreve na agenda
+
+Com `ToolContext.dryRun` (ligado pelo chat de teste), as tools de agenda
+validam e leem (`hasConflictAnywhere` incluso) mas não chamam
+`createAppointment`, `rescheduleAppointment` nem `cancelAppointment`, logo
+nada chega ao Clinicorp, Google ou iCloud. Na remarcação simulada, o conflito
+ignora a própria consulta e o espelho dela no Clinicorp (mesma regra da real).
+Nada é reservado, então a simulação não bloqueia horário para o próximo pedido.
+Ativação, limites e teste em `agent-engine/README.md` ("O teste não ocupa a
+agenda real").
+
 ## Horários livres: o agente só oferece o que está vago
 
 O expediente no prompt diz quando atendemos, **não o que está livre**. Sem mais

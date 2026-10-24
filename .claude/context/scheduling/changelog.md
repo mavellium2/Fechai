@@ -2,6 +2,14 @@
 
 Atualize ao alterar o módulo.
 
+### 2026-10-24 — Simulação da agenda no chat de teste
+
+Card cmvml66yp000m01nx96cjcq4h, commit 09d465b. Com `ToolContext.dryRun` (chat de teste),
+marcar, remarcar e cancelar validam e leem (conflito via `hasConflictAnywhere`, incluindo
+Clinicorp) mas não chamam `createAppointment`/`rescheduleAppointment`/`cancelAppointment`;
+nada chega ao Clinicorp, Google ou iCloud e nada é reservado. Sem schema nem env.
+Detalhe: `src/modules/agent-engine/README.md`, "O teste não ocupa a agenda real".
+
 ### 2026-10-24 — Calendário da Apple (iCloud, CalDAV)
 
 Card cmukfq7t7002f01jw2mrv7nl8, commits 173105e (espelho), 5a3646a (disponibilidade),

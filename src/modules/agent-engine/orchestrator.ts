@@ -93,6 +93,12 @@ export async function runAgentTurn(input: {
    * canal com contato real.
    */
   skipEnabledCheck?: boolean;
+  /**
+   * Simulação da agenda: marcar, remarcar e cancelar só validam e descrevem o
+   * que aconteceria, sem gravar nem espelhar (Clinicorp, Google, iCloud). Ligado
+   * pelo chat de teste; ver `ToolContext.dryRun`.
+   */
+  dryRunScheduling?: boolean;
 }): Promise<AgentTurn> {
   const { tenantId, conversationId, leadId, userMessage } = input;
 
@@ -244,7 +250,7 @@ export async function runAgentTurn(input: {
     agent ? variableDefinitions : undefined,
     handoff ? parseHandoffConfig(handoff.config) : undefined,
   );
-  const ctx: ToolContext = { tenantId, conversationId, leadId, agentId: agent?.id ?? null };
+  const ctx: ToolContext = { tenantId, conversationId, leadId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling };
   // A cadeia de fallback vem do painel (/admin/ia): o admin monta a ordem e
   // aponta cada degrau para uma credencial. Sem nada cadastrado, cai no padrão
   // do código (modelo ativo → Grok → Groq). Resolvida UMA vez por turno, já

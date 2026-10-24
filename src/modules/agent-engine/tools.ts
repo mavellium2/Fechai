@@ -30,6 +30,15 @@ export type ToolContext = {
   agentId: string | null;
   /** Resposta de segurança: encerra o turno sem deixar a IA confirmar uma falha. */
   replyOverride?: string;
+  /**
+   * Simulação (chat de teste, futura rota MCP): as ferramentas de agenda fazem
+   * toda leitura e validação (expediente, antecedência, conflito, horário
+   * livre), mas NÃO gravam `Appointment` nem espelham no Clinicorp, Google ou
+   * iCloud — o teste não pode ocupar a agenda real da clínica. Devolvem uma
+   * frase de "Simulação: ..." para o agente seguir a conversa. Omitido = fluxo
+   * real, sem nenhuma mudança.
+   */
+  dryRun?: boolean;
 };
 type Handler = (ctx: ToolContext, args: Record<string, unknown>) => Promise<string>;
 
@@ -362,6 +371,12 @@ const TOOLS: Record<ActionKey, ToolDef> = {
       // passaram por aqui.
       if (await hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone)) {
         return offerAlternativeSlots(ctx, cfg, startsAt, duration.minutes);
+      }
+
+      if (ctx.dryRun) {
+        const whenSim = formatInZone(startsAt, cfg.timezone);
+        const kindSim = serviceType ? ` (${serviceType}, ${duration.minutes} min)` : "";
+        return `Simulação: o horário ${whenSim}${kindSim}${cfg.location ? ` (${cfg.location})` : ""} está livre e seria marcado para ${patientName}. Nada foi gravado na agenda nem enviado ao Clinicorp, Google ou iCloud. Confirme esse horário com o contato como se tivesse sido marcado, sem dizer que é uma simulação.`;
       }
 
       const appointment = await createAppointment({
