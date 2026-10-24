@@ -42,6 +42,8 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.11.2",
+    "ical.js": "^2.2.1",
     "ioredis": "^5.11.1",
     "lucide-react": "^1.25.0",
     "motion": "^12.42.2",

@@ -7,8 +7,8 @@ o resultado do envio. Uma resposta a lembrete não deve aparecer como aquisiçã
 nova. Mensagens históricas sem esse registro conservam finalidade desconhecida;
 não se deduz confirmação pelo conteúdo nem por `sentBy`.
 
-A agenda do fechai é a **fonte da verdade**. Google Agenda e Clinicorp são
-espelhos opcionais, ligados por conta (tenant). Nenhum dos dois pode derrubar um
+A agenda do fechai é a **fonte da verdade**. Google Agenda, Clinicorp e o
+Calendário da Apple (iCloud) são espelhos opcionais, ligados por conta (tenant). Nenhum dos dois pode derrubar um
 atendimento: as funções de integração **nunca lançam** — a falha é registrada e
 mostrada no painel, e o horário combinado com o lead continua de pé.
 
@@ -25,6 +25,14 @@ mostrada no painel, e o horário combinado com o lead continua de pé.
 | `meta-reminder.ts` | Template aprovado da Meta para lembrar quem nunca conversou com o número (`metaReminderTemplate`): leitura, parâmetros e validação. Puro — a tela importa. |
 | `features.ts` | Quais calendários a conta habilitou em /integracoes. |
 | `dimensions.ts` | As dimensões de um agendamento (tipo, situação, confirmação, comparecimento, procedimento, origem, horário de origem): rótulos e regras puras. Ver "Dimensões de um agendamento". |
+| `caldav.ts` | Calendário da Apple: HTTP CalDAV puro (sem banco). Só `*.icloud.com`, redirect de partição, XML com `fast-xml-parser`. |
+| `ical.ts` | Calendário da Apple: monta o `.ics` (TZID + VTIMEZONE) e lê ocupado/agenda com `ical.js`. Puro. |
+| `icloud.ts` | Calendário da Apple: API pública (envio, remarcação, cancelamento, disponibilidade, saúde, agenda). Nunca lança. |
+| `icloud-sync.ts` | Varredura do worker: envia consultas futuras sem evento e remove eventos de canceladas. |
+| `icloud-health.ts` | Varredura do worker: confere senha de app e calendário a cada 30 min por conta. |
+| `icloud-agenda-view.ts` | Calendário da Apple: dedupe dos eventos `fechai-<id>` e detecção de "horário alterado no iPhone". Puro. |
+| `app/(dashboard)/integracoes/IcloudCalendarCard.tsx` | Painel de conexão (Apple ID, senha de app, escolha do calendário, alertas). |
+| `app/(dashboard)/agenda/IcloudEventItem.tsx` | Card só leitura de um evento do iPhone na `/agenda`. |
 
 Fora do módulo, o que usa estas peças:
 
@@ -432,6 +440,150 @@ nada, o agente sugeria um horário já ocupado, o contato aceitava e só então
   alternativas conferidas (`offerAlternativeSlots`), para a segunda sugestão não ser outro
   chute. A lista é orientação: `hasConflictAnywhere` continua sendo a checagem
   final antes de gravar (alguém pode marcar entre a consulta e a confirmação).
+
+## Calendário da Apple (iCloud)
+
+Espelho por CalDAV, com senha de app. O horário marcado vira evento no calendário
+do cliente no iPhone, e o que já está ocupado lá entra na disponibilidade do
+agente, somado à nossa base e ao Clinicorp. Ligado por `CalendarFeatures.icloudEnabled`
+em `/integracoes?aba=calendarios`. Vale tudo o que vale para os outros espelhos: a
+agenda do fechai é a fonte da verdade, nada lança e falha de envio não desfaz consulta.
+
+### Conexão e credenciais
+
+- Entra com Apple ID e **senha de app** (gerada em appleid.apple.com; exige 2FA).
+  Nunca a senha do Apple ID.
+- `connectIcloudAction` chama `verifyIcloudCredentials` (descobre o principal e o
+  calendar-home e lista os calendários). Com um calendário só, ele é escolhido sozinho;
+  com mais, a pessoa escolhe em `saveIcloudSettingsAction`, que confere no servidor
+  que a URL veio da lista que o próprio iCloud acabou de devolver.
+- Apple ID e senha ficam **cifrados** (AES-256-GCM, `ENCRYPTION_KEY`). Única leitura:
+  `getIntegration()` (decifra e confere as flags); única escrita:
+  `saveIcloudCredentials()`. Credencial ilegível vale como "não conectado". Sem
+  `ENCRYPTION_KEY` a conexão é recusada na tela.
+- Log nunca tem Apple ID, senha, header ou corpo: só tenantId e código HTTP.
+- **Trocar de Apple ID** esquece o calendário escolhido, os de "considerar ocupado" e
+  os endereços gravados; os eventos antigos continuam no iPhone da conta anterior.
+  Trocar só a senha, da mesma conta, mantém o calendário e limpa os erros.
+- **Desconectar** apaga a linha e esquece os endereços. Os eventos já enviados ficam
+  no iPhone; uma reconexão volta a enviar as consultas futuras.
+- Duas chaves independentes: `syncEnabled` (enviar os horários ao iPhone) e
+  `checkAvailability` (ler o iCloud antes de oferecer horário). Desligar
+  `checkAvailability` faz o agente oferecer horário sem conferir o iPhone.
+
+### Como o evento é gravado
+
+- Endereço fixo: `{calendarUrl}fechai-<appointmentId>.ics` (`eventUrl()`), UID
+  `fechai-<id>@fechai`. Uma consulta, um arquivo: não há duplicata.
+- Envio (`pushEventToIcloud`): `PUT` com `If-None-Match: *`, para não sobrescrever um
+  evento que a pessoa editou no iPhone. **412 = o evento já existe** (a varredura
+  chegou antes): é tratado como sucesso e um segundo `PUT` grava os dados atuais.
+  Idempotente.
+- Remarcação (`updateIcloudEvent`): `PUT` no mesmo endereço, sem `If-None-Match`. Se o
+  evento foi apagado no iPhone, o `PUT` recria.
+- Cancelamento (`deleteIcloudEvent`): ignora `icloudEnabled`, como Clinicorp e Google.
+  2xx e 404 contam como removido, e o endereço é esquecido.
+- Conteúdo: SUMMARY com paciente e procedimento (prefixo `[TESTE fechai]` em conta de
+  teste), DESCRIPTION com procedimento, WhatsApp e observações, LOCATION com
+  `ScheduleConfig.location`. Lead de teste não leva telefone.
+- Fuso: `DTSTART;TZID=<cfg.timezone>` com um `VTIMEZONE` de período único, cujo
+  deslocamento sai de `zoneOffsetMinutes()` em `time.ts`. Consulta que atravessa a
+  troca de horário de verão grava o `DTEND` em UTC (limite conhecido).
+- Consulta no passado nunca é enviada, nem na marcação nem na varredura.
+- Falha de envio na marcação: a consulta continua marcada e a varredura tenta depois.
+- Remarcação que falha: o endereço antigo é esquecido e a varredura envia o horário
+  novo. Falha temporária espera 2 min antes da próxima tentativa.
+- Remarcação com envio desligado apaga o evento do horário antigo, para não sobrar
+  bloqueio no iPhone.
+- Clinicorp recusou o horário por conflito depois de o iCloud já ter recebido o
+  evento: `processClinicorpSync` apaga o evento do iPhone também.
+
+### Disponibilidade: o agente não oferece horário ocupado no iPhone
+
+- `listIcloudBusyBlocks(tenantId, dia, tz, ignoreUid?)` lê, por dia local, o calendário
+  de gravação e os de "considerar ocupado" (REPORT `time-range`). **Sem cache**: horário
+  oferecido com leitura velha vira consulta duplicada.
+- Recorrência (RRULE, EXDATE, RECURRENCE-ID) é expandida do nosso lado. Dia inteiro
+  bloqueia o dia local. `TRANSP:TRANSPARENT` (livre) e `STATUS:CANCELLED` não bloqueiam.
+  Encostar não é conflito, a mesma regra de `hasConflict`.
+- Evento `fechai-<id>` de consulta que não está `scheduled` na conta **não bloqueia**
+  (é o que sobrou de um cancelamento). Se o banco falhar nessa conferência, a
+  disponibilidade vira desconhecida (`null`).
+- **Falha de leitura é `null`, nunca agenda vazia**: 5xx, timeout, rede, XML
+  ilegível, senha revogada (`authFailedAt` para sem nem chamar a Apple). `null` em
+  `hasIcloudConflict` faz `hasConflictAnywhere` e `listFreeSlots` lançarem
+  `AvailabilityUnavailableError`, e o agente não oferece nem confirma horário, igual
+  ao Clinicorp.
+- `hasConflictAnywhere` e `listFreeSlots` consultam a nossa base, o Clinicorp e o
+  iCloud em paralelo. Remarcar ignora o próprio `fechai-<id>` (`ignoreUid`).
+- Limite conhecido: o CalDAV não recusa conflito no servidor, então duas marcações
+  simultâneas podem passar ao mesmo tempo. O risco aceito é pequeno e não tem
+  solução na v1.
+
+### Varredura do worker
+
+Fila `icloud-calendar`, a cada `ICLOUD_SCAN_EVERY_SECONDS` (detalhes em
+`workers/follow-up-worker/README.md`). Tudo o que ela faz nunca lança.
+
+- Conta elegível: `syncEnabled`, calendário escolhido, sem `authFailedAt`, sem
+  `connectionError`, tenant ativo com `icloudEnabled`.
+- Ordem: primeiro remove os eventos de consultas **canceladas** que ainda têm
+  endereço gravado (`removeLeftovers`); depois envia as **futuras** sem evento.
+- Envio: 10 por conta e 50 por rodada, da mais próxima para a mais distante. Consulta
+  criada há menos de 2 min fica de fora (o envio da marcação ainda pode estar em curso).
+  Relê a consulta antes de gravar; o endereço só é ligado se `startsAt` e `endsAt`
+  continuam os mesmos. Cancelou no meio: apaga o evento recém-criado. Remarcou no
+  meio: deixa para a próxima rodada.
+- Falha temporária (5xx, timeout): `icloudSyncAttempts` sobe e a próxima tentativa
+  espera 2, 4, 8… min, até 60, sem limite de tentativas.
+- 401: grava `authFailedAt` e a conta para. 403/404 do calendário: grava
+  `connectionError` ("não existe mais ou é só leitura") e para até a pessoa escolher de novo.
+- Saúde (`scanIcloudHealth`): a cada 30 min por conta, no máximo 20 contas por rodada.
+  Um PROPFIND Depth 0 com `getctag` confere a conexão. 401: `authFailedAt` e
+  `connectionError`. 404/403: `connectionError`. 207: limpa só `connectionError`.
+  5xx e timeout: não grava nada. `lastError` é de envio e leitura e some só com o
+  próximo envio que deu certo.
+- Log só com contagens: `[icloud] contas= enviados= removidos= falhas= senha_revogada= calendario_sumiu= checadas=`.
+- Na tela, o `IcloudCalendarCard` mostra o `lastError`/`connectionError` com "há X".
+  Quando a senha foi revogada, avisa que o agente parou de oferecer horários.
+
+### Eventos do iPhone na /agenda (só leitura)
+
+- `listIcloudAgenda(tenantId, from, to, tz, { fresh })` devolve `off`, `ok` (itens,
+  `skipped`, `truncated`, `fetchedAt`) ou `error`. Nunca lança e **não grava
+  `lastError`**: ler para desenhar a tela não é envio.
+- Cada item traz uid, início, fim, dia inteiro, **só o título**, nome do calendário e
+  o marcador de livre. DESCRIPTION e LOCATION não saem do módulo. Não é `Appointment`:
+  sem relatório, ação ou override de lembrete. **Evento criado direto no iPhone não
+  recebe lembrete.**
+- Dedupe (`placeIcloudItems`): o evento `fechai-<id>` de uma consulta marcada, ou
+  remarcada no mês, não repete na lista, porque já aparece como nosso compromisso.
+  `fechai-*` sem consulta marcada aparece como evento comum.
+- Consulta cujo evento está em outro horário no iPhone ganha o aviso "horário alterado
+  no iPhone". O fechai segue como fonte da verdade: nada volta para o iPhone nem para a
+  consulta.
+- Cache no `globalThis`: 30 min para leitura ok, 10 s para erro, 300 entradas, e
+  pedidos simultâneos compartilham a mesma promessa. Chave: tenant, hash dos
+  calendários, período e fuso. Qualquer escrita da conta limpa o cache dela.
+- `fresh` (pulso ao vivo, `agenda-pulse.ts`): lê só o `getctag` de cada calendário e
+  reaproveita os eventos quando nenhum mudou. Assim o pulso a cada 15 s não relê o mês.
+- A versão do pulso só inclui o iCloud quando `status !== "off"`. Conta sem iCloud tem
+  exatamente a mesma versão de antes.
+- Teto de 500 ocorrências por mês (`truncated`). Linha ilegível vai para `skipped`, e a
+  tela avisa. Falha de leitura vira `Alert` "Eventos do Calendário da Apple não
+  carregaram", nunca calendário vazio em silêncio.
+
+### Schema, configuração e testes
+
+- Schema aditivo, sem índice único novo: `CalendarFeatures.icloudEnabled`,
+  `IcloudCalendarIntegration` (`tenantId @unique`) e, em `Appointment`,
+  `icloudEventUrl`, `icloudSyncAttempts` e `icloudNextAttemptAt`. Depois de mudar:
+  `db push` + `generate` nos dois processos (web e worker).
+- Dependências novas: `ical.js` e `fast-xml-parser`.
+- Variável: `ICLOUD_SCAN_EVERY_SECONDS` (worker; padrão 60, mínimo 15).
+- Testes: `tests/icloud-*.test.ts` e `tests/fixtures/icloud/` (207, redirect de
+  partição, 401, 412, 404, timeout, `.ics` com recorrência, dia inteiro, livre,
+  cancelado e TZID).
 
 ## Clinicorp
 

@@ -43,7 +43,7 @@ export function CalendarMonth({
   /** Quantos compromissos em cada dia, indexado por "AAAA-MM-DD". */
   countByDay: Map<string, number>;
   hrefFor: (params: { year?: number; month?: number; day?: number | null }) => string;
-  /** A agenda do Clinicorp ainda está chegando: as contagens podem subir. */
+  /** As agendas externas (Clinicorp, Calendário da Apple) ainda estão chegando: as contagens podem subir. */
   busy?: boolean;
 }) {
   const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
@@ -69,7 +69,7 @@ export function CalendarMonth({
           <h2 className="font-display text-lg font-semibold capitalize text-white">{monthLabel}</h2>
           {busy && (
             <span className="font-mono text-micro uppercase tracking-wider text-white/45 motion-safe:animate-pulse">
-              buscando Clinicorp…
+              buscando agendas externas…
             </span>
           )}
         </div>

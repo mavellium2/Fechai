@@ -113,7 +113,7 @@ const REVERTIBLE_MODELS: Record<string, RevertibleModel> = {
   },
   CalendarFeatures: {
     delegate: "calendarFeatures",
-    fields: ["googleEnabled", "clinicorpEnabled"],
+    fields: ["googleEnabled", "clinicorpEnabled", "icloudEnabled"],
     restorable: false,
     label: "integração de agenda",
     gender: "f",

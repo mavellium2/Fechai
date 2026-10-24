@@ -8,6 +8,10 @@
 - ClinicorpReminder: controle legado por tenant/id/horário.
 - ReminderDispatch: tenant/origem/horário/antecedência; queued/blocked/sending/sent/manual/unknown/skipped; token de posse.
 - ReminderReceipt: tenant/provedor/messageId/status; avanço monotônico.
+- IcloudCalendarIntegration: 1 por tenant; appleId/appPassword cifrados; calendarUrl + busyCalendarUrls; syncEnabled (envio) e checkAvailability (leitura) separados; authFailedAt para tudo; lastError = envio/leitura, connectionError = saúde.
+- Appointment (iCloud): icloudEventUrl null = não enviado; icloudSyncAttempts/icloudNextAttemptAt = recuo 2–60 min.
+- IcloudAgendaItem: só leitura, só título (sem DESCRIPTION/LOCATION); não é Appointment.
+- CalendarFeatures.icloudEnabled: liga o espelho; cancelamento ignora a flag.
 
 QR: clinicorpQrEnabled só true com QrRiskAcceptance atual e íntegro. Prova:
 version, termsText, responsibleName, acceptedByUserId, acceptedAt; nome 3–120

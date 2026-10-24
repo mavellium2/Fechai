@@ -20,10 +20,12 @@ import { ensureTenantWidgetDeployed } from "@/lib/widget/deploy";
 import { isGoogleCalendarConfigured } from "@/modules/scheduling/google";
 import { getCalendarFeatures } from "@/modules/scheduling/features";
 import { getClinicorpStatus, listClinicorpBusinesses } from "@/modules/scheduling/clinicorp";
+import { getIcloudStatus, listIcloudCalendars } from "@/modules/scheduling/icloud";
 import { isEncryptionConfigured } from "@/lib/crypto";
 import { CalendarFeatureToggles } from "./CalendarFeatureToggles";
 import { GoogleCalendarCard, type GoogleState } from "./GoogleCalendarCard";
 import { ClinicorpCard, type ClinicorpState } from "./ClinicorpCard";
+import { IcloudCalendarCard, type IcloudState } from "./IcloudCalendarCard";
 import { listBlockedNumbers } from "@/modules/whatsapp/blocklist";
 import { WhatsappConnect } from "./WhatsappConnect";
 import { MetaWhatsappConnect } from "./MetaWhatsappConnect";
@@ -97,12 +99,13 @@ export default async function IntegracoesPage({
           getCalendarFeatures(tenantId),
           prisma.calendarIntegration.findUnique({ where: { tenantId } }),
           getClinicorpStatus(tenantId),
+          getIcloudStatus(tenantId),
         ])
       : null;
 
   const bitrix = tab === "crm" ? await getBitrixStatus(tenantId) : null;
 
-  const [features, googleRow, clinicorpRow] = calendars ?? [null, null, null];
+  const [features, googleRow, clinicorpRow, icloudRow] = calendars ?? [null, null, null, null];
 
   const googleState: GoogleState | null = !features?.googleEnabled
     ? null
@@ -137,6 +140,31 @@ export default async function IntegracoesPage({
           businesses: await listClinicorpBusinesses(tenantId),
         }
       : { connected: false };
+
+  // A lista de calendários é uma chamada de rede ao iCloud — só com conexão de pé
+  // e senha ainda válida (com a senha revogada nem vale chamar a Apple).
+  const icloudState: IcloudState | null = !features?.icloudEnabled
+    ? null
+    : icloudRow
+      ? await (async (): Promise<IcloudState> => {
+          const authFailed = Boolean(icloudRow.authFailedAt);
+          const list = authFailed ? null : await listIcloudCalendars(tenantId);
+          return {
+            connected: true,
+            encryptionReady: isEncryptionConfigured(),
+            appleIdHint: icloudRow.appleIdHint,
+            calendarUrl: icloudRow.calendarUrl,
+            busyCalendarUrls: icloudRow.busyCalendarUrls,
+            calendars: list?.ok ? list.data.map((c) => ({ url: c.url, name: c.name })) : null,
+            syncEnabled: icloudRow.syncEnabled,
+            checkAvailability: icloudRow.checkAvailability,
+            authFailed,
+            lastError: icloudRow.lastError,
+            lastErrorWhen: icloudRow.lastErrorAt ? relativeTime(icloudRow.lastErrorAt) : null,
+            connectionError: icloudRow.connectionError,
+          };
+        })()
+      : { connected: false, encryptionReady: isEncryptionConfigured() };
 
   // Uma linha por conexão: o QR code (Evolution) e a API oficial (Meta) podem
   // estar de pé ao mesmo tempo, cada uma com o seu número.
@@ -244,6 +272,17 @@ export default async function IntegracoesPage({
                   : "Faltam as credenciais do Google no servidor desta instalação.",
               },
               {
+                key: "icloud",
+                name: "Calendário da Apple",
+                description:
+                  "Envia os horários para o Calendário do iPhone e lê o que você já ocupou lá, para o agente não marcar em cima.",
+                enabled: features.icloudEnabled,
+                connected: Boolean(icloudRow),
+                unavailable: isEncryptionConfigured()
+                  ? undefined
+                  : "Falta a chave de criptografia no servidor desta instalação.",
+              },
+              {
                 key: "clinicorp",
                 name: "Clinicorp",
                 description:
@@ -260,6 +299,7 @@ export default async function IntegracoesPage({
             panels={{
               google: googleState ? <GoogleCalendarCard state={googleState} /> : null,
               clinicorp: clinicorpState ? <ClinicorpCard state={clinicorpState} /> : null,
+              icloud: icloudState ? <IcloudCalendarCard state={icloudState} /> : null,
             }}
           />
         </section>

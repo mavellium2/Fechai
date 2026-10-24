@@ -28,7 +28,9 @@ import {
 } from "@/modules/whatsapp/blocklist";
 import { deployTenantWidget, WIDGET_CONFIG_SELECT } from "@/lib/widget/deploy";
 import { uploadToBunny } from "@/lib/bunny";
-import { setCalendarFeature, type CalendarFeatureKey } from "@/modules/scheduling/features";
+import {
+  CALENDAR_FEATURE_FIELDS, getCalendarFeatures, setCalendarFeature, type CalendarFeatureKey,
+} from "@/modules/scheduling/features";
 import { disconnectGoogleCalendar } from "@/modules/scheduling/google";
 import {
   disconnectClinicorp,
@@ -38,6 +40,10 @@ import {
   verifyClinicorpCredentials,
   testClinicorpConnection,
 } from "@/modules/scheduling/clinicorp";
+import {
+  clearIcloudAgendaCache, disconnectIcloud, listIcloudCalendars, moveIcloudEvents, saveIcloudCredentials,
+  testIcloudConnection, verifyIcloudCredentials,
+} from "@/modules/scheduling/icloud";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/crypto";
 import { recordAudit, recordChange } from "@/modules/audit/log";
 
@@ -760,12 +766,12 @@ export async function setCalendarFeatureAction(
 
   const before = await prisma.calendarFeatures.findUnique({
     where: { tenantId },
-    select: { id: true, googleEnabled: true, clinicorpEnabled: true },
+    select: { id: true, googleEnabled: true, clinicorpEnabled: true, icloudEnabled: true },
   });
 
   await setCalendarFeature(tenantId, key, enabled);
 
-  const field = key === "google" ? "googleEnabled" : "clinicorpEnabled";
+  const field = CALENDAR_FEATURE_FIELDS[key];
   const saved = await prisma.calendarFeatures.findUnique({
     where: { tenantId },
     select: { id: true },
@@ -969,4 +975,151 @@ export async function testClinicorpConnectionAction(): Promise<WhatsappControlRe
   revalidatePath("/integracoes");
   revalidatePath("/agenda");
   return result.ok ? { ok: true, info: result.data } : { ok: false, error: result.error };
+}
+
+// --- Calendário da Apple (iCloud) -----------------------------------------
+
+const icloudSchema = z.object({
+  appleId: z.string().trim().toLowerCase().email("Informe o Apple ID (o e-mail da sua conta Apple).").max(200),
+  // A senha de app vem com hífens ("abcd-efgh-ijkl-mnop"), mas quem cola pode
+  // trazer espaços do copiar: aceita os dois jeitos.
+  appPassword: z.string().trim().min(1, "Informe a senha de app.").max(100)
+    .transform((value) => value.replace(/\s+/g, "")),
+});
+
+/**
+ * Conecta a conta ao Calendário da Apple.
+ *
+ * As credenciais só são gravadas depois de o iCloud aceitá-las e devolver os
+ * calendários. Apple ID e senha **nunca** entram no log, na auditoria nem na
+ * resposta. Com um calendário só, ele já fica escolhido; com vários, a pessoa
+ * escolhe qual recebe os horários (e enquanto não escolher, nada é enviado).
+ */
+export async function connectIcloudAction(
+  _prev: WhatsappControlResult | null,
+  formData: FormData,
+): Promise<WhatsappControlResult> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+
+  const { tenantId } = await requireTenant();
+  const parsed = icloudSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
+  }
+
+  if (!(await getCalendarFeatures(tenantId)).icloudEnabled) {
+    return { ok: false, error: "Habilite o Calendário da Apple antes de conectar." };
+  }
+  if (!isEncryptionConfigured()) {
+    return {
+      ok: false,
+      error: "Integração indisponível nesta instalação — falta a chave de criptografia no servidor.",
+    };
+  }
+
+  const check = await verifyIcloudCredentials(parsed.data.appleId, parsed.data.appPassword);
+  if (!check.ok) return { ok: false, error: check.error };
+
+  const only = check.data.calendars.length === 1 ? check.data.calendars[0] : null;
+  await saveIcloudCredentials(tenantId, { ...parsed.data, ...check.data }, {
+    calendarUrl: only?.url ?? null, calendarName: only?.name ?? null,
+  });
+
+  await recordAudit({
+    event: "integration.saved",
+    target: { type: "IcloudCalendarIntegration", id: tenantId, label: "Calendário da Apple" },
+    after: { calendarios: check.data.calendars.length, calendarioEscolhido: Boolean(only) },
+  });
+
+  revalidatePath("/integracoes");
+  revalidatePath("/agenda");
+  return { ok: true, info: only ? "Calendário da Apple conectado." : "Conectado. Escolha o calendário que recebe os horários." };
+}
+
+/**
+ * Qual calendário recebe os horários e quais outros são lidos só para saber o
+ * que está ocupado. O formulário manda URLs, mas quem decide o que é válido é o
+ * servidor: só entra endereço que o próprio iCloud acabou de listar para esta
+ * conta — a URL vinda do navegador nunca é confiada.
+ */
+export async function saveIcloudSettingsAction(
+  _prev: WhatsappControlResult | null,
+  formData: FormData,
+): Promise<WhatsappControlResult> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+
+  const { tenantId } = await requireTenant();
+  const calendarUrl = String(formData.get("calendarUrl") ?? "").trim();
+  if (!calendarUrl) return { ok: false, error: "Escolha o calendário que recebe os horários." };
+  const busy = formData.getAll("busyCalendarUrls").map(String);
+
+  const [list, current] = await Promise.all([
+    listIcloudCalendars(tenantId),
+    prisma.icloudCalendarIntegration.findUnique({ where: { tenantId }, select: { calendarUrl: true } }),
+  ]);
+  if (!current) return { ok: false, error: "Calendário da Apple não está conectado." };
+  if (!list.ok) return { ok: false, error: list.error };
+
+  const chosen = list.data.find((c) => c.url === calendarUrl);
+  if (!chosen) return { ok: false, error: "Esse calendário não existe mais na sua conta. Atualize a página e escolha de novo." };
+  const known = new Set(list.data.map((c) => c.url));
+  const busyUrls = [...new Set(busy)].filter((url) => known.has(url) && url !== chosen.url);
+
+  await prisma.icloudCalendarIntegration.update({
+    where: { tenantId },
+    data: {
+      calendarUrl: chosen.url, calendarName: chosen.name, busyCalendarUrls: busyUrls,
+      // Escolher de novo é a saída do "calendário sumiu": a varredura volta a tentar.
+      connectionError: null, connectionErrorAt: null,
+    },
+  });
+  clearIcloudAgendaCache(tenantId);
+  // Os horários futuros já enviados saem do calendário antigo e vão para o novo.
+  if (current.calendarUrl && current.calendarUrl !== chosen.url) await moveIcloudEvents(tenantId);
+
+  revalidatePath("/integracoes");
+  revalidatePath("/agenda");
+  return { ok: true, info: "Preferências salvas." };
+}
+
+/** Enviar os horários ao iPhone e ler o que já está ocupado lá são dois botões separados. */
+export async function setIcloudToggle(
+  field: "syncEnabled" | "checkAvailability",
+  enabled: boolean,
+): Promise<WhatsappControlResult> {
+  if (field !== "syncEnabled" && field !== "checkAvailability") return { ok: false, error: "Opção inválida." };
+  const { tenantId } = await requireTenant();
+  const { count } = await prisma.icloudCalendarIntegration.updateMany({
+    where: { tenantId },
+    data: { [field]: enabled },
+  });
+  if (count === 0) return { ok: false, error: "Calendário da Apple não está conectado." };
+  clearIcloudAgendaCache(tenantId);
+  revalidatePath("/integracoes");
+  revalidatePath("/agenda");
+  return { ok: true };
+}
+
+export async function testIcloudConnectionAction(): Promise<WhatsappControlResult> {
+  const { tenantId } = await requireTenant();
+  const result = await testIcloudConnection(tenantId);
+  revalidatePath("/integracoes");
+  revalidatePath("/agenda");
+  return result.ok ? { ok: true, info: result.data } : { ok: false, error: result.error };
+}
+
+export async function disconnectIcloudAction(): Promise<WhatsappControlResult> {
+  const { tenantId } = await requireTenant();
+  await disconnectIcloud(tenantId);
+
+  await recordAudit({
+    event: "integration.removed",
+    target: { type: "IcloudCalendarIntegration", id: tenantId, label: "Calendário da Apple" },
+  });
+
+  revalidatePath("/integracoes");
+  revalidatePath("/agenda");
+  return { ok: true, info: "Calendário da Apple desconectado." };
 }

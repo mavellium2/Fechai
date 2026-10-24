@@ -13,21 +13,29 @@ import { prisma } from "@/lib/prisma";
  * quem desliga por uma semana espera reencontrar tudo ao religar.
  */
 
-export type CalendarFeatureKey = "google" | "clinicorp";
+export type CalendarFeatureKey = "google" | "clinicorp" | "icloud";
 
 export type CalendarFeatures = {
   googleEnabled: boolean;
   clinicorpEnabled: boolean;
+  icloudEnabled: boolean;
 };
 
+/** Coluna de cada calendário. Uma chave nova entra aqui e no tipo acima — mais nada. */
+export const CALENDAR_FEATURE_FIELDS = {
+  google: "googleEnabled",
+  clinicorp: "clinicorpEnabled",
+  icloud: "icloudEnabled",
+} as const satisfies Record<CalendarFeatureKey, keyof CalendarFeatures>;
+
 /** Nada habilitado — o padrão de toda conta que nunca abriu a aba. */
-const NONE: CalendarFeatures = { googleEnabled: false, clinicorpEnabled: false };
+const NONE: CalendarFeatures = { googleEnabled: false, clinicorpEnabled: false, icloudEnabled: false };
 
 export async function getCalendarFeatures(tenantId: string, onUnavailable?: () => void): Promise<CalendarFeatures> {
   const row = await prisma.calendarFeatures
     .findUnique({
       where: { tenantId },
-      select: { googleEnabled: true, clinicorpEnabled: true },
+      select: { googleEnabled: true, clinicorpEnabled: true, icloudEnabled: true },
     })
     .catch(() => { onUnavailable?.(); return null; });
   return row ?? NONE;
@@ -38,7 +46,7 @@ export async function setCalendarFeature(
   key: CalendarFeatureKey,
   enabled: boolean,
 ): Promise<void> {
-  const field = key === "google" ? "googleEnabled" : "clinicorpEnabled";
+  const field = CALENDAR_FEATURE_FIELDS[key];
   await prisma.calendarFeatures.upsert({
     where: { tenantId },
     create: { tenantId, ...NONE, [field]: enabled },

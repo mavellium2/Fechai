@@ -10,6 +10,10 @@ const db = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("@/modules/scheduling/google", () => ({ pushEventToGoogle: vi.fn(async () => null) }));
+vi.mock("@/modules/scheduling/icloud", () => ({
+  pushEventToIcloud: vi.fn(async () => ({ status: "skipped" })), updateIcloudEvent: vi.fn(async () => ({ status: "skipped" })),
+  deleteIcloudEvent: vi.fn(async () => true), listIcloudBusyBlocks: vi.fn(async () => []), hasIcloudConflict: vi.fn(async () => false),
+}));
 // Estes testes exercitam o contrato HTTP; a fila durável tem sua suíte própria.
 vi.mock("@/modules/scheduling/clinicorp-sync", () => ({
   syncAppointmentToClinicorp: async (tenantId: string, _id: string, input: unknown) => {

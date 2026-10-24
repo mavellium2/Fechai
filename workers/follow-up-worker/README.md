@@ -26,6 +26,19 @@ antes de criar. Também recupera consultas futuras que ficaram sem envio antes
 da fila existir. Não manda mensagens ao paciente. Lembretes locais aguardam o
 envio concluir. Exige `db push` + client gerado nos processos web e worker.
 
+A fila `icloud-calendar` (Calendário da Apple) roda a cada `ICLOUD_SCAN_EVERY_SECONDS`
+(padrão 60, mínimo 15), com concorrência global 1, e faz duas coisas em ordem:
+`scanIcloudSync()` (`src/modules/scheduling/icloud-sync.ts`) primeiro apaga o evento
+de consulta **cancelada** que sobrou no iPhone (o DELETE falhou na hora), e depois
+envia ao iCloud as consultas **futuras** sem evento — inclusive as que já existiam
+quando a conta ligou o iCloud. Consulta criada há menos de 2 min fica de fora, para
+não disputar com o envio na hora da marcação. Teto de 10 por conta e 50 por rodada;
+recuo de 2 a 60 min entre tentativas, sem limite de tentativas. Depois vem
+`scanIcloudHealth()` (`icloud-health.ts`), que confere a senha de app e o calendário
+a cada 30 min por conta (máximo de 20 contas por rodada). Os lembretes **não esperam**
+o iCloud. O log só tem contagens, nunca credencial:
+`[icloud] contas= enviados= removidos= falhas= senha_revogada= calendario_sumiu= checadas=`.
+
 A fila `bitrix-crm-sync` roda a cada 30 s, com concorrência global 1 e fila durável
 em `BitrixSyncJob`. Envia contatos, leads/negócios e reuniões de cada conta ao seu
 portal Bitrix24. Não manda mensagens ao paciente nem participa da reserva local.
@@ -200,7 +213,8 @@ npm run worker       # tsx workers/follow-up-worker/index.ts
 ```
 
 Env: `REDIS_URL`, `FOLLOWUP_SCAN_EVERY_MINUTES` (intervalo da varredura, padrão 15),
-`CLINICORP_REMINDER_SCAN_EVERY_MINUTES` (lembretes do Clinicorp, padrão 5).
+`CLINICORP_REMINDER_SCAN_EVERY_MINUTES` (lembretes do Clinicorp, padrão 5),
+`ICLOUD_SCAN_EVERY_SECONDS` (envio e saúde do Calendário da Apple, padrão 60).
 
 ## Follow-up em esteira (`scan.ts`)
 
