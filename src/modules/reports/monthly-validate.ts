@@ -2,6 +2,8 @@ import { normalizeLabel } from "./monthly-config";
 import type { MonthlyReport } from "./monthly";
 import type { MonthlyReportData, Split } from "./monthly-data";
 import { allowedNumbers, hasFullDate, unknownNumbers } from "./monthly-text-guard";
+import { SURVEY_TOPIC_KEYS } from "@/modules/satisfaction/categories";
+import { roundAverage, TOP_TOPICS } from "@/modules/satisfaction/summary";
 
 /*
  * Validador do relatório mensal v2. Roda ao salvar, antes da redação da IA e
@@ -63,6 +65,21 @@ export function validateMonthlyReport(data: MonthlyReportData, texts: Texts): Mo
   if (reasons !== contacts - a.scheduledContacts) {
     add("blocking", "reasons_sum", "Motivo de não agendar", `Os motivos somam ${reasons}, mas ${contacts - a.scheduledContacts} contatos não agendaram.`, "Reimporte os dados; se persistir, avise o desenvolvimento.");
   }
+  const sat = data.satisfaction;
+  if (sat) {
+    const counted = sat.distribution.reduce((n, v) => n + v, 0);
+    const weighted = sat.distribution.reduce((n, v, i) => n + v * (i + 1), 0);
+    if (counted !== sat.answered) {
+      add("blocking", "satisfaction_sum", "Satisfação", `A distribuição das notas soma ${counted}, mas há ${sat.answered} respostas.`, "Reimporte os dados; se persistir, avise o desenvolvimento.");
+    } else if (sat.average.value !== roundAverage(weighted, sat.answered)) {
+      add("blocking", "satisfaction_average", "Satisfação", "A nota média não bate com a distribuição das notas.", "Reimporte os dados; se persistir, avise o desenvolvimento.");
+    }
+    // O top 3 só pode conter chaves do conjunto fechado, contadas e dentro do limite de respostas.
+    const top = sat.improvementTopics;
+    if (top.length > TOP_TOPICS || top.some((t, i) => !SURVEY_TOPIC_KEYS.includes(t.key) || t.count < 1 || t.count > sat.answered || (i > 0 && t.count > top[i - 1].count))) {
+      add("blocking", "satisfaction_topics", "Pontos de melhoria", "Os pontos de melhoria citados não vêm das chaves contadas nas respostas.", "Reimporte os dados; se persistir, avise o desenvolvimento.");
+    }
+  }
   const decisionMaker = texts.decisionMaker.trim(), operational = (texts.operationalContact ?? "").trim();
   if (!decisionMaker) {
     add("blocking", "decision_maker", "Decisor", "Decisor não informado.", "Informe o dono ou sócio que recebe o relatório.");
@@ -119,6 +136,9 @@ export function validateMonthlyReport(data: MonthlyReportData, texts: Texts): Mo
   }
   if ((c.unverified.total.value ?? 0) > 0) {
     add("warning", "attendance", "Compareceram", `${c.unverified.total.value} avaliação(ões) com data passada e sem comparecimento confirmado.`, "Mapeie os status do Clinicorp ou marque o comparecimento na agenda.");
+  }
+  if (sat && sat.unclassified > 0) {
+    add("warning", "satisfaction_topics_pending", "Pontos de melhoria", `${sat.unclassified} comentário(s) da pesquisa de satisfação ainda sem motivo classificado.`, "A classificação roda em segundo plano; confira o motivo na visão de satisfação ou aguarde antes de fechar.");
   }
   if (splits.some(([, split]) => split.unclassified > 0)) {
     add("warning", "arrival", "Expediente", "Há registros sem horário de chegada do contato, fora da quebra por expediente.", "Confira os registros sem classificação.");

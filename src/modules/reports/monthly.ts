@@ -24,6 +24,7 @@ import { CASE_AUDIOS_MAX, casePeriod, parseCaseFacts, type CaseFacts, type CaseP
 import { parsePreviousActions, reviewPreviousActions, type PreviousAction } from "./monthly-previous-actions";
 import { parseAgentChanges, type ReportedAgentChange } from "./monthly-agent-changes";
 import { buildMonthlyReportData, monthlyComparison, type MonthlyReportData } from "./monthly-data";
+import { loadMonthlySurveys } from "./monthly-satisfaction";
 import { getServiceArea } from "@/modules/lead-insights/service-area-store";
 import type { ServiceArea } from "@/modules/lead-insights/service-area";
 
@@ -148,6 +149,13 @@ export type MonthlyAppointment = { id: string; agentId?: string | null; conversa
   clinicorpAppointmentId: string | null };
 export type MonthlyEvent = { id?: string; conversationId: string; kind: string; procedure: string | null; createdAt: Date; messageId?: string };
 export type MonthlyGap = { id?: string; agentId: string | null; firstAskedAt: Date; answeredAt: Date };
+/**
+ * Pesquisa de satisfação que o contato recebeu (e, se respondeu, a nota). Só o
+ * que o relatório conta: nada do texto do comentário — `hasComment` é um
+ * booleano calculado na leitura.
+ */
+export type MonthlySurvey = { id: string; agentId: string | null; conversationId: string; sentAt: Date; ratedAt: Date | null;
+  rating: number | null; topics: string[]; hasComment: boolean; classified: boolean };
 
 function addSplit(split: SplitCount, at: Date | null, config: MonthlyAssumptions) {
   const outside = at ? outsideHumanHours(at, config) : null;
@@ -167,6 +175,8 @@ export type MonthlyInput = {
   start: Date; end: Date; now: Date; trackingSince: Date; accountCreatedAt?: Date; config: MonthlyAssumptions;
   conversations: MonthlyConversation[]; appointments: MonthlyAppointment[]; events: MonthlyEvent[];
   gaps?: MonthlyGap[];
+  /** Pesquisa de satisfação do mês. Ausente = sem leitura (testes, fixtures antigas): o bloco some. */
+  surveys?: MonthlySurvey[];
   /** Quedas registradas do WhatsApp e desde quando são medidas. Ausente = sem leitura (testes, fixtures antigas). */
   uptime?: { trackedSince: Date | null; incidents: UptimeIncident[] };
   clinicorp: ClinicorpReportData;
@@ -429,7 +439,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
   const previousWindow = monthlyWindow(window.previousMonth, previousAssumptions.timezone);
   const start = new Date(Math.min(window.start.getTime(), previousWindow.start.getTime()));
   const end = new Date(Math.max(window.end.getTime(), previousWindow.end.getTime()));
-  const [rawConversations, appointments, events, clinicorp, gaps, lead, incidents, area] = await Promise.all([
+  const [rawConversations, appointments, events, clinicorp, gaps, lead, incidents, area, surveys] = await Promise.all([
     prisma.conversation.findMany({ where: { tenantId, isTest: false, lead: { isTest: false }, OR: [
       { messages: { some: { createdAt: { gte: start, lt: end } } } },
       { appointments: { some: { OR: [{ startsAt: { gte: start, lt: end } }, { createdAt: { gte: start, lt: end } }] } } },
@@ -461,6 +471,11 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
       select: { provider: true, startedAt: true, endedAt: true }, orderBy: { startedAt: "asc" } }))
       .catch((error) => { console.error("[monthly] quedas do WhatsApp indisponíveis", error); return undefined; }),
     getServiceArea(tenantId).catch(() => null),
+    // Pesquisa de satisfação do mês do relatório (envio ou resposta nele). Também
+    // complemento: sem a leitura o bloco some. O texto do comentário vira só um
+    // booleano aqui, no limite da consulta — nunca segue adiante.
+    loadMonthlySurveys(tenantId, window.start, window.end)
+      .catch((error) => { console.error("[monthly] pesquisa de satisfação indisponível", error); return undefined; }),
   ]);
   const uptime = incidents ? { trackedSince: tenant.uptimeTrackedSince ?? null, incidents } : undefined;
   const conversationIds = rawConversations.map((c) => c.id);
@@ -490,7 +505,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
       audio: audioUrl || audioSeconds != null || unheardIds.has(m.id) ? { seconds: audioSeconds, heard: !unheardIds.has(m.id) } : null })) }));
   const now = new Date();
   const trackingSince = new Date(Math.max(tenant.createdAt.getTime(), tenant.reportTrackingStartedAt.getTime()));
-  const { metrics: automaticCurrent, evidence, data } = evaluateMonthlyMetrics({ start: window.start, end: window.end, now, trackingSince, accountCreatedAt: tenant.createdAt, config: assumptions, conversations, appointments, events, gaps, uptime, clinicorp, area });
+  const { metrics: automaticCurrent, evidence, data } = evaluateMonthlyMetrics({ start: window.start, end: window.end, now, trackingSince, accountCreatedAt: tenant.createdAt, config: assumptions, conversations, appointments, events, gaps, surveys, uptime, clinicorp, area });
   if (lead) { evidence.leads = lead.leads; evidence.leadPopulation = "attended"; }
   capEvidence(evidence);
   const previousSnapshot = previousSaved?.status === "ready" && previousSaved.snapshot ? previousSaved.snapshot as unknown as MonthlyReport : null;

@@ -10,6 +10,7 @@ import type { MonthlyAppointment, MonthlyConversation, MonthlyInput } from "./mo
 import type { Bucket, CohortStatus, MonthlyEvidence } from "./monthly-evidence";
 import type { MonthlyTimeMetrics } from "./monthly-time";
 import type { AvailabilityIncident, AvailabilityMetrics } from "./monthly-operations";
+import { buildSatisfaction } from "./monthly-satisfaction";
 
 /*
  * Relatório mensal v2: o contrato único de números.
@@ -64,6 +65,28 @@ export type EstimatedReturn = {
   /** Retorno líquido ÷ investimento ("5,2x"). */
   multiple: number;
 };
+/**
+ * Satisfação dos contatos no mês (pesquisa pós-conversa). Só números e rótulos
+ * do conjunto fechado de motivos: o texto dos comentários nunca vem para cá.
+ * Opcional: snapshot anterior à pesquisa, ou mês sem envio, não tem o bloco.
+ */
+export type MonthlySatisfaction = {
+  /** Pesquisas que os contatos receberam no mês. */
+  sent: number;
+  /** Respostas com nota, pela data da nota. */
+  answered: number;
+  responseRatePercent: number | null;
+  /** Média de uma casa; "amostra pequena" na nota quando há menos de 5 respostas. */
+  average: Metric;
+  /** Índice 0 = nota 1 … 4 = nota 5. Soma = `answered`. */
+  distribution: [number, number, number, number, number];
+  /** Até 3 motivos de melhoria mais citados, só chaves do conjunto fechado. */
+  improvementTopics: { key: string; label: string; count: number }[];
+  /** Comentários sem motivo classificado: "sem classificação", à parte. */
+  unclassified: number;
+  withComment: number;
+  smallSample: boolean;
+};
 export type MonthlyComparison = {
   contacts: number; scheduled: number; agentFirstResponseSeconds: number | null;
   unanswered: number; noShowRatePercent: number | null;
@@ -109,6 +132,8 @@ export type MonthlyReportData = {
     reasons: { key: string; label: string; contacts: number }[];
     suggestions: string[];
   };
+  /** Pesquisa de satisfação (nota dada pelos contatos). Opcional e congelada no snapshot. */
+  satisfaction?: MonthlySatisfaction;
   /** Quedas da conexão no mês, como o monitor registrou (`whatsapp/incidents.ts`). */
   incidents: AvailabilityIncident[];
   /** Só o que os dados comprovam. Vazio = "nenhum incidente relevante". */
@@ -401,6 +426,7 @@ export function buildMonthlyReportData(input: MonthlyInput, time: MonthlyTimeMet
   const contexts = summarizeContactContexts({ start, end, conversations, events: input.events,
     bookings: evidence.cohort.filter((a) => !a.earlier).map((a) => ({ id: a.appointmentId, conversationId: a.conversationId, createdAt: new Date(a.createdAt) })) });
   evidence.contexts = contexts.records;
+  const satisfaction = buildSatisfaction(input, evidence);
   return {
     version: 2,
     meta: { timezone: config.timezone, hoursConfigured, secondsPerMessage, secondsPerMessageDefault: config.secondsPerMessage == null },
@@ -457,6 +483,7 @@ export function buildMonthlyReportData(input: MonthlyInput, time: MonthlyTimeMet
       outOfAreaScheduled: area ? metric(outScheduled, cityCoverage, "insights+serviceArea") : metric(null, "unavailable", "serviceArea"),
       firstDoubts, reasons: reasonList, suggestions: [],
     },
+    ...(satisfaction ? { satisfaction } : {}),
     incidents,
     problems,
     estimatedReturn, financialSummary, estimatedReturnMissing: financialEnabled(config) ? missing : [],

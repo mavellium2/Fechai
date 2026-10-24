@@ -151,6 +151,21 @@ interno do WhatsApp escolhido em `/perguntas`. Nenhum aviso leva nome ou
 telefone de paciente. A retomada do contato com a resposta **não** passa pelo
 worker: é a pedido de quem aprova, na action (`resume.ts`).
 
+## Pesquisa de satisfação (`satisfaction.ts`)
+
+Fila `satisfaction-surveys`, a cada 5 min (`SATISFACTION_SCAN_EVERY_MINUTES`),
+concorrência global 1: duas varreduras ao mesmo tempo poderiam perguntar a nota
+duas vezes. Para cada conta com a pesquisa ligada, olha as conversas com mensagem
+do contato nas últimas 24h e pergunta a `evaluateSurvey` (regra pura em
+`modules/satisfaction/eligibility.ts`): `send` → `sendSurvey` (claim antes do POST,
+nunca repete), `expire` → grava `expired` sem enviar. Até 20 envios por conta por
+volta. Também fecha o que ficou aberto (sem nota em 24h → `no_reply`; nota sem
+comentário em 24h → `completed`; `sending` há 10 min → `unknown`) e classifica os
+comentários novos (IA em segundo plano, só chaves). **Follow-up tem prioridade**: a
+pesquisa não vai a quem tem esteira em andamento, e `nextFollowUp` devolve `null`
+quando o contato recebeu a pesquisa depois da última mensagem dele
+(`lastSurveySentAt`). Detalhes em `src/modules/satisfaction/README.md`.
+
 ## Lembretes do Clinicorp (`clinicorp-reminders.ts`)
 
 O público escolhido na conta (`reminderAudience` / `reminderTypes`) vale para

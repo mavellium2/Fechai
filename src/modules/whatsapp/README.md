@@ -404,6 +404,18 @@ apagada no provedor (`exists: false`) é **recriada** em vez de receber um pedid
 de QR que devolveria 404 — antes, o botão "Conectar" falhava justamente quando
 era a única coisa que resolveria.
 
+### Mensagens interativas e a pesquisa de satisfação
+
+`IncomingMessage.replyId` carrega o id da opção escolhida numa lista/botão da Meta
+(`interactive.list_reply` / `button_reply`, em `meta-events.ts`); o `text` leva o
+título da opção, então o resto do fluxo a trata como mensagem comum. A Meta também
+tem `sendRatingPrompt` (lista interativa de até 10 linhas, título ≤ 24 caracteres)
+— opcional no contrato, só a Cloud API implementa; no QR (Evolution) não há botões
+nem lista e a pergunta vai como texto numerado. Em `process-incoming.ts` o que a
+pesquisa envia é reconhecido no ramo `fromMe` (`satisfaction/echo.ts`) para **não
+pausar o agente**, e a resposta do contato é capturada antes do turno
+(`satisfaction/capture.ts`). Ver `src/modules/satisfaction/README.md`.
+
 ## O que NÃO faz
 
 - Não decide a resposta — isso é do `agent-engine` (orquestrador).
