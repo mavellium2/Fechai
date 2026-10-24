@@ -2,6 +2,15 @@
 
 Atualize ao alterar o módulo.
 
+### 2026-10-24 — Calendário da Apple (iCloud, CalDAV)
+
+Card cmukfq7t7002f01jw2mrv7nl8, commits 173105e (espelho), 5a3646a (disponibilidade),
+23c588b (worker, saúde, /agenda) e 546ce05 (revisão). Senha de app cifrada; evento
+com endereço fixo `fechai-<id>.ics`; 412 = já enviado; leitura com falha = não oferece
+horário. Eventos do iPhone só leitura na /agenda (título, sem lembrete). Schema
+aditivo: db push + generate nos dois processos. Dependências: ical.js, fast-xml-parser.
+Detalhe: `src/modules/scheduling/README.md`, seção "Calendário da Apple (iCloud)".
+
 ### 2026-10-09 — Aceite dos riscos da Evolution
 
 qr-risk-terms, parser, action/modal, audit e testes. Checkbox/nome/versão
