@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   appointmentCreate: vi.fn(),
   appointmentUpdate: vi.fn(),
   rate: vi.fn(),
+  reserve: vi.fn(),
   runTurn: vi.fn(),
   complete: vi.fn(),
   createAppointment: vi.fn(),
@@ -71,7 +72,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rate }));
+vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rate, rateLimitReserve: mocks.reserve }));
 
 // O turno: o real por padrão (camada 2), trocado por um controlável na camada 1.
 vi.mock("@/modules/agent-engine/orchestrator", async (importOriginal) => {
@@ -174,6 +175,7 @@ beforeEach(() => {
 
   tenantRows = { "tenant-A": { agents: [AGENT_A] }, "tenant-B": { agents: [AGENT_B] } };
   mocks.rate.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
+  mocks.reserve.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
   mocks.tokenFindUnique.mockResolvedValue(tokenRow(["simulate"]));
   mocks.tokenUpdate.mockResolvedValue({});
 
@@ -287,7 +289,7 @@ describe("escopo simulate", () => {
     expect(mocks.agentFindFirst).not.toHaveBeenCalled();
     expect(mocks.conversationFindFirst).not.toHaveBeenCalled();
     expect(mocks.runTurn).not.toHaveBeenCalled();
-    expect(mocks.rate.mock.calls.filter(([scope]) => scope === "mcp:simulate")).toHaveLength(0);
+    expect(mocks.reserve).not.toHaveBeenCalled();
   });
 
   it("com simulate, as ferramentas de leitura passam a responder 403", async () => {
@@ -403,7 +405,7 @@ describe("run_simulation: variantes e limites de entrada", () => {
     // Recusada antes de qualquer custo.
     expect(mocks.runTurn).not.toHaveBeenCalled();
     expect(mocks.leadCreate).not.toHaveBeenCalled();
-    expect(mocks.rate.mock.calls.filter(([scope]) => scope === "mcp:simulate")).toHaveLength(0);
+    expect(mocks.reserve).not.toHaveBeenCalled();
   });
 
   it("variante fora do enum é argumento inválido", async () => {
@@ -441,7 +443,7 @@ describe("isolamento entre contas", () => {
     expect(mocks.agentFindFirst.mock.calls[0][0].where).toMatchObject({ id: AGENT_B, tenantId: "tenant-A" });
     expect(mocks.leadCreate).not.toHaveBeenCalled();
     expect(mocks.runTurn).not.toHaveBeenCalled();
-    expect(mocks.rate.mock.calls.filter(([scope]) => scope === "mcp:simulate")).toHaveLength(0);
+    expect(mocks.reserve).not.toHaveBeenCalled();
   });
 
   /** Banco de mentira: a simulação é da conta B; só responde se o filtro bater. */
@@ -510,23 +512,16 @@ describe("isolamento entre contas", () => {
 });
 
 describe("limite de turnos por token", () => {
-  it("reserva um turno por mensagem, por token, com a janela de 10 minutos", async () => {
+  it("reserva o pedido inteiro de uma vez, por token, com a janela de 10 minutos", async () => {
     mocks.runTurn.mockResolvedValue({ reply: "ok", toolsUsed: [], status: "ok" });
     await call(toolCall("run_simulation", { agentId: AGENT_A, messages: ["a", "b", "c"] }));
-    const calls = mocks.rate.mock.calls.filter(([scope]) => scope === "mcp:simulate");
-    expect(calls).toHaveLength(3);
-    for (const [, subject, max, window] of calls) {
-      expect(subject).toBe("tok-sim");
-      expect(max).toBe(SIMULATION_LIMIT.max);
-      expect(window).toBe(600);
-    }
+    expect(mocks.reserve).toHaveBeenCalledTimes(1);
+    expect(mocks.reserve).toHaveBeenCalledWith("mcp:simulate", "tok-sim", SIMULATION_LIMIT.max, 600, 3);
     expect(SIMULATION_LIMIT.max).toBe(30);
   });
 
   it("passou do limite: 429 com Retry-After, sem criar conversa nem rodar turno", async () => {
-    mocks.rate.mockImplementation(async (scope: string) =>
-      scope === "mcp:simulate" ? { allowed: false, retryAfterSeconds: 321 } : { allowed: true, retryAfterSeconds: 0 },
-    );
+    mocks.reserve.mockResolvedValue({ allowed: false, retryAfterSeconds: 321 });
     const res = await call(toolCall("run_simulation", { agentId: AGENT_A, messages: ["a", "b"] }));
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("321");
@@ -536,21 +531,22 @@ describe("limite de turnos por token", () => {
     expect(mocks.runTurn).not.toHaveBeenCalled();
   });
 
-  it("o saldo acaba no meio do pedido: 429 e nenhum turno roda", async () => {
-    let used = 0;
-    mocks.rate.mockImplementation(async (scope: string) => {
-      if (scope !== "mcp:simulate") return { allowed: true, retryAfterSeconds: 0 };
-      used += 1;
-      return used <= 2 ? { allowed: true, retryAfterSeconds: 0 } : { allowed: false, retryAfterSeconds: 60 };
+  it("o pedido maior que o saldo é recusado inteiro: 429 e nenhum turno roda", async () => {
+    let balance = 2;
+    mocks.reserve.mockImplementation(async (_scope: string, _subject: string, _max: number, _window: number, n: number) => {
+      if (n > balance) return { allowed: false, retryAfterSeconds: 60 };
+      balance -= n;
+      return { allowed: true, retryAfterSeconds: 0 };
     });
     const res = await call(toolCall("run_simulation", { agentId: AGENT_A, messages: ["a", "b", "c"] }));
     expect(res.status).toBe(429);
     expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(balance).toBe(2);
   });
 
   it("get_simulation não gasta o limite de turnos (não chama LLM)", async () => {
     await call(toolCall("get_simulation", { simulationId: "abc" }));
-    expect(mocks.rate.mock.calls.filter(([scope]) => scope === "mcp:simulate")).toHaveLength(0);
+    expect(mocks.reserve).not.toHaveBeenCalled();
   });
 });
 

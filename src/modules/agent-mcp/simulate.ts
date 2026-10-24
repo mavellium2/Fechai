@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { rateLimit } from "@/lib/rate-limit";
+import { rateLimitReserve } from "@/lib/rate-limit";
 import { getOrCreateConversation } from "@/modules/agent-engine/conversation";
 import { runAgentTurn, type TurnStatus } from "@/modules/agent-engine/orchestrator";
 import { maskText } from "@/modules/knowledge-gaps/mask";
@@ -45,21 +45,23 @@ export type SimulationResult = {
   dryRun: true;
 };
 
-/** O que sai de uma conversa passa pela máscara (e-mail, telefone, nome). */
+/** O que sai de uma conversa passa pela máscara (e-mail, telefone e documento). */
 function safe(text: string): string {
   return maskText(text);
 }
 
-/** Reserva um turno de saldo por mensagem ANTES de rodar qualquer coisa. */
+/**
+ * Reserva o saldo do pedido inteiro ANTES de rodar qualquer coisa, numa operação
+ * só (`INCRBY n`). Se não cabe, as `n` voltam (`DECRBY n`) e responde 429: o
+ * saldo parcial segue disponível para um pedido menor.
+ */
 async function reserveTurns(tokenId: string, turns: number): Promise<void> {
-  for (let i = 0; i < turns; i++) {
-    const limited = await rateLimit("mcp:simulate", tokenId, SIMULATION_LIMIT.max, SIMULATION_LIMIT.windowSeconds);
-    if (!limited.allowed) {
-      throw new McpRateLimitedError(
-        `Limite de ${SIMULATION_LIMIT.max} turnos de simulação a cada ${SIMULATION_LIMIT.windowSeconds / 60} minutos atingido.`,
-        limited.retryAfterSeconds,
-      );
-    }
+  const limited = await rateLimitReserve("mcp:simulate", tokenId, SIMULATION_LIMIT.max, SIMULATION_LIMIT.windowSeconds, turns);
+  if (!limited.allowed) {
+    throw new McpRateLimitedError(
+      `Limite de ${SIMULATION_LIMIT.max} turnos de simulação a cada ${SIMULATION_LIMIT.windowSeconds / 60} minutos atingido.`,
+      limited.retryAfterSeconds,
+    );
   }
 }
 
