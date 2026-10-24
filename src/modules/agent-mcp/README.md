@@ -65,8 +65,9 @@ mas ainda não pode ser emitido.
 | `run_simulation` | `simulate` | `{ agentId, messages, variant? }` | `{ simulationId, runs: [{ variant, turns: [{ user, reply, toolsUsed, status }] }], dryRun: true }` |
 | `get_simulation` | `simulate` | `{ simulationId }` | `{ simulationId, agentId, runs: [{ variant, turns: [{ user, reply }] }], dryRun: true }` |
 
-As de `read` se anunciam com `readOnlyHint: true`; `run_simulation` com
-`readOnlyHint: false` (grava uma conversa de teste e custa LLM), sempre
+`list_agents`, `get_agent_config` e `get_simulation` se anunciam com
+`readOnlyHint: true`; `run_simulation` com `readOnlyHint: false` e
+`idempotentHint: false` (grava uma conversa de teste e custa LLM). Todas com
 `destructiveHint: false` e `openWorldHint: false`. As duas famílias são
 independentes: um token só com `simulate` não vê `list_agents`, então, para
 descobrir os ids, emita `read` + `simulate`.
@@ -98,6 +99,12 @@ mais. Regras:
   conta na cota), `skipEnabledCheck` (responde com o agente desligado) e
   `dryRunScheduling` (marcar/remarcar/cancelar só descrevem o que aconteceria: sem
   `createAppointment`, sem Clinicorp, Google ou iCloud).
+- **Telefone `mcp:` é sintético.** Não é número de ninguém. `isSyntheticPhone`
+  (`src/lib/format.ts`) o reconhece junto de `sandbox`: a conversa não tem link
+  `wa.me`, a tela mostra "teste no sandbox" em vez de número, `{{numero}}` não nasce
+  preenchido (`withContactDefaults`) e nenhum número entra no prompt. O
+  `simulationId` no telefone é só a chave que `get_simulation` usa para reencontrar
+  a conversa.
 - **Nada fala com o WhatsApp.** Quem envia é o webhook e o worker; a simulação
   chama só `getOrCreateConversation` e `runAgentTurn`, e o orquestrador não envia
   (só grava a resposta). O teste prova isso com o turno real e os provedores,
@@ -120,6 +127,7 @@ mais. Regras:
   operação só (`INCRBY n`) **antes** de criar a conversa. Se não cabe, as `n`
   voltam (`DECRBY n`), responde 429 com `Retry-After` e nenhum turno roda: um
   pedido recusado não consome o saldo, e o que sobrou serve a um pedido menor.
+  Sem Redis, o limite libera (falha aberta, ver Riscos): a simulação segue sem teto.
 - **Pode demorar vários minutos.** Cada mensagem é uma chamada de LLM, em
   sequência, e o `simulationId` só volta no fim da chamada. Com 10 mensagens, o
   cliente MCP deve esperar a resposta (aumente o timeout dele); se desistir antes,
@@ -132,7 +140,8 @@ com `tenantId` do token, `isTest` no lead e na conversa, e telefone exatamente
 `mcp:<agente>:<simulationId>`. Conversa real, chat de teste do painel
 (`sandbox:`) e simulação de outra conta respondem "Simulação não encontrada nesta
 conta.". Não traz `toolsUsed` nem `status` (o banco não guarda por turno) e não
-gasta o limite de turnos.
+gasta o limite de turnos. `reply` vem `null` quando a fala não tem resposta
+gravada (o agente ficou calado naquele turno).
 
 ## Como emitir e revogar
 
@@ -215,7 +224,7 @@ em pedaços e cancelado ao passar do limite (`readBodyWithinLimit`).
 Automático (sem banco nem Redis reais: `prisma` e `rate-limit` são simulados):
 
 ```
-npx vitest run tests/agent-mcp.test.ts tests/agent-mcp-simulacao.test.ts tests/autorizacao.test.ts
+npx vitest run tests/agent-mcp.test.ts tests/agent-mcp-simulacao.test.ts tests/autorizacao.test.ts tests/rate-limit-reserve.test.ts
 ```
 
 Manual, contra um ambiente com token emitido (`FECHAI_MCP_TOKEN` exportado):
@@ -235,6 +244,7 @@ Confira:
 - `tools/list` com `read` mostra só `list_agents` e `get_agent_config`; com `simulate`, também `run_simulation` e `get_simulation`.
 - `run_simulation` com `{"agentId":"...","messages":["Oi","Quero marcar sexta às 14h"]}`: resposta com `dryRun: true`, nada novo em `/agenda`, nenhuma mensagem no WhatsApp, e a conversa na aba de testes de `/conversas`.
 - `run_simulation` com `variant: "proposal"`: `isError: true`.
+- `get_simulation` com o `simulationId` devolvido: as mesmas falas (mascaradas), sem `toolsUsed`.
 - Sem o header `Authorization`: 401 com `WWW-Authenticate`.
 - `list_agents` com `arguments: {"tenantId": "..."}`: `-32602`.
 - `get_agent_config` com `agentId` de outra conta: `isError: true`, "Agente não encontrado nesta conta."
@@ -269,6 +279,16 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
   cada 10 min) e grava conversas de teste na conta.
 - **Conversas de simulação acumulam.** Cada `run_simulation` cria um lead/conversa
   de teste novo; não há limpeza automática.
+
+- **Chave do limite de simulação pode ficar sem TTL.** `rateLimitReserve` faz
+  `INCRBY` e só faz `EXPIRE` quando o valor devolvido é `n` (a primeira reserva da
+  janela). São dois comandos sem atomicidade: numa corrida rara na virada da janela,
+  a chave `rl:mcp:simulate:<digest>` pode ficar sem expiração. Se o `EXPIRE` falhar,
+  a exceção cai no `catch`, que libera o pedido, e a chave fica assim. Efeito: o
+  contador não zera sozinho e o token fica sem simulação até a chave ser apagada,
+  mesmo com o 429 dizendo "tente em 10 minutos"; revogar o token não limpa a chave.
+  **Correção fica para um ajuste futuro** (`INCRBY` e `EXPIRE` juntos, ou reexpirar
+  quando o TTL for -1). Até lá, se um token travar, apague a chave à mão no Redis.
 
 ## Schema
 
