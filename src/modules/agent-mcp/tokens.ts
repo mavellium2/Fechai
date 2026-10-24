@@ -19,12 +19,13 @@ export type McpScope = (typeof MCP_SCOPES)[number];
 
 /**
  * Escopos que a EMISSÃO aceita hoje. `MCP_SCOPES` continua com os três porque o
- * schema e a autenticação já os conhecem (parte C), mas na parte A só `read`
- * tem ferramenta: emitir `simulate`/`propose` entregaria um token com permissão
+ * schema e a autenticação já os conhecem, mas só emitimos escopo que tem
+ * ferramenta: `read` (parte A) e `simulate` (parte B). `propose` fica de fora até
+ * a parte C — emitir um escopo sem ferramenta entregaria um token com permissão
  * que nada usa e que passaria a valer sozinha quando a ferramenta chegasse.
  * Ampliar esta lista é a decisão de liberar o escopo.
  */
-export const EMITTABLE_MCP_SCOPES = ["read"] as const satisfies readonly McpScope[];
+export const EMITTABLE_MCP_SCOPES = ["read", "simulate"] as const satisfies readonly McpScope[];
 
 export const MCP_SCOPE_LABELS: Record<McpScope, string> = {
   read: "Ler a configuração do agente",
@@ -93,7 +94,7 @@ export function validateIssueInput(input: Pick<IssueMcpTokenInput, "label" | "sc
   if (scopes.length === 0) return { ok: false, error: "Escolha pelo menos uma permissão." };
   if (!scopes.every(isMcpScope)) return { ok: false, error: "Permissão desconhecida." };
   if (!scopes.every(isEmittableMcpScope)) {
-    return { ok: false, error: "Esta permissão ainda não pode ser emitida. Por enquanto só a leitura da configuração do agente." };
+    return { ok: false, error: "Esta permissão ainda não pode ser emitida. Por enquanto só a leitura da configuração e a simulação de conversas." };
   }
 
   const ttlDays = input.ttlDays ?? MCP_DEFAULT_TTL_DAYS;

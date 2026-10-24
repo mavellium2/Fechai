@@ -180,9 +180,16 @@ describe("Autenticação da rota MCP", () => {
   });
 
   it("tools/list só mostra o que o escopo permite", async () => {
-    mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["simulate"] }));
+    // `propose` ainda não tem ferramenta (parte C): lista vazia.
+    mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["propose"] }));
     const body = await json(await call(rpc("tools/list")));
     expect(body.result.tools).toEqual([]);
+
+    // `simulate` (parte B) vê só as de simulação, nunca as de leitura.
+    mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["simulate"] }));
+    const simulate = await json(await call(rpc("tools/list")));
+    const names = simulate.result.tools.map((tool: { name: string }) => tool.name).sort();
+    expect(names).toEqual(["get_simulation", "run_simulation"]);
   });
 });
 
@@ -496,12 +503,13 @@ describe("Tokens: emissão, listagem e revogação", () => {
     expect(mocks.tokenCreate).not.toHaveBeenCalled();
   });
 
-  it("só `read` é emitível; simulate e propose existem no schema mas são recusados na emissão", async () => {
-    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read"]);
+  it("`read` e `simulate` são emitíveis; propose existe no schema mas é recusado na emissão", async () => {
+    // A parte B liberou `simulate` (tem ferramenta: run_simulation/get_simulation).
+    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read", "simulate"]);
     // A lista de escopos conhecidos (parte C) continua com os três.
     expect([...MCP_SCOPES]).toEqual(["read", "simulate", "propose"]);
 
-    for (const scopes of [["simulate"], ["propose"], ["read", "simulate"], ["read", "propose"]]) {
+    for (const scopes of [["propose"], ["read", "propose"], ["simulate", "propose"], ["read", "simulate", "propose"]]) {
       const valid = validateIssueInput({ label: "x", scopes });
       expect(valid.ok).toBe(false);
       if (!valid.ok) expect(valid.error).toMatch(/ainda não pode ser emitida/);
@@ -514,6 +522,8 @@ describe("Tokens: emissão, listagem e revogação", () => {
     expect(mocks.tokenCreate).not.toHaveBeenCalled();
 
     expect(validateIssueInput({ label: "x", scopes: ["read"] })).toMatchObject({ ok: true, scopes: ["read"] });
+    expect(validateIssueInput({ label: "x", scopes: ["simulate"] })).toMatchObject({ ok: true, scopes: ["simulate"] });
+    expect(validateIssueInput({ label: "x", scopes: ["read", "simulate"] })).toMatchObject({ ok: true });
   });
 
   it("a action de emissão passa pela mesma validação antes de tocar no banco", () => {
