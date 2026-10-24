@@ -109,6 +109,17 @@ caminho de busca) e libera o telefone canônico para nascer vazio na próxima
 mensagem — a IA não recomeça vendo o histórico do teste anterior, mas nada é
 perdido do lado do usuário.
 
+#### O teste não ocupa a agenda real (`dryRunScheduling` / `ToolContext.dryRun`)
+
+Os dois caminhos de teste (`/api/sandbox` e `sendTestClientMessage`) passam
+`dryRunScheduling: true`, que o orquestrador põe em `ToolContext.dryRun`. Com
+a marca, `schedule_meeting`, `reschedule_meeting` e `cancel_meeting` fazem
+toda leitura e validação (antecedência, expediente, conflito em todas as
+agendas, confirmação do cliente) mas **não gravam `Appointment` nem chamam
+Clinicorp, Google ou iCloud**; devolvem uma frase "Simulação: ... seria
+marcado/remarcado/cancelada". Sem a marca (WhatsApp, widget) nada muda. A
+futura rota MCP deve ligar a mesma flag. Teste: `tests/agendamento-simulacao.test.ts`.
+
 #### O teste responde com o agente desligado (`skipEnabledCheck`)
 
 `Agent.enabled` é a chave geral, e desligada ela cala o agente **para o

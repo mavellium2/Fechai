@@ -411,6 +411,13 @@ gasta uma chamada de rede.
 Sobreposição é `início < fimExistente && fim > inícioExistente`. Encostar não é
 conflito: 14:00–15:00 e 15:00–16:00 convivem.
 
+### Simulação (chat de teste) não escreve na agenda
+
+Com `ToolContext.dryRun` (ligado pelo chat de teste), as tools de agenda
+validam e leem (`hasConflictAnywhere` incluso) mas não chamam
+`createAppointment`, `rescheduleAppointment` nem `cancelAppointment`, logo
+nada chega ao Clinicorp, Google ou iCloud. Ver `agent-engine/README.md`.
+
 ## Horários livres: o agente só oferece o que está vago
 
 O expediente no prompt diz quando atendemos, **não o que está livre**. Sem mais

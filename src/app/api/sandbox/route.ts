@@ -65,6 +65,8 @@ export async function POST(req: Request) {
     // cliente (WhatsApp, widget); aqui é o dono falando com o próprio agente,
     // justamente para ajustar antes de religar.
     skipEnabledCheck: true,
+    // Teste não pode ocupar a agenda real nem espelhar no Clinicorp/Google/iCloud.
+    dryRunScheduling: true,
   });
 
   return NextResponse.json({ reply, toolsUsed, status });
