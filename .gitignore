@@ -49,3 +49,6 @@ contas.txt
 
 # PDFs gerados para conferência visual
 /output/pdf/
+
+# cliente MCP local (o .mcp.json.example é versionado)
+.mcp.json
