@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState, useTransition } from "react";
+import { useId, useMemo, useState } from "react";
 import { KeyRound } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Field, fieldProps } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SelectMenu } from "@/components/ui/select-menu";
+import { useSaveFeedback } from "@/components/ui/toast/use-save-feedback";
 import { issueMcpTokenAction, type IssueMcpTokenActionResult } from "./actions";
 
 type TenantOption = { id: string; name: string };
@@ -25,8 +26,10 @@ export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
   const [label, setLabel] = useState("");
   const [ttlDays, setTtlDays] = useState("30");
   const [scopes, setScopes] = useState<string[]>(["read"]);
-  const [result, setResult] = useState<IssueMcpTokenActionResult | null>(null);
-  const [pending, startTransition] = useTransition();
+  // Só o token (conteúdo, mostrado uma vez) fica inline; carregando, erro e
+  // sucesso vão ao toast (TOASTS.md).
+  const [issued, setIssued] = useState<Extract<IssueMcpTokenActionResult, { ok: true }> | null>(null);
+  const save = useSaveFeedback({ entity: "token", action: "create", gender: "m" });
 
   const tenantOptions = useMemo(
     () => tenants.map((tenant) => ({ value: tenant.id, label: tenant.name })),
@@ -40,18 +43,22 @@ export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
   }
 
   function issue() {
-    setResult(null);
-    startTransition(async () => {
+    setIssued(null);
+    // `run` nunca lança: action que rejeita (rede, servidor) vira toast de erro
+    // via `errorToResult`, e redirects do Next (sessão expirada) passam intactos.
+    void save.run(async () => {
       const next = await issueMcpTokenAction({
         tenantId,
         label,
         scopes,
         ttlDays: Number(ttlDays),
       });
-      setResult(next);
+      if (!next.ok) return { ok: false, error: next.error };
       // O token em claro fica só neste estado; limpar o nome evita emitir dois
       // tokens iguais por clique duplo.
-      if (next.ok) setLabel("");
+      setIssued(next);
+      setLabel("");
+      return { ok: true, info: "Token emitido. Copie-o abaixo." };
     });
   }
 
@@ -67,7 +74,7 @@ export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
             labelledBy={`${uid}-tenant`}
             value={tenantId}
             options={tenantOptions}
-            onChange={(value) => { setTenantId(value); setResult(null); }}
+            onChange={(value) => { setTenantId(value); setIssued(null); }}
           />
           <p className="mt-1.5 text-xs text-white/50">
             O token só enxerga os agentes desta conta. Não há como mudar isso na chamada.
@@ -118,13 +125,11 @@ export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
         </Field>
       </div>
 
-      {result && !result.ok && <Alert tone="danger" className="mt-5">{result.error}</Alert>}
-
-      {result?.ok && (
+      {issued && (
         <Alert tone="success" title="Token emitido" className="mt-5">
           <p>
-            {result.label} · {result.tenantName}. Vale até{" "}
-            {new Date(result.expiresAt).toLocaleDateString("pt-BR")}.
+            {issued.label} · {issued.tenantName}. Vale até{" "}
+            {new Date(issued.expiresAt).toLocaleDateString("pt-BR")}.
           </p>
           <p className="mt-2 font-medium">
             Copie agora: por segurança ele não é guardado e não aparece de novo.
@@ -134,9 +139,9 @@ export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
               data-testid="mcp-token-once"
               className="min-w-0 flex-1 break-all rounded-control bg-ink/60 px-3 py-2 font-mono text-xs text-white"
             >
-              {result.token}
+              {issued.token}
             </code>
-            <CopyButton value={result.token} label="Copiar token" />
+            <CopyButton value={issued.token} label="Copiar token" />
           </div>
         </Alert>
       )}
@@ -145,7 +150,7 @@ export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
         <Button
           type="button"
           onClick={issue}
-          loading={pending}
+          loading={save.saving}
           loadingLabel="Emitindo token"
           disabled={!tenantId || !label.trim() || scopes.length === 0}
         >

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import { Ban } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/ui/confirm-dialog";
+import { useSaveFeedback } from "@/components/ui/toast/use-save-feedback";
 import { revokeMcpTokenAction } from "./actions";
 
 export function RevokeMcpTokenButton({
@@ -16,30 +16,32 @@ export function RevokeMcpTokenButton({
   label: string;
 }) {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const save = useSaveFeedback({ entity: "token", action: "update", gender: "m" });
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <ConfirmButton
-        size="sm"
-        confirm={{
-          title: `Revogar “${label}”?`,
-          description:
-            "O token deixa de funcionar na hora, em qualquer ferramenta que o esteja usando. Não dá para desfazer: emita outro se precisar.",
-          confirmLabel: "Revogar token",
-          tone: "danger",
-        }}
-        onConfirm={async () => {
-          setError(null);
-          const result = await revokeMcpTokenAction({ tenantId, tokenId });
-          if (!result.ok) setError(result.error);
-          else router.refresh();
-        }}
-      >
-        <Ban size={14} aria-hidden />
-        Revogar
-      </ConfirmButton>
-      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
-    </div>
+    <ConfirmButton
+      size="sm"
+      confirm={{
+        title: `Revogar “${label}”?`,
+        description:
+          "O token deixa de funcionar na hora, em qualquer ferramenta que o esteja usando. Não dá para desfazer: emita outro se precisar.",
+        confirmLabel: "Revogar token",
+        tone: "danger",
+      }}
+      // O ConfirmButton só tem try/finally (sem catch): uma rejeição aqui
+      // deixaria o diálogo aberto e a pessoa sem aviso. `run` nunca lança —
+      // exceção vira toast de erro via `errorToResult` — e redirects do Next
+      // (sessão expirada) passam intactos.
+      onConfirm={async () => {
+        const result = await save.run(async () => {
+          const done = await revokeMcpTokenAction({ tenantId, tokenId });
+          return done.ok ? { ok: true, info: "Token revogado." } : { ok: false, error: done.error };
+        });
+        if (result.ok) router.refresh();
+      }}
+    >
+      <Ban size={14} aria-hidden />
+      Revogar
+    </ConfirmButton>
   );
 }
