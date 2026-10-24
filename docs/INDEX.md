@@ -33,6 +33,7 @@ Ver [CHANGELOG.md](./CHANGELOG.md) para o último milestone concluído.
 - Prioridade e transferência para humano (aviso no grupo interno, nunca inclusão do lead) → [regras, formato e testes](../src/modules/agent-engine/README.md#transferir-para-humano-e-o-grupo-do-whatsapp-handoffts)
 - Duplicação, exportação, importação e réplica administrativa de agentes → seção "Duplicar, exportar, importar e replicar agentes" no README do agent-engine
 - Resumo de conversa gerado por IA (sob demanda, com cache) → seção "Resumo da conversa" em `src/modules/agent-engine/README.md`
+- Módulo agent-mcp (`/api/mcp`, tokens emitidos pelo superadmin, leitura da configuração do agente; partes B e C pendentes) → `src/modules/agent-mcp/README.md`
 - Módulo ai (providers de LLM/embeddings, catálogo, modelo ativo) → `src/modules/ai/README.md`
 - Módulo knowledge-base (RAG) → `src/modules/knowledge-base/README.md`
 - Módulo whatsapp (provider Evolution) → `src/modules/whatsapp/README.md`

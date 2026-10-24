@@ -2,6 +2,20 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Acesso MCP do agente, parte A (leitura da configuração) — 2026-10-24
+
+Servidor MCP em `POST /api/mcp` para uma ferramenta externa ler a configuração dos
+agentes de **uma** conta, com token Bearer emitido pelo superadmin em
+`/admin/agentes/mcp` (botão "Acesso MCP" em `/admin/agentes`). Só escopo `read`
+pode ser emitido; ferramentas `list_agents` e `get_agent_config`. Conta sai do
+token, nunca do argumento; token guardado só como sha256 e revogação vale na hora.
+A leitura não consulta lead, mensagem, conversa, agenda nem credencial. Erros e
+limites (401, 403, 413, 429) estão na tabela do README. Schema novo `McpToken`:
+`db push` + `generate` nos dois processos (web e worker). Testes:
+`tests/agent-mcp.test.ts`, `tests/autorizacao.test.ts` e `tests/toast-feedback.test.ts`
+passam (118 casos). Card cmvml66er000g01nxtqmbgbhg. Módulo:
+[agent-mcp](../src/modules/agent-mcp/README.md).
+
 ## Simulação da agenda no chat de teste — 2026-10-24
 
 No chat de teste, marcar, remarcar e cancelar consulta só validam e descrevem o que
