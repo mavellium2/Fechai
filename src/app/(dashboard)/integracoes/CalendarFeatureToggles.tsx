@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { CalendarCheck2, Stethoscope } from "lucide-react";
+import { Apple, CalendarCheck2, Stethoscope } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -21,6 +21,7 @@ import type { CalendarFeatureKey } from "@/modules/scheduling/features";
 const ICONS: Record<CalendarFeatureKey, React.ComponentType<{ size?: number | string; className?: string }>> = {
   google: CalendarCheck2,
   clinicorp: Stethoscope,
+  icloud: Apple,
 };
 
 type Item = {
@@ -100,7 +101,7 @@ export function CalendarFeatureToggles({
                   <p className="mt-2 text-xs text-white/70">
                     {item.connected ? (
                       <>
-                        {item.key === "clinicorp" ? "Credenciais salvas." : "Conectado."}{" "}
+                        {item.key === "clinicorp" || item.key === "icloud" ? "Credenciais salvas." : "Conectado."}{" "}
                         <Link
                           href="/agenda"
                           className="rounded-control underline underline-offset-4 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"

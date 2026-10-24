@@ -146,6 +146,7 @@ model Tenant {
   bitrix           BitrixIntegration?
   bitrixSyncJobs   BitrixSyncJob[]
   clinicorp        ClinicorpIntegration?
+  icloud           IcloudCalendarIntegration?
   clinicorpReminders ClinicorpReminder[]
   reminderDispatches ReminderDispatch[]
   reminderReceipts ReminderReceipt[]
@@ -1075,6 +1076,13 @@ model Appointment {
   /// Guardado como String porque o id de lá é um inteiro de 64 bits (ex.:
   /// 4791226171916288) — fora do alcance seguro do Number do JS.
   clinicorpAppointmentId String?
+  /// Endereço (URL CalDAV) do evento no Calendário da Apple. Null = ainda não
+  /// enviado (a varredura do worker tenta de novo) ou integração desligada.
+  icloudEventUrl         String?
+  /// Tentativas de envio ao iCloud que falharam por erro temporário (5xx/rede).
+  icloudSyncAttempts     Int       @default(0)
+  /// Quando a varredura pode tentar de novo (recuo 2, 4, 8… min até 60).
+  icloudNextAttemptAt    DateTime?
   clinicorpSync          ClinicorpAppointmentSync?
   rescheduleHistory      AppointmentReschedule[]
   /// Antecedências (em minutos) dos lembretes que JÁ foram enviados para esta
@@ -1166,6 +1174,8 @@ model CalendarFeatures {
   googleEnabled    Boolean @default(false)
   /// Mostra o card do Clinicorp na /agenda.
   clinicorpEnabled Boolean @default(false)
+  /// Mostra o card do Calendário da Apple (iCloud, CalDAV) na /agenda.
+  icloudEnabled    Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1259,6 +1269,47 @@ model ClinicorpIntegration {
   lastSyncAt  DateTime?
   lastErrorAt DateTime?
   lastError   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Conexão do tenant com o Calendário da Apple (iCloud) por CalDAV. O cliente
+/// gera uma senha de app em appleid.apple.com; Apple ID e senha ficam cifrados
+/// (src/lib/crypto.ts) e só `scheduling/icloud.ts` os lê.
+model IcloudCalendarIntegration {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// Cifrados (AES-256-GCM). Nunca devolvidos ao cliente nem escritos em log.
+  appleId     String
+  appPassword String
+
+  /// Descobertos na conexão. O iCloud responde por um host de partição
+  /// (`pNN-caldav.icloud.com`), por isso guardamos as URLs e não só o domínio.
+  principalUrl    String
+  calendarHomeUrl String
+  /// Calendário que recebe os horários do fechai.
+  calendarUrl     String?
+  calendarName    String?
+  /// Calendários extras lidos só para saber o que está ocupado.
+  busyCalendarUrls String[] @default([])
+
+  /// Enviar os horários do fechai para o iPhone. Separado da leitura.
+  syncEnabled       Boolean @default(true)
+  /// Ler o iCloud antes de oferecer horário. Falha na leitura = não oferece.
+  checkAvailability Boolean @default(true)
+
+  /// Diagnóstico para a tela. `lastError` é de envio/leitura; `connectionError`
+  /// é da checagem periódica de saúde; `authFailedAt` para tudo até reconectar.
+  lastSyncAt        DateTime?
+  lastError         String?
+  lastErrorAt       DateTime?
+  authFailedAt      DateTime?
+  connectionError   String?
+  connectionErrorAt DateTime?
+  lastCheckedAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -20,6 +20,7 @@ import {
   type ClinicorpAgenda,
   type ClinicorpAgendaItem,
 } from "@/modules/scheduling/clinicorp";
+import { getIcloudStatus } from "@/modules/scheduling/icloud";
 import { listMonthAppointments, listMonthAppointmentReschedules } from "@/modules/scheduling/repository";
 import { loadAppointmentOriginHours } from "@/modules/reports/origin-hours";
 import { clockInZone, dayKeyInZone, todayInZone } from "@/modules/scheduling/time";
@@ -65,7 +66,7 @@ export default async function AgendaPage({
 
   // Tudo que não depende do fuso sai junto com o agente: uma ida ao banco a
   // menos em série em cada troca de mês.
-  const [primaryAgent, features, integration, clinicorp, contacts] = await Promise.all([
+  const [primaryAgent, features, integration, clinicorp, icloud, contacts] = await Promise.all([
     // A configuração de horário do agente principal é a da conta: fuso e
     // duração padrão saem dela (ver módulo scheduling).
     prisma.agent.findFirst({
@@ -81,6 +82,7 @@ export default async function AgendaPage({
     getCalendarFeatures(tenantId),
     prisma.calendarIntegration.findUnique({ where: { tenantId } }),
     getClinicorpStatus(tenantId),
+    getIcloudStatus(tenantId),
     prisma.lead.findMany({
       where: { tenantId, isTest: false },
       orderBy: { createdAt: "desc" },
@@ -165,6 +167,20 @@ export default async function AgendaPage({
           sending: Boolean(integration?.syncEnabled),
           // O Google é espelho de mão única: só enviamos eventos para lá.
           receiving: false,
+        }
+      : null,
+    features.icloudEnabled
+      ? {
+          key: "icloud" as const,
+          name: "Calendário da Apple",
+          connected: Boolean(icloud),
+          sending: Boolean(icloud?.syncEnabled && icloud.calendarUrl),
+          receiving: Boolean(icloud?.checkAvailability),
+          // Senha revogada para tudo (inclusive a leitura); fora isso, o último erro do espelho.
+          error: !icloud ? null
+            : icloud.authFailedAt ? "A senha de app foi revogada ou o Apple ID mudou. Reconecte para voltar a enviar horários."
+            : icloud.connectionError ?? icloud.lastError
+              ?? (!icloud.calendarUrl ? "Escolha o calendário que recebe os horários em Integrações." : null),
         }
       : null,
     features.clinicorpEnabled

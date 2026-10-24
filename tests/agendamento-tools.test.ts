@@ -9,7 +9,12 @@ const db = vi.hoisted(() => ({
   lead: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
 }));
 const mirrors = vi.hoisted(() => ({ googlePush: vi.fn(), googleDelete: vi.fn(), clinicorpPush: vi.fn(), clinicorpCancel: vi.fn(), clinicorpConflict: vi.fn(), clinicorpBusy: vi.fn(), clinicorpPending: vi.fn() }));
+const icloud = vi.hoisted(() => ({ push: vi.fn(), update: vi.fn(), remove: vi.fn(), busy: vi.fn(), conflict: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
+vi.mock("@/modules/scheduling/icloud", () => ({
+  pushEventToIcloud: icloud.push, updateIcloudEvent: icloud.update, deleteIcloudEvent: icloud.remove,
+  listIcloudBusyBlocks: icloud.busy, hasIcloudConflict: icloud.conflict,
+}));
 vi.mock("@/modules/scheduling/google", () => ({ pushEventToGoogle: mirrors.googlePush, deleteEventFromGoogle: mirrors.googleDelete }));
 vi.mock("@/modules/scheduling/clinicorp", () => ({ pushAppointmentToClinicorp: mirrors.clinicorpPush, cancelAppointmentInClinicorp: mirrors.clinicorpCancel, hasClinicorpConflict: mirrors.clinicorpConflict, listClinicorpBusyBlocks: mirrors.clinicorpBusy, clinicorpConfirmationPending: mirrors.clinicorpPending }));
 vi.mock("@/modules/scheduling/clinicorp-sync", () => ({
@@ -57,6 +62,11 @@ beforeEach(() => {
   mirrors.clinicorpConflict.mockResolvedValue(false);
   mirrors.clinicorpBusy.mockResolvedValue([]);
   mirrors.clinicorpPending.mockResolvedValue(false);
+  icloud.push.mockResolvedValue({ status: "skipped" });
+  icloud.update.mockResolvedValue({ status: "skipped" });
+  icloud.remove.mockResolvedValue(true);
+  icloud.busy.mockResolvedValue([]);
+  icloud.conflict.mockResolvedValue(false);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -206,6 +216,15 @@ describe("cancelamento", () => {
     expect(mirrors.googleDelete).toHaveBeenCalledWith(ctx.tenantId, "google-antigo");
     expect(mirrors.clinicorpCancel).toHaveBeenCalledWith(ctx.tenantId, "123");
   });
+  it("remove também o evento do Calendário da Apple, no endereço gravado", async () => {
+    db.appointment.findFirst.mockResolvedValue({ ...appointment, icloudEventUrl: "https://p1-caldav.icloud.com/c/fechai-consulta-1.ics" });
+    expect(await cancel()).toContain("Cancelamento feito");
+    expect(icloud.remove).toHaveBeenCalledWith(ctx.tenantId, "https://p1-caldav.icloud.com/c/fechai-consulta-1.ics", appointment.id);
+  });
+  it("sem endereço gravado ainda pede a remoção (o evento pode existir sem ter sido anotado)", async () => {
+    await cancel();
+    expect(icloud.remove).toHaveBeenCalledWith(ctx.tenantId, null, appointment.id);
+  });
   it("repetir cancelamento não repete a alteração", async () => {
     db.appointment.findFirst.mockResolvedValue({ ...appointment, status: "canceled" });
     expect(await cancel()).toContain("já está cancelada");
@@ -263,6 +282,34 @@ describe("reagendamento", () => {
     expect(mirrors.clinicorpConflict).toHaveBeenCalledWith(ctx.tenantId, new Date("2026-09-18T17:00:00Z"), new Date("2026-09-18T17:30:00Z"), cfg.timezone, "123");
     expect(mirrors.clinicorpCancel).toHaveBeenCalledWith(ctx.tenantId, "123");
     expect(mirrors.clinicorpPush).toHaveBeenCalledOnce();
+  });
+  it("move o evento do iPhone para o novo horário, no mesmo endereço", async () => {
+    const url = "https://p1-caldav.icloud.com/c/fechai-consulta-1.ics";
+    db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id ? { ...appointment, icloudEventUrl: url, patientName: "Maria" } : null);
+    icloud.update.mockResolvedValue({ status: "synced", url });
+    expect(await reschedule()).toContain("reagendada");
+    expect(icloud.update).toHaveBeenCalledWith(ctx.tenantId, url, expect.objectContaining({
+      appointmentId: appointment.id, startsAt: new Date("2026-09-18T17:00:00Z"), endsAt: new Date("2026-09-18T17:30:00Z"), phone: "5511999999999",
+    }), { agentId: null });
+    expect(db.appointment.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.not.objectContaining({ icloudEventUrl: null }) }));
+  });
+  it("iCloud fora do ar na remarcação: esquece o endereço para a varredura reenviar", async () => {
+    db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id ? { ...appointment, icloudEventUrl: "https://p1-caldav.icloud.com/c/x.ics" } : null);
+    icloud.update.mockResolvedValue({ status: "failed", reason: "transient" });
+    expect(await reschedule()).toContain("reagendada");
+    expect(db.appointment.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: expect.any(Date) }),
+    }));
+  });
+  it("consulta que nunca foi ao iCloud não é enviada na remarcação: a varredura lê o horário novo", async () => {
+    await reschedule();
+    expect(icloud.update).not.toHaveBeenCalled();
+  });
+  it("recusa do Clinicorp por conflito não mexe no evento do iPhone", async () => {
+    db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id ? { ...appointment, icloudEventUrl: "https://p1-caldav.icloud.com/c/x.ics" } : null);
+    mirrors.clinicorpPush.mockResolvedValueOnce({ status: "failed", reason: "conflict", error: "ocupado" });
+    await reschedule();
+    expect(icloud.update).not.toHaveBeenCalled();
   });
   it("não altera horário sem confirmação", async () => {
     expect(await reschedule({ confirmed: false })).toContain("Nenhuma alteração");
@@ -399,6 +446,38 @@ describe("nome da pessoa atendida", () => {
     expect(mirrors.clinicorpPush).toHaveBeenCalledWith(ctx.tenantId, expect.objectContaining({
       patientName: "Maria Souza", lead: expect.objectContaining({ name: "Thalita" }),
     }));
+  });
+
+  it("envia ao iCloud sem o telefone quando o contato é do chat de teste, com o endereço gravado", async () => {
+    db.appointment.findMany.mockResolvedValue([]);
+    db.appointment.findFirst.mockResolvedValue(null);
+    db.appointment.create.mockResolvedValue({ id: "nova-consulta" });
+    db.appointment.update.mockResolvedValue({});
+    db.lead.findUnique.mockResolvedValue({ name: "Teste", phone: "5511999999999", isTest: true });
+    db.lead.update.mockResolvedValue({});
+    icloud.push.mockResolvedValue({ status: "synced", url: "https://p1-caldav.icloud.com/c/fechai-nova-consulta.ics" });
+
+    await runToolHandler("schedule_meeting", ctx, { date: "2026-09-17", time: "14:00", patientName: "Maria Souza", procedimento: "Implante" });
+
+    expect(icloud.push).toHaveBeenCalledWith(ctx.tenantId, expect.objectContaining({
+      appointmentId: "nova-consulta", patientName: "Maria Souza", procedure: "Implante", phone: null, isTest: true,
+    }), { agentId: ctx.agentId });
+    expect(db.appointment.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ icloudEventUrl: "https://p1-caldav.icloud.com/c/fechai-nova-consulta.ics" }),
+    }));
+  });
+
+  it("falha do iCloud não desfaz a consulta", async () => {
+    db.appointment.findMany.mockResolvedValue([]);
+    db.appointment.findFirst.mockResolvedValue(null);
+    db.appointment.create.mockResolvedValue({ id: "nova-consulta" });
+    db.appointment.update.mockResolvedValue({});
+    db.lead.findUnique.mockResolvedValue({ name: "Thalita", phone: "5511999999999", isTest: false });
+    db.lead.update.mockResolvedValue({});
+    icloud.push.mockResolvedValue({ status: "failed", reason: "transient" });
+
+    expect(await runToolHandler("schedule_meeting", ctx, { date: "2026-09-17", time: "14:00", patientName: "Maria Souza" })).toContain("Agendado");
+    expect(db.appointment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.not.objectContaining({ icloudEventUrl: expect.anything() }) }));
   });
 
   it("preserva o nome da paciente ao reagendar", async () => {

@@ -202,6 +202,7 @@ export function createMonthlyAiToolbox(ctx: { tenantId: string; report: MonthlyR
               statusDisponiveis: report.clinicorpStatusTypes.map((s) => ({ id: s.type, nome: s.description })),
               agendamentosVinculados: evidence ? evidence.appointments.filter((a) => a.clinicorp.linked).length : null },
             googleAgenda: { ligadoNaConta: features?.googleEnabled ?? "indisponível" },
+            calendarioApple: { ligadoNaConta: features?.icloudEnabled ?? "indisponível" },
             whatsapp: channels ?? "indisponível",
           });
         }

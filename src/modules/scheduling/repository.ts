@@ -12,6 +12,7 @@ import {
 import { dayKeyInZone, monthRangeUtc, parseLocalDateTime, partsInZone, timeInZone, zonedTimeToUtc } from "./time";
 import { canConfirm, canMarkAttendance, type AppointmentKind, type Attendance } from "./dimensions";
 import { syncAppointmentToClinicorp } from "./clinicorp-sync";
+import { deleteIcloudEvent, pushEventToIcloud, updateIcloudEvent, type IcloudSyncResult } from "./icloud";
 
 /**
  * Leitura e escrita da agenda. Toda query filtra por tenantId (regra do
@@ -257,16 +258,29 @@ export async function createAppointment(input: CreateAppointmentInput) {
     startsAt: input.startsAt, endsAt, timeZone: input.timezone,
   });
 
+  // Lead de teste (chat do agente) marca o título e não leva o telefone ao iPhone.
+  const icloud = await pushEventToIcloud(
+    input.tenantId,
+    {
+      appointmentId: appointment.id, title: input.title, patientName: input.patientName, procedure: input.procedure,
+      phone: lead?.isTest ? null : lead?.phone, notes: input.notes, startsAt: input.startsAt, endsAt,
+      timeZone: input.timezone, isTest: lead?.isTest,
+    },
+    { agentId: input.agentId ?? null },
+  );
+  const icloudEventUrl = icloud.status === "synced" ? icloud.url : null;
+
   await prisma.appointment.update({
     where: { id: appointment.id },
     data: {
       reminderOverride: Prisma.DbNull,
       ...(googleEventId ? { googleEventId } : {}),
       ...(clinicorpAppointmentId ? { clinicorpAppointmentId } : {}),
+      ...(icloudEventUrl ? { icloudEventUrl } : {}),
     },
   });
 
-  return { ...appointment, reminderOverride: null, googleEventId, clinicorpAppointmentId, clinicorpSync };
+  return { ...appointment, reminderOverride: null, googleEventId, clinicorpAppointmentId, icloudEventUrl, clinicorpSync };
 }
 
 export async function cancelAppointment(tenantId: string, id: string, leadId?: string, options: {
@@ -296,6 +310,8 @@ export async function cancelAppointment(tenantId: string, id: string, leadId?: s
     appointment.clinicorpAppointmentId
       ? cancelAppointmentInClinicorp(tenantId, appointment.clinicorpAppointmentId)
       : Promise.resolve(true),
+    // Sem endereço gravado apaga o endereço fixo do evento (404 = nada a remover).
+    deleteIcloudEvent(tenantId, appointment.icloudEventUrl ?? null, appointment.id),
   ]);
   return { ...appointment, status: "canceled", notes, clinicorpCancellationAccepted };
 }
@@ -408,10 +424,24 @@ export async function rescheduleAppointment(input: {
     });
     return { status: "conflict" } as const;
   }
+  // O Clinicorp aceitou (ou não é usado): agora o evento do iPhone vai para o
+  // novo horário, no mesmo endereço. Quem nunca foi enviado fica por conta da
+  // varredura do worker, que já lê o horário novo no banco.
+  const icloud: IcloudSyncResult = previous.icloudEventUrl
+    ? await updateIcloudEvent(input.tenantId, previous.icloudEventUrl, {
+        appointmentId: previous.id, title: previous.title, patientName: previous.patientName, procedure: previous.procedure,
+        phone: lead?.isTest ? null : lead?.phone, notes: previous.notes, startsAt: input.startsAt, endsAt,
+        timeZone: input.timezone, isTest: lead?.isTest,
+      }, { agentId: previous.agentId ?? null })
+    : { status: "skipped" };
+  // Não deu para mover o evento: esquece o endereço para a varredura reenviar o
+  // horário atual (sobrescrevendo o antigo) assim que o iCloud responder.
+  const icloudData = !previous.icloudEventUrl || icloud.status === "synced" ? {}
+    : { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: icloud.status === "failed" && icloud.reason === "transient" ? new Date(Date.now() + 2 * 60_000) : null };
   await prisma.appointment.updateMany({
     where: { id: previous.id, tenantId: input.tenantId, status: "scheduled", startsAt: input.startsAt, endsAt, rescheduledAt: changedAt },
     data: {
-      googleEventId, clinicorpAppointmentId,
+      googleEventId, clinicorpAppointmentId, ...icloudData,
     },
   });
   return { status: "rescheduled", clinicorpSync } as const;

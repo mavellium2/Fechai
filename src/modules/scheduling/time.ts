@@ -39,6 +39,21 @@ function offsetMs(at: Date, timeZone: string): number {
   return asIfUtc - at.getTime();
 }
 
+/** Deslocamento do fuso em minutos neste instante (-180 = UTC-03:00). */
+export function zoneOffsetMinutes(at: Date, timeZone: string): number {
+  return Math.round(offsetMs(at, timeZone) / 60_000);
+}
+
+/** O fuso existe para o `Intl`? Nome inventado ou do Windows não existe. */
+export function isKnownTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Data/hora local de um fuso -> instante UTC.
  *

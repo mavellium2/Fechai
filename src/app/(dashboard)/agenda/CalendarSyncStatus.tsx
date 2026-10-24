@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { CalendarCheck2, Stethoscope, TriangleAlert } from "lucide-react";
+import { Apple, CalendarCheck2, Stethoscope, TriangleAlert } from "lucide-react";
 import { Card } from "@/components/ui/card";
 
 export type CalendarSyncItem = {
-  key: "google" | "clinicorp";
+  key: "google" | "clinicorp" | "icloud";
   name: string;
   /** Habilitado em /integracoes mas ainda sem credencial. */
   connected: boolean;
@@ -18,6 +18,7 @@ export type CalendarSyncItem = {
 const ICONS = {
   google: CalendarCheck2,
   clinicorp: Stethoscope,
+  icloud: Apple,
 } as const;
 
 /**

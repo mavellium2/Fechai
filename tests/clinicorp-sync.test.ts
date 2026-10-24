@@ -13,6 +13,10 @@ vi.mock("@/modules/scheduling/clinicorp", () => ({
   cancelAppointmentInClinicorp: api.cancel, getClinicorpStatus: api.status,
 }));
 vi.mock("@/modules/scheduling/google", () => ({ pushEventToGoogle: api.googlePush, deleteEventFromGoogle: api.googleDelete }));
+vi.mock("@/modules/scheduling/icloud", () => ({
+  pushEventToIcloud: vi.fn(async () => ({ status: "skipped" })), updateIcloudEvent: vi.fn(async () => ({ status: "skipped" })),
+  deleteIcloudEvent: vi.fn(async () => true), listIcloudBusyBlocks: vi.fn(async () => []), hasIcloudConflict: vi.fn(async () => false),
+}));
 
 import { processClinicorpSync, scanClinicorpSync, syncAppointmentToClinicorp } from "@/modules/scheduling/clinicorp-sync";
 import { createAppointment } from "@/modules/scheduling/repository";
