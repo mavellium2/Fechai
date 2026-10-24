@@ -67,7 +67,7 @@ e quem aplica é um superadmin, no painel.
 | `get_agent_config` | `read` | `{ agentId }` | persona, `systemPrompt`, `behavior`, `variables`, `actions`, `knowledge` |
 | `run_simulation` | `simulate` | `{ agentId, messages, variant? }` | `{ simulationId, runs: [{ variant, turns: [{ user, reply, toolsUsed, status }] }], dryRun: true }` |
 | `get_simulation` | `simulate` | `{ simulationId }` | `{ simulationId, agentId, runs: [{ variant, turns: [{ user, reply }] }], dryRun: true }` |
-| `propose_change` | `propose` | `{ agentId, changes: { persona?: {campos} }, reason }` | `{ proposalId, status: "pending", diff: [{ field, before, after }], promptDiff: [{ type, text }], approveUrl, expiresAt }` |
+| `propose_change` | `propose` + `read` | `{ agentId, changes: { persona?: {campos} }, reason }` | `{ proposalId, status: "pending", diff: [{ field, before, after }], promptDiff: [{ type, text }], approveUrl, expiresAt }` |
 | `get_proposal` | `propose` | `{ proposalId }` | `{ proposalId, status, decidedAt, decidedByRole, appliedAt, rejectReason }` |
 
 `run_simulation` também aceita `proposalId` (ver "Propostas de mudança").
@@ -77,7 +77,12 @@ e quem aplica é um superadmin, no painel.
 segunda grava na fila de propostas, nunca no agente). Todas com
 `destructiveHint: false` e `openWorldHint: false`. As famílias são
 independentes: um token só com `simulate` ou `propose` não vê `list_agents`, então,
-para descobrir os ids, emita `read` junto.
+para descobrir os ids, emita `read` junto. A única exceção à independência é
+`propose_change`, que exige `propose` **e** `read` (`alsoScopes` em `tools.ts`): a
+saída traz o `promptDiff` e o `diff`, que mostram o valor atual do prompt e dos
+campos da persona, conteúdo de `read`; um token só com `propose` leria o prompt
+inteiro de lado. Token só com `propose` vê apenas `get_proposal` (que não mostra
+prompt) e recebe 403 em `propose_change`.
 
 `get_agent_config` devolve: `persona` (nome do agente e da empresa, setor, tom,
 estilo, oferta, objetivo, regras), `systemPrompt`, `behavior` (ouvir áudio, parar
@@ -188,8 +193,17 @@ passo.
   edição entre a conferência e o `update` também cai em `stale` e nada é gravado.
 - **Aplicar duas vezes** é recusado: a aprovação "reivindica" a linha com
   `updateMany where { id, tenantId, status: "pending" }` antes de gravar; quem perde
-  a corrida (count 0) não grava. Se a gravação do agente falhar com exceção, a
-  proposta volta a `pending`.
+  a corrida (count 0) não grava. O claim e a gravação do agente rodam numa
+  **`prisma.$transaction` interativa** (`applyPersonaAnswers` aceita `options.tx`),
+  então são atômicos: se a gravação lança ou o processo cai no meio, a transação
+  desfaz o claim e a proposta continua `pending` (nunca `applied` sem ter aplicado;
+  não há mais reversão manual no `catch`). Duas aprovações simultâneas: a segunda
+  espera o lock da linha no Postgres, vê `applied` e perde o claim; os testes, com
+  banco em memória, só provam a lógica, a garantia real é do Postgres. A auditoria
+  (`recordChange`, que nunca lança) sai **depois do commit** (`applied.audit()`),
+  para não registrar uma mudança que a transação poderia desfazer. Proposta
+  `stale` não tem decisor: `decidedById`, `decidedByEmail`, `decidedAt` e
+  `appliedAt` são zerados, e `get_proposal` devolve `decidedByRole: null`.
 - **Aplicar** chama `applyPersonaAnswers` (o mesmo núcleo de `savePersona` e
   `saveRules` do painel) com o superadmin como ator, e audita o evento normal da
   mudança (`agent.persona_updated`; `agent.rules_updated` quando só as regras mudam)
@@ -278,7 +292,7 @@ mostrado uma vez fica inline, porque é conteúdo.
 | Agente de outra conta ou inexistente | 200 | resultado com `isError: true` | |
 | `run_simulation` com mais de 10 mensagens, mensagem vazia ou acima de 1000 caracteres | 200 | `-32602` | |
 | `run_simulation` com `proposal`/`both` sem `proposalId`, com `proposalId` na `current`, com proposta que não está `pending` (aplicada, recusada, vencida, desatualizada), de outro agente ou de outra conta, ou sem o escopo `propose` | 200 | resultado com `isError: true` | |
-| `propose_change` ou `get_proposal` em token sem `propose` | 403 | `-32003` | |
+| `propose_change` ou `get_proposal` em token sem `propose`, ou `propose_change` em token sem `read` | 403 | `-32003` | |
 | `propose_change` com campo de persona desconhecido, `tenantId`, `businessName` vazio ou texto acima de 4000 caracteres | 200 | `-32602` | |
 | `propose_change` de agente de outra conta, proposta que não muda nada ou com 10 pendentes no agente | 200 | resultado com `isError: true` | |
 | `get_proposal` de outra conta ou inexistente | 200 | resultado com `isError: true` | |
@@ -319,7 +333,7 @@ curl -s -X POST "$URL" -H "Authorization: Bearer $FECHAI_MCP_TOKEN" \
 
 Confira:
 
-- `tools/list` com `read` mostra só `list_agents` e `get_agent_config`; com `simulate`, também `run_simulation` e `get_simulation`; com `propose`, `propose_change` e `get_proposal`.
+- `tools/list` com `read` mostra só `list_agents` e `get_agent_config`; com `simulate`, também `run_simulation` e `get_simulation`; com `propose` sozinho, só `get_proposal`; com `propose` + `read`, também `propose_change`.
 - `propose_change` com `{"agentId":"...","changes":{"persona":{"tone":"direto"}},"reason":"..."}`: `status: "pending"`, o agente **não muda**; abrir o `approveUrl` como superadmin mostra o diff e os botões.
 - Aprovar: o agente muda (veja a persona em `/agentes`), `/admin/logs` mostra `agent.persona_updated` com `via: "mcp"`, e `get_proposal` responde `applied`. Aprovar de novo é recusado.
 - `run_simulation` com `{"agentId":"...","messages":["Oi","Quero marcar sexta às 14h"]}`: resposta com `dryRun: true`, nada novo em `/agenda`, nenhuma mensagem no WhatsApp, e a conversa na aba de testes de `/conversas`.
@@ -363,6 +377,11 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
   o que o superadmin viu: o diff é montado pelo servidor e a aprovação confere o
   `baseHash`, mas o texto do campo é do portador do token, então leia antes de
   aprovar (principalmente `avoid`, as regras).
+- **O teto de 10 pendentes não é atômico.** `createProposal` conta as pendentes e
+  depois cria, em duas operações; chamadas concorrentes do mesmo token podem passar
+  da contagem e ultrapassar 10. Não há lock (decisão: não implementar agora). O
+  limite de 120 chamadas/min por token limita o estrago, e o excesso só entra na
+  fila de revisão do superadmin (nada é aplicado sem ele).
 - **Conversas de simulação acumulam.** Cada `run_simulation` cria um lead/conversa
   de teste novo; não há limpeza automática.
 

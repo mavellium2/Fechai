@@ -49,6 +49,12 @@ export type McpTool = {
   name: string;
   description: string;
   scope: McpScope;
+  /**
+   * Escopos que o token também precisa ter. `propose_change` exige `read`: a saída
+   * (diff por campo e por linha do prompt) mostra o valor atual do prompt, que é
+   * conteúdo de `read`; sem isto, `propose` leria o prompt inteiro de lado.
+   */
+  alsoScopes?: readonly McpScope[];
   /** Omitido = leitura pura (`READ_ONLY_ANNOTATIONS`). */
   annotations?: McpToolAnnotations;
   /** JSON Schema anunciado em `tools/list`. */
@@ -168,10 +174,11 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "propose_change",
     description:
-      "Propõe uma mudança na persona de um agente (campos de persona e as regras em `avoid`). NADA é aplicado: a proposta fica pendente até um superadmin aprovar no painel (link em `approveUrl`), vence em 7 dias e fica desatualizada se o agente mudar antes disso. " +
+      "Propõe uma mudança na persona de um agente (campos de persona e as regras em `avoid`). Exige as permissões propose + read (a resposta mostra o valor atual do prompt). NADA é aplicado: a proposta fica pendente até um superadmin aprovar no painel (link em `approveUrl`), vence em 7 dias e fica desatualizada se o agente mudar antes disso. " +
       "Devolve o diff por campo e o diff por linha do prompt composto (antes/depois). Use get_proposal para acompanhar e run_simulation com variant `proposal` para testar antes da aprovação. " +
       "Só os campos presentes em `changes.persona` mudam; os demais ficam como estão.",
     scope: "propose",
+    alsoScopes: ["read"],
     // Grava só a fila de propostas; o agente não muda.
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
@@ -223,6 +230,11 @@ export const MCP_TOOLS: McpTool[] = [
     run: (ctx, args) => getProposalStatus(ctx.tenantId, args.proposalId as string),
   },
 ];
+
+/** Todos os escopos que a ferramenta exige (o principal e os adicionais). */
+export function toolScopes(tool: Pick<McpTool, "scope" | "alsoScopes">): McpScope[] {
+  return [tool.scope, ...(tool.alsoScopes ?? [])];
+}
 
 export function findMcpTool(name: string): McpTool | undefined {
   return MCP_TOOLS.find((tool) => tool.name === name);

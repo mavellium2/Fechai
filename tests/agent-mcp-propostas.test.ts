@@ -17,9 +17,11 @@ type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-exp
 const state = vi.hoisted(() => ({
   agents: [] as Row[],
   proposals: [] as Row[],
-  scopes: ["propose"] as string[],
+  scopes: ["read", "propose"] as string[],
   tokenTenant: "tenant-A",
   seq: 0,
+  /** Ordem dos eventos de uma aprovação: "commit" (fim da transação) e "audit". */
+  events: [] as string[],
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -43,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   runTurn: vi.fn(),
   getOrCreateConversation: vi.fn(),
+  transaction: vi.fn(),
 }));
 
 function matches(row: Row, where: Row): boolean {
@@ -58,6 +61,7 @@ function matches(row: Row, where: Row): boolean {
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    $transaction: mocks.transaction,
     mcpToken: { findUnique: mocks.tokenFindUnique, update: mocks.tokenUpdate, findFirst: mocks.tokenFindFirst },
     agent: { findFirst: mocks.agentFindFirst, update: mocks.agentUpdate, updateMany: mocks.agentUpdateMany },
     agentChangeProposal: {
@@ -164,14 +168,17 @@ beforeEach(() => {
 
   state.agents = [makeAgent(), makeAgent({ id: "agent-B", tenantId: "tenant-B", name: "Bia" })];
   state.proposals = [];
-  state.scopes = ["propose"];
+  state.scopes = ["read", "propose"];
   state.tokenTenant = "tenant-A";
   state.seq = 0;
+  state.events = [];
 
   mocks.rate.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
   mocks.reserve.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
   mocks.recordAudit.mockResolvedValue(undefined);
-  mocks.recordChange.mockResolvedValue(undefined);
+  mocks.recordChange.mockImplementation(async () => {
+    state.events.push("audit");
+  });
   mocks.requireSuperadmin.mockResolvedValue(admin);
   mocks.requireTenant.mockResolvedValue({ tenantId: "tenant-A" });
 
@@ -184,6 +191,29 @@ beforeEach(() => {
     tenant: { status: "active" },
   }));
   mocks.tokenUpdate.mockResolvedValue({});
+
+  // Transação interativa em memória: o cliente `tx` é o mesmo banco; se a função lança,
+  // o estado volta ao de antes (rollback) e o erro sobe; se termina, vale o "commit".
+  // Isto prova a LÓGICA (claim + agente juntos, nada pela metade). A garantia real,
+  // inclusive o lock de linha que serializa duas aprovações, é do Postgres.
+  mocks.transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+    const snapshot = {
+      proposals: state.proposals.map((row) => ({ ...row })),
+      agents: state.agents.map((row) => ({ ...row, personaDraft: { ...row.personaDraft } })),
+    };
+    try {
+      const result = await fn({
+        agent: { findFirst: mocks.agentFindFirst, updateMany: mocks.agentUpdateMany },
+        agentChangeProposal: { updateMany: mocks.proposalUpdateMany },
+      });
+      state.events.push("commit");
+      return result;
+    } catch (error) {
+      state.proposals.splice(0, state.proposals.length, ...snapshot.proposals);
+      state.agents.splice(0, state.agents.length, ...snapshot.agents);
+      throw error;
+    }
+  });
   mocks.tokenFindFirst.mockResolvedValue({ tokenPrefix: "ABCD1234" });
 
   mocks.agentFindFirst.mockImplementation(async ({ where }: { where: Row }) => {
@@ -337,9 +367,28 @@ describe("escopo propose", () => {
     expect(mocks.proposalFindFirst).not.toHaveBeenCalled();
   });
 
-  it("com o escopo, as duas aparecem, nenhuma anuncia tenantId e propose_change não é leitura pura", async () => {
+  it("propose_change exige read além de propose: o diff mostra o prompt atual, que é do escopo read", async () => {
+    state.scopes = ["propose"];
     const list = await json(await call({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
-    const tools = list.result.tools as Row[];
+    const names = list.result.tools.map((tool: { name: string }) => tool.name);
+    // get_proposal não mostra prompt: basta propose.
+    expect(names).toEqual(["get_proposal"]);
+
+    const denied = await call(toolCall("propose_change", { agentId: "agent-A", changes: { persona: { tone: "x" } }, reason: "x" }));
+    expect(denied.status).toBe(403);
+    expect(((await json(denied)).error?.message as string) ?? "").toContain('"read"');
+    expect(mocks.agentFindFirst).not.toHaveBeenCalled();
+    expect(mocks.proposalCreate).not.toHaveBeenCalled();
+
+    // Com read junto, passa; e o get_proposal segue valendo só com propose.
+    state.scopes = ["read", "propose"];
+    expect((await call(toolCall("propose_change", { agentId: "agent-A", changes: { persona: { tone: "x" } }, reason: "x" }))).status).toBe(200);
+    expect(mocks.proposalCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("com os escopos, as duas aparecem, nenhuma anuncia tenantId e propose_change não é leitura pura", async () => {
+    const list = await json(await call({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    const tools = (list.result.tools as Row[]).filter((tool) => ["get_proposal", "propose_change"].includes(tool.name));
     expect(tools.map((tool) => tool.name).sort()).toEqual(["get_proposal", "propose_change"]);
     for (const tool of tools) expect(Object.keys(tool.inputSchema.properties)).not.toContain("tenantId");
     expect(tools.find((tool) => tool.name === "propose_change")?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
@@ -497,9 +546,20 @@ describe("aprovação pelo superadmin", () => {
     if (!result.ok) expect(result.error).toMatch(/mudou depois desta proposta/);
     expect(state.proposals[0].status).toBe("stale");
     expect(state.proposals[0].appliedAt).toBeNull();
+    // Ninguém aplicou: sem decisor.
+    expect(state.proposals[0]).toMatchObject({ decidedById: null, decidedByEmail: null, decidedAt: null });
     expect(mocks.agentUpdateMany).not.toHaveBeenCalled();
     expect(agent.personaDraft.tone).toBe("acolhedor");
     expect(mocks.recordChange).not.toHaveBeenCalled();
+    // E o MCP não mostra "decidida por superadmin" numa proposta que ninguém decidiu.
+    expect(output(await json(await call(toolCall("get_proposal", { proposalId }))))).toEqual({
+      proposalId,
+      status: "stale",
+      decidedAt: null,
+      decidedByRole: null,
+      appliedAt: null,
+      rejectReason: null,
+    });
   });
 
   it("agente que muda ENTRE a conferência e a gravação também é recusado (updatedAt na condição)", async () => {
@@ -508,8 +568,10 @@ describe("aprovação pelo superadmin", () => {
     const result = await approveProposal(proposalId, { id: "admin-1", email: null });
     expect(result.ok).toBe(false);
     expect(mocks.agentUpdateMany.mock.calls[0][0].where).toMatchObject({ id: "agent-A", tenantId: "tenant-A", updatedAt: expect.any(Date) });
-    expect(state.proposals[0]).toMatchObject({ status: "stale", appliedAt: null });
+    // O claim e o desatualizado são da mesma transação; a proposta fica sem decisor.
+    expect(state.proposals[0]).toMatchObject({ status: "stale", appliedAt: null, decidedById: null, decidedByEmail: null, decidedAt: null });
     expect(mocks.recordChange).not.toHaveBeenCalled();
+    expect(output(await json(await call(toolCall("get_proposal", { proposalId })))).decidedByRole).toBeNull();
   });
 
   it("proposta vencida é marcada expired e recusada, sem gravar", async () => {
@@ -532,6 +594,8 @@ describe("aprovação pelo superadmin", () => {
     expect(mocks.recordChange).toHaveBeenCalledTimes(1);
   });
 
+  // Em memória isto só prova a lógica do claim condicional dentro da transação; que a
+  // segunda transação espere o lock da linha e perca a corrida é garantia do Postgres.
   it("duas aprovações ao mesmo tempo: o updateMany condicional deixa passar uma", async () => {
     const { proposalId } = await propose();
     // Os dois passam pela leitura (ainda 'pending'); o claim decide.
@@ -541,6 +605,7 @@ describe("aprovação pelo superadmin", () => {
     ]);
     expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
     expect(mocks.agentUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mocks.recordChange).toHaveBeenCalledTimes(1);
     const claims = mocks.proposalUpdateMany.mock.calls.map((callArgs) => callArgs[0].where);
     for (const where of claims) expect(where).toMatchObject({ id: proposalId, tenantId: "tenant-A", status: expect.any(String) });
   });
@@ -565,11 +630,27 @@ describe("aprovação pelo superadmin", () => {
     expect(none).toEqual({ ok: false, error: "Proposta não encontrada." });
   });
 
-  it("falha ao gravar o agente devolve a proposta à fila (não fica 'aplicada' sem aplicar)", async () => {
+  it("claim e gravação do agente são uma transação só; a auditoria sai depois do commit", async () => {
+    const { proposalId } = await propose();
+    mocks.recordChange.mockClear();
+    state.events = [];
+    expect(await approveProposal(proposalId, { id: "admin-1", email: null })).toMatchObject({ ok: true });
+    expect(mocks.transaction).toHaveBeenCalledTimes(1);
+    expect(state.events).toEqual(["commit", "audit"]);
+  });
+
+  it("falha ao gravar o agente na transação: a proposta NÃO fica 'aplicada' e nada é auditado", async () => {
     const { proposalId } = await propose();
     mocks.agentUpdateMany.mockRejectedValueOnce(new Error("banco fora do ar"));
     await expect(approveProposal(proposalId, { id: "admin-1", email: null })).rejects.toThrow("banco fora do ar");
-    expect(state.proposals[0]).toMatchObject({ status: "pending", decidedById: null, appliedAt: null });
+    // Rollback da transação: volta ao estado de antes do claim, sem remendo manual.
+    expect(state.proposals[0]).toMatchObject({ status: "pending", decidedById: null, decidedByEmail: null, decidedAt: null, appliedAt: null });
+    expect(agentOf("agent-A").personaDraft.tone).toBe("acolhedor");
+    expect(mocks.recordChange).not.toHaveBeenCalled();
+    expect(state.events).not.toContain("commit");
+    // E dá para aprovar de novo depois que o banco volta.
+    expect(await approveProposal(proposalId, { id: "admin-1", email: null })).toMatchObject({ ok: true });
+    expect(state.proposals[0].status).toBe("applied");
   });
 });
 
@@ -622,7 +703,7 @@ describe("recusa", () => {
 
 describe("run_simulation com proposta", () => {
   beforeEach(() => {
-    state.scopes = ["simulate", "propose"];
+    state.scopes = ["read", "simulate", "propose"];
   });
 
   const callSim = async (args: Row) => json(await call(toolCall("run_simulation", { agentId: "agent-A", messages: ["Oi", "Quanto custa?"], ...args })));

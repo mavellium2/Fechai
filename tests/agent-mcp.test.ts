@@ -183,10 +183,20 @@ describe("Autenticação da rota MCP", () => {
   });
 
   it("tools/list só mostra o que o escopo permite", async () => {
-    // `propose` (parte C): só as duas de proposta, nunca leitura nem simulação.
+    // `propose` sozinho (parte C): só get_proposal; propose_change exige `read` também.
     mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["propose"] }));
     const body = await json(await call(rpc("tools/list")));
-    expect(body.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(["get_proposal", "propose_change"]);
+    expect(body.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(["get_proposal"]);
+
+    // `propose` + `read`: as duas de proposta, mais a leitura.
+    mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["read", "propose"] }));
+    const both = await json(await call(rpc("tools/list")));
+    expect(both.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual([
+      "get_agent_config",
+      "get_proposal",
+      "list_agents",
+      "propose_change",
+    ]);
 
     // `simulate` (parte B) vê só as de simulação, nunca as de leitura.
     mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["simulate"] }));

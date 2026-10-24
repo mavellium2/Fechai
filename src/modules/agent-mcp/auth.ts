@@ -94,3 +94,12 @@ export function missingScope(auth: Pick<McpAuth, "scopes">, scope: McpScope): Mc
   if (auth.scopes.includes(scope)) return null;
   return { ok: false, status: 403, message: `Este token não tem a permissão "${scope}".` };
 }
+
+/** Ferramenta que exige mais de um escopo: a primeira permissão que falta recusa. */
+export function missingScopes(auth: Pick<McpAuth, "scopes">, scopes: readonly McpScope[]): McpAuthFailure | null {
+  for (const scope of scopes) {
+    const denied = missingScope(auth, scope);
+    if (denied) return denied;
+  }
+  return null;
+}
