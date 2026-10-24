@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fechai": {
+      "type": "http",
+      "url": "${FECHAI_MCP_URL:-https://fechai.januscms.com.br/api/mcp}",
+      "headers": {
+        "Authorization": "Bearer ${FECHAI_MCP_TOKEN}"
+      }
+    }
+  }
+}
