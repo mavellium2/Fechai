@@ -53,6 +53,40 @@ function clientIp(request: Request): string {
   return forwarded?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "desconhecido";
 }
 
+/**
+ * Lê o corpo sem passar do teto. `Content-Length` declarado acima do limite é
+ * recusado sem ler nada; sem ele (chunked) ou com um valor mentiroso, o stream é
+ * lido em pedaços e cancelado assim que a soma passa do teto — o corpo inteiro
+ * nunca chega à memória. `null` = grande demais.
+ */
+export async function readBodyWithinLimit(request: Request, maxBytes: number): Promise<string | null> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null) {
+    const length = Number(declared);
+    if (Number.isFinite(length) && length > maxBytes) return null;
+  }
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -87,8 +121,13 @@ export async function handleMcpPost(request: Request): Promise<Response> {
   }
 
   // 2. Corpo.
-  const raw = await request.text();
-  if (Buffer.byteLength(raw) > MAX_MCP_BODY_BYTES) {
+  let raw: string | null;
+  try {
+    raw = await readBodyWithinLimit(request, MAX_MCP_BODY_BYTES);
+  } catch {
+    return rpcError(null, RPC.parse, "Não foi possível ler o corpo.", 400);
+  }
+  if (raw === null) {
     return rpcError(null, RPC.invalidRequest, "Corpo grande demais.", 413);
   }
   let body: unknown;
