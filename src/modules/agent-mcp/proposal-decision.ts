@@ -12,7 +12,7 @@ import { effectiveStatus, parseStoredSide, PROPOSAL_STATUS_LABELS } from "./prop
  *
  * A proposta é "reivindicada" por um `updateMany` condicional (`status:
  * "pending"`), então duas aprovações simultâneas, ou aprovar duas vezes, só
- * deixam uma passar. Antes disso, três recusas sem gravar nada no agente:
+ * deixam uma passar. O claim e a gravação do agente rodam na mesma transação. Antes disso, três recusas sem gravar nada no agente:
  * vencida (`expired`), agente mudou desde a proposta (`stale`) e já decidida.
  */
 
@@ -22,6 +22,9 @@ export type DecisionResult = { ok: true; info: string } | { ok: false; error: st
 export const MAX_REJECT_REASON_CHARS = 1000;
 
 const NOT_FOUND = "Proposta não encontrada.";
+
+/** Proposta desatualizada: ninguém a aplicou, então não tem decisor nem data de aplicação. */
+const STALE_DATA = { status: "stale", decidedById: null, decidedByEmail: null, decidedAt: null, appliedAt: null } as const;
 
 async function tokenPrefixOf(tenantId: string, tokenId: string): Promise<string | null> {
   try {
@@ -57,7 +60,7 @@ export async function approveProposal(proposalId: string, actor: DecisionActor, 
     select: { name: true, systemPrompt: true, objective: true, personaDraft: true, archived: true },
   });
   if (!agent || agent.archived || agentBaseHash(agent) !== proposal.baseHash) {
-    await prisma.agentChangeProposal.updateMany({ where: { id: proposal.id, tenantId, status: "pending" }, data: { status: "stale" } });
+    await prisma.agentChangeProposal.updateMany({ where: { id: proposal.id, tenantId, status: "pending" }, data: STALE_DATA });
     return {
       ok: false,
       error: "O agente mudou depois desta proposta (ou não existe mais). Nada foi gravado; peça uma nova proposta a partir da versão atual.",
@@ -65,40 +68,45 @@ export async function approveProposal(proposalId: string, actor: DecisionActor, 
   }
 
   const decidedAt = now;
-  const claim = await prisma.agentChangeProposal.updateMany({
-    where: { id: proposal.id, tenantId, status: "pending" },
-    data: { status: "applied", decidedById: actor.id, decidedByEmail: actor.email, decidedAt, appliedAt: decidedAt },
-  });
-  if (claim.count === 0) return { ok: false, error: "Esta proposta já foi decidida por outra pessoa; nada foi gravado." };
-
   const tokenPrefix = await tokenPrefixOf(tenantId, proposal.tokenId);
-  let applied;
-  try {
-    applied = await applyPersonaAnswers(
+
+  // Reivindicar a proposta e gravar o agente é UMA transação: se o processo cai ou a
+  // gravação lança, o claim desfaz junto e a proposta continua `pending` (nunca fica
+  // "aplicada" sem ter aplicado). Duas aprovações concorrentes: a segunda espera o
+  // lock da linha da proposta, vê `applied` e perde o claim (count 0).
+  const outcome = await prisma.$transaction(async (tx) => {
+    const claim = await tx.agentChangeProposal.updateMany({
+      where: { id: proposal.id, tenantId, status: "pending" },
+      data: { status: "applied", decidedById: actor.id, decidedByEmail: actor.email, decidedAt, appliedAt: decidedAt },
+    });
+    if (claim.count === 0) return { kind: "lost" } as const;
+
+    const applied = await applyPersonaAnswers(
       tenantId,
       agentId,
       after.persona,
       { id: actor.id, email: actor.email, role: "SUPERADMIN" },
-      { expectedBaseHash: proposal.baseHash, meta: { via: "mcp", proposalId: proposal.id, tokenPrefix } },
+      { expectedBaseHash: proposal.baseHash, meta: { via: "mcp", proposalId: proposal.id, tokenPrefix }, tx },
     );
-  } catch (error) {
-    // Falhou no meio: devolve a proposta à fila em vez de deixá-la "aplicada" sem ter aplicado.
-    await prisma.agentChangeProposal.updateMany({
-      where: { id: proposal.id, tenantId, status: "applied" },
-      data: { status: "pending", decidedById: null, decidedByEmail: null, decidedAt: null, appliedAt: null },
-    });
-    throw error;
-  }
+    if (!applied.ok) {
+      // O agente mudou entre a conferência e a gravação (ou sumiu): nada foi gravado.
+      // Ninguém aplicou, então a proposta não guarda decisor.
+      await tx.agentChangeProposal.updateMany({
+        where: { id: proposal.id, tenantId, status: "applied" },
+        data: STALE_DATA,
+      });
+      return { kind: "stale" } as const;
+    }
+    return { kind: "applied", audit: applied.audit } as const;
+  });
 
-  if (!applied.ok) {
-    // O agente mudou entre a conferência e a gravação (ou sumiu): nada foi gravado.
-    await prisma.agentChangeProposal.updateMany({
-      where: { id: proposal.id, tenantId, status: "applied" },
-      data: { status: "stale", appliedAt: null },
-    });
+  if (outcome.kind === "lost") return { ok: false, error: "Esta proposta já foi decidida por outra pessoa; nada foi gravado." };
+  if (outcome.kind === "stale") {
     return { ok: false, error: "O agente mudou enquanto a proposta era aplicada. Nada foi gravado; peça uma nova proposta." };
   }
 
+  // Auditoria só depois do commit (nunca lança).
+  await outcome.audit();
   return { ok: true, info: "Proposta aplicada ao agente." };
 }
 

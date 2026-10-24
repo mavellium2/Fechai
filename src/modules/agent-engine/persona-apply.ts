@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { recordChange, type RecordAuditInput } from "@/modules/audit/log";
@@ -112,10 +113,24 @@ export type ApplyPersonaOptions = {
    * caminho não ser sobrescrita.
    */
   expectedBaseHash?: string;
+  /**
+   * Cliente de uma `prisma.$transaction` interativa do chamador. Com ele, a leitura
+   * e a gravação do agente entram na transação dele (a aprovação de proposta
+   * muda o status da proposta e o agente de forma atômica) e a auditoria **não**
+   * sai aqui: o chamador a dispara com `audit()` depois do commit, para não
+   * registrar uma mudança que a transação pode desfazer.
+   */
+  tx?: Prisma.TransactionClient;
 };
 
 export type ApplyPersonaResult =
-  | { ok: true; event: AuditEvent; systemPrompt: string }
+  | {
+      ok: true;
+      event: AuditEvent;
+      systemPrompt: string;
+      /** Registra a auditoria. Sem `options.tx` já foi chamada; com `tx`, chame após o commit. Nunca lança. */
+      audit: () => Promise<void>;
+    }
   | { ok: false; reason: "not_found" | "stale" };
 
 /**
@@ -139,7 +154,8 @@ export async function applyPersonaAnswers(
   actor: PersonaActor,
   options: ApplyPersonaOptions = {},
 ): Promise<ApplyPersonaResult> {
-  const agent = await prisma.agent.findFirst({ where: { id: agentId, tenantId } });
+  const db = options.tx ?? prisma;
+  const agent = await db.agent.findFirst({ where: { id: agentId, tenantId } });
   if (!agent) return { ok: false, reason: "not_found" };
   if (options.expectedBaseHash && agentBaseHash(agent) !== options.expectedBaseHash) {
     return { ok: false, reason: "stale" };
@@ -162,7 +178,7 @@ export async function applyPersonaAnswers(
         personaDraft: merged,
       };
 
-  const updated = await prisma.agent.updateMany({
+  const updated = await db.agent.updateMany({
     where: {
       id: agent.id,
       tenantId,
@@ -175,22 +191,24 @@ export async function applyPersonaAnswers(
   }
 
   const event: AuditEvent = rulesOnly ? "agent.rules_updated" : "agent.persona_updated";
-  await recordChange({
-    event,
-    target: { type: "Agent", id: agent.id, label: agent.name },
-    before: rulesOnly
-      ? { systemPrompt: agent.systemPrompt, personaDraft: agent.personaDraft }
-      : {
-          name: agent.name,
-          systemPrompt: agent.systemPrompt,
-          objective: agent.objective,
-          personaDraft: agent.personaDraft,
-        },
-    after: next,
-    meta: options.meta,
-    tenantId,
-    actor: actor ?? undefined,
-  });
+  const audit = () =>
+    recordChange({
+      event,
+      target: { type: "Agent", id: agent.id, label: agent.name },
+      before: rulesOnly
+        ? { systemPrompt: agent.systemPrompt, personaDraft: agent.personaDraft }
+        : {
+            name: agent.name,
+            systemPrompt: agent.systemPrompt,
+            objective: agent.objective,
+            personaDraft: agent.personaDraft,
+          },
+      after: next,
+      meta: options.meta,
+      tenantId,
+      actor: actor ?? undefined,
+    });
+  if (!options.tx) await audit();
 
-  return { ok: true, event, systemPrompt };
+  return { ok: true, event, systemPrompt, audit };
 }

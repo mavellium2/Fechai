@@ -232,6 +232,10 @@ arquivo. Comportamento do painel, que o núcleo preserva:
   evento `agent.persona_updated`.
 - Campo ausente mantém o que o rascunho já tinha. `actor: null` deixa a auditoria
   resolver quem agiu pela sessão (painel, com personificação).
+- `options.tx` (cliente de uma `$transaction` interativa do chamador) faz a leitura
+  e a gravação do agente entrarem na transação dele; nesse caso a auditoria **não**
+  sai na função: o resultado traz `audit()` para o chamador chamar depois do commit.
+  Sem `tx` (painel) nada muda: audita ao fim, como antes.
 
 O segundo chamador é a **aprovação de proposta do MCP**
 (`agent-mcp/proposal-decision.ts`, só depois de `requireSuperadmin`). Nenhuma
