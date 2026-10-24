@@ -101,7 +101,8 @@ export const MCP_TOOLS: McpTool[] = [
       `${MAX_SIMULATION_TURNS}, até ${MAX_SIMULATION_MESSAGE_CHARS} caracteres cada). Devolve a resposta do agente e os nomes das ferramentas usadas em cada turno. ` +
       "É teste: nada é enviado por WhatsApp, a agenda real e os calendários conectados não são alterados, não conta na cota de mensagens nem nos relatórios. " +
       "O agente responde mesmo desligado. A conversa fica gravada como teste (aba Testes de /conversas). " +
-      "Por ora só a variante `current` (o agente como está); `proposal` e `both` chegam com a aprovação de propostas. Limite de 30 turnos a cada 10 minutos por token.",
+      "Por ora só a variante `current` (o agente como está); `proposal` e `both` chegam com a aprovação de propostas. Limite de 30 turnos a cada 10 minutos por token. " +
+      "ATENÇÃO: cada mensagem é uma chamada de LLM em sequência, então a chamada pode levar vários minutos e o `simulationId` só volta no fim. Com 10 mensagens, espere a resposta (não desista no timeout); prefira poucas mensagens por chamada (3 a 5).",
     scope: "simulate",
     // Grava uma conversa de teste e custa uma chamada de LLM por turno: não é leitura pura.
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

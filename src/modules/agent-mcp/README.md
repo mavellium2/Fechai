@@ -115,9 +115,17 @@ mais. Regras:
   `systemPromptOverride` de `runAgentTurn` (ver `agent-engine/README.md`), que hoje
   nenhum chamador liga.
 - **Limite próprio:** 30 turnos a cada 10 minutos por token (`SIMULATION_LIMIT`,
-  `rateLimit("mcp:simulate", tokenId)`), além das 120 chamadas/min gerais. O saldo é
-  reservado, um por mensagem, **antes** de criar a conversa; faltou, responde 429
-  com `Retry-After` e nenhum turno roda.
+  `rateLimitReserve("mcp:simulate", tokenId, …, n)`), além das 120 chamadas/min
+  gerais. O saldo do pedido inteiro (`n` = número de mensagens) é reservado numa
+  operação só (`INCRBY n`) **antes** de criar a conversa. Se não cabe, as `n`
+  voltam (`DECRBY n`), responde 429 com `Retry-After` e nenhum turno roda: um
+  pedido recusado não consome o saldo, e o que sobrou serve a um pedido menor.
+- **Pode demorar vários minutos.** Cada mensagem é uma chamada de LLM, em
+  sequência, e o `simulationId` só volta no fim da chamada. Com 10 mensagens, o
+  cliente MCP deve esperar a resposta (aumente o timeout dele); se desistir antes,
+  o `simulationId` se perde, embora a conversa fique gravada como teste. Prefira
+  poucas mensagens por chamada (3 a 5). Decisão documentada: o fluxo não muda
+  (sem tarefa em segundo plano nem id devolvido antes).
 
 `get_simulation` relê o transcript (falas e respostas, mascaradas) só de conversa
 com `tenantId` do token, `isTest` no lead e na conversa, e telefone exatamente
@@ -237,10 +245,14 @@ Confira:
 
 Registrados, não corrigidos (comportamento atual de propósito até haver decisão):
 
-- **Limites falham aberto.** Os dois limites (falhas por IP em `mcp:auth-fail` e
-  chamadas por token em `mcp:token`) usam `rateLimit`, que libera tudo se o Redis
-  cair. Sem Redis não há freio a tentativa de token nem a carga por token. O token
-  tem 256 bits, então adivinhar não é o risco, e sim a carga na rota.
+- **Limites falham aberto.** Os três limites (falhas por IP em `mcp:auth-fail`,
+  chamadas por token em `mcp:token` e turnos de simulação em `mcp:simulate`) usam
+  `rateLimit`/`rateLimitReserve`, que liberam tudo se o Redis cair. Sem Redis não há
+  freio a tentativa de token nem a carga por token. O token tem 256 bits, então
+  adivinhar não é o risco, e sim a carga na rota. **Custo:** sem Redis,
+  `mcp:simulate` deixa de valer e um token com `simulate` roda turnos sem teto, cada
+  um uma chamada de LLM paga pela plataforma. Decisão do time: o comportamento fica
+  assim; o remédio é monitorar o Redis e revogar o token em caso de abuso.
 - **O banco é consultado antes do limite de falhas.** `authenticateMcp` busca o
   token por hash antes de o limite de falhas ser conferido (ele só é contado depois
   da falha), então um IP bloqueado ainda custa uma consulta por requisição. Um
@@ -255,9 +267,6 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
   até revogar ou até vencer. Padrão de 30 dias, teto de 365. O remédio é revogar e
   emitir outro. Com `simulate`, também gasta LLM da plataforma (até 30 turnos a
   cada 10 min) e grava conversas de teste na conta.
-- **Reserva do limite de simulação é por mensagem e não devolve.** Um pedido de 10
-  mensagens com saldo 5 consome os 5 e responde 429 sem rodar nada. Conservador de
-  propósito (o `rateLimit` só incrementa); o cliente espera o `Retry-After`.
 - **Conversas de simulação acumulam.** Cada `run_simulation` cria um lead/conversa
   de teste novo; não há limpeza automática.
 
