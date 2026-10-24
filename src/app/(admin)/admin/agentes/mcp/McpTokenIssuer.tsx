@@ -13,11 +13,11 @@ import { issueMcpTokenAction, type IssueMcpTokenActionResult } from "./actions";
 
 type TenantOption = { id: string; name: string };
 
-/** `read` e `simulate` funcionam; `propose` (parte C) já existe no schema. Espelha `EMITTABLE_MCP_SCOPES`. */
+/** As três permissões funcionam (`propose` só cria proposta; quem aplica é o superadmin). Espelha `EMITTABLE_MCP_SCOPES`. */
 const SCOPE_OPTIONS = [
   { value: "read", label: "Ler a configuração do agente", available: true },
   { value: "simulate", label: "Simular conversas (sem enviar nada)", available: true },
-  { value: "propose", label: "Propor mudanças (em breve)", available: false },
+  { value: "propose", label: "Propor mudanças (nada é aplicado sem a sua aprovação)", available: true },
 ] as const;
 
 export function McpTokenIssuer({ tenants }: { tenants: TenantOption[] }) {
