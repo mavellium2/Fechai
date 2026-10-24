@@ -47,7 +47,7 @@ listWhatsAppGroups(tenantId) -> { ok: true, groups } | { ok: false, reason, erro
 handoffToolDescription(config?) -> string              // descrição de handoff_human com o motivo
 ```
 
-Consumidores: `api/webhooks/whatsapp` (WhatsApp real) e `api/sandbox` (chat de teste).
+Consumidores: `api/webhooks/whatsapp` (WhatsApp real), `api/sandbox` (chat de teste) e `agent-mcp/simulate.ts` (simulação pelo MCP).
 
 ### Variáveis da conversa
 
@@ -122,8 +122,8 @@ e os espelhos moram em `createAppointment`, `rescheduleAppointment` e
 `cancelAppointment` (`scheduling/repository.ts`), que o ramo simulado não
 alcança. Cada tool devolve uma frase "Simulação: ... seria marcado/remarcado/
 cancelada", que manda o agente seguir como se tivesse acontecido, sem dizer que
-é simulação. Sem a marca (WhatsApp, widget) nada muda. A futura rota MCP deve
-ligar a mesma flag.
+é simulação. Sem a marca (WhatsApp, widget) nada muda. A simulação pelo MCP
+(`run_simulation`) liga a mesma flag (ver "Simulação pelo MCP", abaixo).
 
 **Ativação:** nenhuma variável de ambiente, flag de painel, migração ou config.
 Vale para todo turno que passa pelas duas rotas de teste, e só para elas.
@@ -198,6 +198,23 @@ O seletor nasce **recolhido**, atrás de um botão "Enviando como você/cliente"
 aberto, ele custava duas linhas acima do campo em toda mensagem enviada. O
 lado atual continua impresso no próprio botão quando fechado — esconder o
 controle não pode esconder o estado.
+
+#### Simulação pelo MCP (`run_simulation`, `systemPromptOverride`)
+
+O terceiro caminho de teste é a ferramenta `run_simulation` da rota MCP
+(`agent-mcp/simulate.ts`; regras completas em `agent-mcp/README.md`, seção
+"Simulação pelo MCP"). Ela usa o mesmo contrato do sandbox: conversa nova
+`isTest` (telefone `mcp:<agentId>:<simulationId>`) e `runAgentTurn` com
+`skipUsageCheck`, `skipEnabledCheck` e `dryRunScheduling` em todo turno. Não
+toca em provedor de WhatsApp: o orquestrador só grava a resposta, e quem envia é
+o webhook/worker.
+
+`runAgentTurn` aceita `systemPromptOverride?: string`, **só de teste**: troca a
+persona (o prompt salvo do agente) **naquele turno**, sem gravar nada no agente.
+Vazio ou só espaços é ignorado e vale o prompt salvo; ausente, nada muda. Horário,
+agenda, variáveis, base de conhecimento e a proteção contra injeção continuam
+sendo montados pelo orquestrador. Nenhum canal com contato real passa isso, e hoje
+nenhum chamador o liga: existe para a variante "proposta" da simulação (parte C).
 
 ### Resposta manual e humano assumindo a conversa (`sendManualReply`, `agentPaused`)
 

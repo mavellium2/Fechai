@@ -4,21 +4,24 @@
 
 Servidor MCP (Model Context Protocol) do agente, em `POST /api/mcp`. Deixa uma
 ferramenta de IA externa (Claude Code, por exemplo) **ler a configuração dos
-agentes de uma conta**, com um token emitido pelo superadmin. Parte A do plano:
-tokens, rota e leitura. Simulação (`simulate`) e propostas de mudança
-(`propose`) vêm nas partes B e C; os escopos já existem no schema, mas ainda
-não podem ser emitidos.
+agentes de uma conta** e, com a permissão de simulação, **conversar com eles em
+modo de teste**, com um token emitido pelo superadmin. Parte A do plano: tokens,
+rota e leitura. Parte B: simulação (`simulate`), ver "Simulação pelo MCP".
+Propostas de mudança (`propose`) vêm na parte C; o escopo já existe no schema,
+mas ainda não pode ser emitido.
 
 ## Arquivos
 
 - `tokens.ts` — emitir, listar, revogar. `fch_mcp_` + 32 bytes aleatórios em base64url.
 - `auth.ts` — `Authorization: Bearer`, busca por hash, recusa revogado/vencido, marca `lastUsedAt`.
 - `rpc.ts` — JSON-RPC 2.0 mínimo, sem estado e sem dependência (`initialize`, `ping`, `tools/list`, `tools/call`). Também os limites e o teto do corpo.
-- `tools.ts` — registro das ferramentas (`list_agents`, `get_agent_config`).
+- `tools.ts` — registro das ferramentas (`list_agents`, `get_agent_config`, `run_simulation`, `get_simulation`) e as `annotations` anunciadas em `tools/list`.
 - `read.ts` — a leitura filtrada da configuração.
+- `simulate.ts` — simulação de conversa (`run_simulation`, `get_simulation`), limite de turnos por token e máscara da saída.
+- `errors.ts` — `McpToolError` (vira `isError: true`) e `McpRateLimitedError` (vira 429).
 - Rota: `src/app/api/mcp/route.ts` (só POST, runtime Node). Admin: `src/app/(admin)/admin/agentes/mcp/`.
 - Exemplo de cliente: `.mcp.json.example` na raiz (sem token; o valor vem da variável `FECHAI_MCP_TOKEN`).
-- Testes: `tests/agent-mcp.test.ts`, mais `tests/autorizacao.test.ts` (rota com autenticação antes do corpo).
+- Testes: `tests/agent-mcp.test.ts`, `tests/agent-mcp-simulacao.test.ts` (parte B), mais `tests/autorizacao.test.ts` (rota com autenticação antes do corpo).
 
 ## Regras que não podem ser quebradas
 
@@ -27,9 +30,11 @@ não podem ser emitidos.
   como parâmetro inválido, nunca é ignorado. `agentId` é só um filtro dentro da
   conta; id de outra conta responde igual a id inexistente ("não encontrado").
 - **Todo acesso ao banco leva o `tenantId` do token** (agente, ações e a consulta de
-  documentos). Esta leitura não consulta `Lead`, `Message`, `Conversation`,
-  `Appointment` nem `Tenant`. A autenticação lê só `Tenant.status`, pela relação do
-  token, para recusar conta suspensa.
+  documentos). A leitura (`read`) não consulta `Lead`, `Message`, `Conversation`,
+  `Appointment` nem `Tenant`. A simulação (`simulate`) cria e lê **só** conversas
+  de teste dela mesma (`isTest` e telefone `mcp:`), também com o `tenantId` do
+  token. A autenticação lê só `Tenant.status`, pela relação do token, para recusar
+  conta suspensa.
 - **O token em claro existe em um lugar só:** o retorno de `issueMcpToken`, mostrado
   uma vez no admin. O banco guarda o sha256 (`tokenHash`, único) e 8 caracteres do
   trecho aleatório (`tokenPrefix`; o `fch_mcp_` é igual em todos e não ajudaria a
@@ -57,6 +62,14 @@ não podem ser emitidos.
 | --- | --- | --- | --- |
 | `list_agents` | `read` | nenhuma | `{ agents: [{ id, name, isPrimary, enabled }] }` |
 | `get_agent_config` | `read` | `{ agentId }` | persona, `systemPrompt`, `behavior`, `variables`, `actions`, `knowledge` |
+| `run_simulation` | `simulate` | `{ agentId, messages, variant? }` | `{ simulationId, runs: [{ variant, turns: [{ user, reply, toolsUsed, status }] }], dryRun: true }` |
+| `get_simulation` | `simulate` | `{ simulationId }` | `{ simulationId, agentId, runs: [{ variant, turns: [{ user, reply }] }], dryRun: true }` |
+
+As de `read` se anunciam com `readOnlyHint: true`; `run_simulation` com
+`readOnlyHint: false` (grava uma conversa de teste e custa LLM), sempre
+`destructiveHint: false` e `openWorldHint: false`. As duas famílias são
+independentes: um token só com `simulate` não vê `list_agents`, então, para
+descobrir os ids, emita `read` + `simulate`.
 
 `get_agent_config` devolve: `persona` (nome do agente e da empresa, setor, tom,
 estilo, oferta, objetivo, regras), `systemPrompt`, `behavior` (ouvir áudio, parar
@@ -68,6 +81,50 @@ documento). O que não sai está na regra "A saída é uma lista de permissões"
 Falha esperada (agente não encontrado) volta como resultado com `isError: true`;
 argumento inválido e ferramenta desconhecida, como erro JSON-RPC `-32602`.
 Ferramenta chamada sem o escopo dela responde 403.
+
+## Simulação pelo MCP
+
+`run_simulation` roda o **mesmo motor do chat de teste** (`runAgentTurn`) e nada
+mais. Regras:
+
+- **Uma conversa nova por chamada**, `isTest: true` no lead e na conversa, com o
+  telefone sintético `mcp:<agentId>:<simulationId>` (`simulationId` é um UUID
+  novo). As `messages` (1 a 10, até 1000 caracteres cada) são as falas do contato,
+  na ordem, na mesma conversa. Como é `isTest`, fica fora da cota, dos relatórios,
+  dos lembretes, do follow-up, da pesquisa de satisfação, da fila de perguntas sem
+  resposta, da qualidade dos leads e do aviso de transferência ao grupo — todos já
+  filtram `isTest`. Aparece em `/conversas`, na aba de testes.
+- **Cada turno liga as três travas do chat de teste:** `skipUsageCheck` (não
+  conta na cota), `skipEnabledCheck` (responde com o agente desligado) e
+  `dryRunScheduling` (marcar/remarcar/cancelar só descrevem o que aconteceria: sem
+  `createAppointment`, sem Clinicorp, Google ou iCloud).
+- **Nada fala com o WhatsApp.** Quem envia é o webhook e o worker; a simulação
+  chama só `getOrCreateConversation` e `runAgentTurn`, e o orquestrador não envia
+  (só grava a resposta). O teste prova isso com o turno real e os provedores,
+  espelhos e `fetch` vigiados.
+- **O agente é buscado com o `tenantId` do token** (`archived: false`); id de outra
+  conta responde "Agente não encontrado nesta conta." antes de qualquer custo.
+- **Saída mascarada:** a fala do contato e a resposta passam por `maskText`
+  (`knowledge-gaps/mask.ts`: e-mail, telefone e documento viram `[e-mail oculto]`/
+  `[número oculto]`). `toolsUsed` traz só os nomes das ferramentas, nunca
+  argumentos ou resultados. Turno que lança vira `status: "error"`, sem detalhe
+  técnico (vai ao log), e a simulação para ali; status diferente de `ok` também para.
+- **Variantes:** só `current` (o agente como está). `proposal` e `both` já estão no
+  esquema, para a API não mudar, mas respondem `isError` "Variante disponível após
+  a aprovação de propostas." (parte C). Quando chegarem, a proposta entra pelo
+  `systemPromptOverride` de `runAgentTurn` (ver `agent-engine/README.md`), que hoje
+  nenhum chamador liga.
+- **Limite próprio:** 30 turnos a cada 10 minutos por token (`SIMULATION_LIMIT`,
+  `rateLimit("mcp:simulate", tokenId)`), além das 120 chamadas/min gerais. O saldo é
+  reservado, um por mensagem, **antes** de criar a conversa; faltou, responde 429
+  com `Retry-After` e nenhum turno roda.
+
+`get_simulation` relê o transcript (falas e respostas, mascaradas) só de conversa
+com `tenantId` do token, `isTest` no lead e na conversa, e telefone exatamente
+`mcp:<agente>:<simulationId>`. Conversa real, chat de teste do painel
+(`sandbox:`) e simulação de outra conta respondem "Simulação não encontrada nesta
+conta.". Não traz `toolsUsed` nem `status` (o banco não guarda por turno) e não
+gasta o limite de turnos.
 
 ## Como emitir e revogar
 
@@ -81,12 +138,13 @@ validade (de 1 a 365 dias; padrão 30). O token aparece uma vez, com botão de
 copiar. Fechou a tela, não há como vê-lo de novo: emita outro e revogue o antigo.
 Emissão tem teto de 10 por minuto por superadmin.
 
-**Escopo `read` apenas na emissão.** A tela lista os três escopos, mas só "Ler a
-configuração do agente" está habilitada; `simulate` e `propose` aparecem
-desabilitados e `validateIssueInput` os recusa na action. A lista é
-`EMITTABLE_MCP_SCOPES` em `tokens.ts`: `MCP_SCOPES` mantém os três porque a
-autenticação e o schema já os conhecem (parte C). Liberar um escopo é ampliar
-`EMITTABLE_MCP_SCOPES`, e só faz sentido junto da ferramenta que o usa.
+**Escopos `read` e `simulate` na emissão.** A tela lista os três escopos; "Ler a
+configuração do agente" e "Simular conversas (sem enviar nada)" estão
+habilitados, `propose` aparece desabilitado e `validateIssueInput` o recusa na
+action. A lista é `EMITTABLE_MCP_SCOPES` em `tokens.ts`: `MCP_SCOPES` mantém os
+três porque a autenticação e o schema já os conhecem (parte C). Liberar um escopo
+é ampliar `EMITTABLE_MCP_SCOPES`, e só faz sentido junto da ferramenta que o usa
+(`simulate` foi liberado na parte B, com `run_simulation`/`get_simulation`).
 
 **Lista:** nome, conta, prefixo, permissões, situação (ativo, revogado ou vencido;
 revogado vence vencido), vencimento e último uso. Nunca mostra o hash.
@@ -127,6 +185,10 @@ mostrado uma vez fica inline, porque é conteúdo.
 | Método desconhecido | 200 | `-32601` | |
 | Ferramenta desconhecida, nome ausente, argumento inválido (inclui `tenantId`) | 200 | `-32602` | |
 | Agente de outra conta ou inexistente | 200 | resultado com `isError: true` | |
+| `run_simulation` com mais de 10 mensagens, mensagem vazia ou acima de 1000 caracteres | 200 | `-32602` | |
+| `run_simulation` com `variant` `proposal` ou `both` (parte C) | 200 | resultado com `isError: true` | |
+| Mais de 30 turnos de simulação em 10 min com o mesmo token | 429 | `-32029` | `Retry-After` |
+| `get_simulation` de outra conta, de conversa real ou do chat de teste do painel | 200 | resultado com `isError: true` | |
 | Notificação (sem `id`) | 202 | sem corpo | |
 | `GET` | 405 | sem corpo | `Allow: POST` |
 | Erro inesperado (detalhe vai só ao log) | 500 | `-32603` | |
@@ -145,7 +207,7 @@ em pedaços e cancelado ao passar do limite (`readBodyWithinLimit`).
 Automático (sem banco nem Redis reais: `prisma` e `rate-limit` são simulados):
 
 ```
-npx vitest run tests/agent-mcp.test.ts tests/autorizacao.test.ts
+npx vitest run tests/agent-mcp.test.ts tests/agent-mcp-simulacao.test.ts tests/autorizacao.test.ts
 ```
 
 Manual, contra um ambiente com token emitido (`FECHAI_MCP_TOKEN` exportado):
@@ -162,7 +224,9 @@ curl -s -X POST "$URL" -H "Authorization: Bearer $FECHAI_MCP_TOKEN" \
 
 Confira:
 
-- `tools/list` mostra só `list_agents` e `get_agent_config`.
+- `tools/list` com `read` mostra só `list_agents` e `get_agent_config`; com `simulate`, também `run_simulation` e `get_simulation`.
+- `run_simulation` com `{"agentId":"...","messages":["Oi","Quero marcar sexta às 14h"]}`: resposta com `dryRun: true`, nada novo em `/agenda`, nenhuma mensagem no WhatsApp, e a conversa na aba de testes de `/conversas`.
+- `run_simulation` com `variant: "proposal"`: `isError: true`.
 - Sem o header `Authorization`: 401 com `WWW-Authenticate`.
 - `list_agents` com `arguments: {"tenantId": "..."}`: `-32602`.
 - `get_agent_config` com `agentId` de outra conta: `isError: true`, "Agente não encontrado nesta conta."
@@ -189,7 +253,13 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
 - **Token é bearer, sem restrição de IP.** Quem tiver o token lê a configuração
   dos agentes (prompt, persona, regras, config das ações, títulos dos documentos)
   até revogar ou até vencer. Padrão de 30 dias, teto de 365. O remédio é revogar e
-  emitir outro.
+  emitir outro. Com `simulate`, também gasta LLM da plataforma (até 30 turnos a
+  cada 10 min) e grava conversas de teste na conta.
+- **Reserva do limite de simulação é por mensagem e não devolve.** Um pedido de 10
+  mensagens com saldo 5 consome os 5 e responde 429 sem rodar nada. Conservador de
+  propósito (o `rateLimit` só incrementa); o cliente espera o `Retry-After`.
+- **Conversas de simulação acumulam.** Cada `run_simulation` cria um lead/conversa
+  de teste novo; não há limpeza automática.
 
 ## Schema
 
@@ -207,6 +277,7 @@ dev server e rode de novo.
 
 ## O que NÃO faz (ainda)
 
-- Não simula conversa nem grava nada (partes B e C). Quando a simulação chegar,
-  deve ligar `dryRunScheduling`, como o chat de teste (ver `agent-engine/README.md`).
+- Não grava nada no agente nem propõe mudança (parte C). A simulação só grava a
+  própria conversa de teste.
+- Não roda a variante `proposal`/`both` da simulação (parte C).
 - Não tem sessão, SSE nem lote JSON-RPC: GET devolve 405.
