@@ -17,6 +17,15 @@ import { prisma } from "@/lib/prisma";
 export const MCP_SCOPES = ["read", "simulate", "propose"] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
+/**
+ * Escopos que a EMISSÃO aceita hoje. `MCP_SCOPES` continua com os três porque o
+ * schema e a autenticação já os conhecem (parte C), mas na parte A só `read`
+ * tem ferramenta: emitir `simulate`/`propose` entregaria um token com permissão
+ * que nada usa e que passaria a valer sozinha quando a ferramenta chegasse.
+ * Ampliar esta lista é a decisão de liberar o escopo.
+ */
+export const EMITTABLE_MCP_SCOPES = ["read"] as const satisfies readonly McpScope[];
+
 export const MCP_SCOPE_LABELS: Record<McpScope, string> = {
   read: "Ler a configuração do agente",
   simulate: "Simular conversas (sem enviar nada)",
@@ -42,6 +51,10 @@ export function hashMcpToken(token: string): string {
 
 export function isMcpScope(value: unknown): value is McpScope {
   return typeof value === "string" && (MCP_SCOPES as readonly string[]).includes(value);
+}
+
+export function isEmittableMcpScope(value: unknown): value is McpScope {
+  return typeof value === "string" && (EMITTABLE_MCP_SCOPES as readonly string[]).includes(value);
 }
 
 export type IssueMcpTokenInput = {
@@ -79,6 +92,9 @@ export function validateIssueInput(input: Pick<IssueMcpTokenInput, "label" | "sc
   const scopes = [...new Set(input.scopes)];
   if (scopes.length === 0) return { ok: false, error: "Escolha pelo menos uma permissão." };
   if (!scopes.every(isMcpScope)) return { ok: false, error: "Permissão desconhecida." };
+  if (!scopes.every(isEmittableMcpScope)) {
+    return { ok: false, error: "Esta permissão ainda não pode ser emitida. Por enquanto só a leitura da configuração do agente." };
+  }
 
   const ttlDays = input.ttlDays ?? MCP_DEFAULT_TTL_DAYS;
   if (!Number.isInteger(ttlDays) || ttlDays < 1 || ttlDays > MCP_MAX_TTL_DAYS) {
