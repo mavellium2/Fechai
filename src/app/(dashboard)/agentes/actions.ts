@@ -7,7 +7,7 @@ import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { planOf } from "@/modules/billing/plans";
-import { composeSystemPrompt, type PersonaAnswers } from "@/modules/agent-engine/persona";
+import { applyPersonaAnswers, personaSchema, rulesSchema } from "@/modules/agent-engine/persona-apply";
 import { ACTION_BY_KEY, type ActionKey } from "@/modules/agent-engine/actions";
 import { createAgent, getAgentOwned, getAgentUsage } from "@/modules/agent-engine/agents";
 import { validateQrRiskConsent, createQrRiskAcceptance } from "@/modules/scheduling/qr-risk-terms";
@@ -737,23 +737,15 @@ export async function deleteAgent(agentId: string): Promise<Result> {
 
 // ---------------------------------------------------------------- persona
 
-const personaSchema = z.object({
-  agentName: z.string().trim().default(""),
-  businessName: z.string().trim().min(1, "Informe o nome do negócio"),
-  sector: z.string().trim().default(""),
-  tone: z.string().trim().default(""),
-  writingStyle: z.string().trim().default(""),
-  offer: z.string().trim().default(""),
-  avoid: z.string().trim().default(""),
-  objective: z.string().trim().default(""),
-});
+// Os schemas e a gravação moram em `persona-apply.ts`, compartilhados com a
+// aprovação de propostas do MCP: o comportamento é um só.
 
 export async function savePersona(_prev: Result | null, formData: FormData): Promise<Result> {
   const tooLarge = payloadTooLarge(formData);
   if (tooLarge) return { ok: false, error: tooLarge };
 
   const agentId = String(formData.get("agentId") ?? "");
-  const { agent } = await requireAgent(agentId);
+  const { tenantId, agent } = await requireAgent(agentId);
   if (!agent) return { ok: false, error: "Agente não encontrado" };
 
   const parsed = personaSchema.safeParse(Object.fromEntries(formData));
@@ -762,40 +754,18 @@ export async function savePersona(_prev: Result | null, formData: FormData): Pro
   }
 
   // `avoid` não faz mais parte deste formulário (virou o passo Regras, com
-  // sua própria action) — preserva o que já estava salvo em vez de confiar no
-  // `.default("")` do schema, que apagaria as regras a cada save de persona.
-  const existingAvoid = (agent.personaDraft as Partial<PersonaAnswers> | null)?.avoid ?? "";
-  const answers: PersonaAnswers = { ...parsed.data, avoid: existingAvoid };
+  // sua própria action) — tira da resposta em vez de confiar no `.default("")`
+  // do schema, que apagaria as regras a cada save de persona. `applyPersonaAnswers`
+  // mantém o `avoid` que já estava salvo.
+  const { avoid: _formAvoid, ...answers } = parsed.data;
+  void _formAvoid;
 
-  const next = {
-    // O nome do agente na lista acompanha o que a pessoa respondeu no wizard.
-    name: answers.agentName || agent.name,
-    systemPrompt: composeSystemPrompt(answers),
-    objective: answers.objective,
-    personaDraft: answers,
-  };
-
-  await prisma.agent.update({ where: { id: agent.id }, data: next });
-
-  await recordChange({
-    event: "agent.persona_updated",
-    target: { type: "Agent", id: agent.id, label: agent.name },
-    before: {
-      name: agent.name,
-      systemPrompt: agent.systemPrompt,
-      objective: agent.objective,
-      personaDraft: agent.personaDraft,
-    },
-    after: next,
-  });
+  const applied = await applyPersonaAnswers(tenantId, agent.id, answers, null);
+  if (!applied.ok) return { ok: false, error: "Agente não encontrado" };
 
   revalidateAgent(agent.id);
   return { ok: true, info: "Persona salva." };
 }
-
-const rulesSchema = z.object({
-  rules: z.string().trim().default(""),
-});
 
 /**
  * Regras (`avoid`) têm a própria action porque o formulário de Regras não
@@ -807,7 +777,7 @@ export async function saveRules(_prev: Result | null, formData: FormData): Promi
   if (tooLarge) return { ok: false, error: tooLarge };
 
   const agentId = String(formData.get("agentId") ?? "");
-  const { agent } = await requireAgent(agentId);
+  const { tenantId, agent } = await requireAgent(agentId);
   if (!agent) return { ok: false, error: "Agente não encontrado" };
 
   const parsed = rulesSchema.safeParse({ rules: formData.get("rules") });
@@ -815,27 +785,8 @@ export async function saveRules(_prev: Result | null, formData: FormData): Promi
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
   }
 
-  const draft = (agent.personaDraft as Partial<PersonaAnswers> | null) ?? {};
-  const answers: PersonaAnswers = {
-    agentName: draft.agentName ?? "",
-    businessName: draft.businessName ?? "",
-    sector: draft.sector ?? "",
-    tone: draft.tone ?? "",
-    writingStyle: draft.writingStyle ?? "",
-    offer: draft.offer ?? "",
-    objective: draft.objective ?? "",
-    avoid: parsed.data.rules,
-  };
-
-  const next = { systemPrompt: composeSystemPrompt(answers), personaDraft: answers };
-  await prisma.agent.update({ where: { id: agent.id }, data: next });
-
-  await recordChange({
-    event: "agent.rules_updated",
-    target: { type: "Agent", id: agent.id, label: agent.name },
-    before: { systemPrompt: agent.systemPrompt, personaDraft: agent.personaDraft },
-    after: next,
-  });
+  const applied = await applyPersonaAnswers(tenantId, agent.id, { avoid: parsed.data.rules }, null);
+  if (!applied.ok) return { ok: false, error: "Agente não encontrado" };
 
   revalidateAgent(agent.id);
   return { ok: true, info: "Regras salvas." };
