@@ -13,9 +13,10 @@ vi.mock("@/modules/scheduling/clinicorp", () => ({
   cancelAppointmentInClinicorp: api.cancel, getClinicorpStatus: api.status,
 }));
 vi.mock("@/modules/scheduling/google", () => ({ pushEventToGoogle: api.googlePush, deleteEventFromGoogle: api.googleDelete }));
+const icloud = vi.hoisted(() => ({ remove: vi.fn() }));
 vi.mock("@/modules/scheduling/icloud", () => ({
   pushEventToIcloud: vi.fn(async () => ({ status: "skipped" })), updateIcloudEvent: vi.fn(async () => ({ status: "skipped" })),
-  deleteIcloudEvent: vi.fn(async () => true), listIcloudBusyBlocks: vi.fn(async () => []), hasIcloudConflict: vi.fn(async () => false),
+  deleteIcloudEvent: icloud.remove, listIcloudBusyBlocks: vi.fn(async () => []), hasIcloudConflict: vi.fn(async () => false),
 }));
 
 import { processClinicorpSync, scanClinicorpSync, syncAppointmentToClinicorp } from "@/modules/scheduling/clinicorp-sync";
@@ -39,7 +40,7 @@ beforeEach(() => {
   api.features.mockResolvedValue({ clinicorpEnabled: true }); api.status.mockResolvedValue(target);
   api.push.mockResolvedValue({ status: "synced", appointmentId: "789" });
   api.lookup.mockResolvedValue({ status: "absent" }); api.cancel.mockResolvedValue(true);
-  api.googlePush.mockResolvedValue(null); api.googleDelete.mockResolvedValue(true);
+  api.googlePush.mockResolvedValue(null); api.googleDelete.mockResolvedValue(true); icloud.remove.mockResolvedValue(true);
   db.lead.findUnique.mockResolvedValue(input.lead); db.lead.update.mockResolvedValue({});
   db.appointment.create.mockImplementation(async () => appointment);
   db.appointment.update.mockImplementation(async ({ data }) => Object.assign(appointment, data));
@@ -149,6 +150,36 @@ describe("envio automático durável ao Clinicorp", () => {
     expect(await processClinicorpSync("envio")).toMatchObject({ reason: "conflict" });
     expect(appointment.status).toBe("canceled"); expect(job?.state).toBe("conflict");
     expect(api.googleDelete).toHaveBeenCalledWith("conta", "google");
+  });
+
+  it("a recusa posterior por conflito também apaga o evento do Calendário da Apple", async () => {
+    api.push.mockResolvedValueOnce({ status: "failed", error: "Offline" });
+    await syncAppointmentToClinicorp("conta", "consulta", input);
+    appointment.icloudEventUrl = "https://p1-caldav.icloud.com/c/fechai-consulta.ics";
+    api.push.mockResolvedValue({ status: "failed", reason: "conflict", error: "Horário ocupado" });
+    vi.setSystemTime(new Date(NOW.getTime() + 120_000));
+    await processClinicorpSync("envio");
+    expect(appointment.status).toBe("canceled");
+    expect(icloud.remove).toHaveBeenCalledWith("conta", "https://p1-caldav.icloud.com/c/fechai-consulta.ics", "consulta");
+  });
+
+  it("sem endereço gravado ainda pede a remoção (o envio pode ter ido sem ser anotado)", async () => {
+    api.push.mockResolvedValueOnce({ status: "failed", error: "Offline" });
+    await syncAppointmentToClinicorp("conta", "consulta", input);
+    api.push.mockResolvedValue({ status: "failed", reason: "conflict", error: "Horário ocupado" });
+    vi.setSystemTime(new Date(NOW.getTime() + 120_000));
+    await processClinicorpSync("envio");
+    expect(icloud.remove).toHaveBeenCalledWith("conta", null, "consulta");
+  });
+
+  it("consulta que mudou durante o envio (nada cancelado) não apaga o evento", async () => {
+    api.push.mockResolvedValueOnce({ status: "failed", error: "Offline" });
+    await syncAppointmentToClinicorp("conta", "consulta", input);
+    api.push.mockResolvedValue({ status: "failed", reason: "conflict", error: "Horário ocupado" });
+    db.appointment.updateMany.mockResolvedValueOnce({ count: 0 });
+    vi.setSystemTime(new Date(NOW.getTime() + 120_000));
+    await processClinicorpSync("envio");
+    expect(icloud.remove).not.toHaveBeenCalled();
   });
 
   it("não muda o destino nem os dados de uma tentativa ainda incerta", async () => {

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getCalendarFeatures } from "./features";
 import { parseScheduleConfig } from "./config";
 import { deleteEventFromGoogle } from "./google";
+import { deleteIcloudEvent } from "./icloud";
 import {
   cancelAppointmentInClinicorp, getClinicorpStatus, lookupClinicorpAppointment,
   pushAppointmentToClinicorp, type ClinicorpEventInput, type ClinicorpSyncResult,
@@ -122,6 +123,8 @@ export async function processClinicorpSync(id: string, now = new Date()): Promis
         data: { status: "canceled", reminderOverride: [], updatedAt: new Date() },
       });
       if (canceled.count && current.googleEventId) await deleteEventFromGoogle(job.tenantId, current.googleEventId);
+      // O horário não existe: o evento do iPhone também sai (senão bloqueia o horário e confunde o cliente).
+      if (canceled.count) await deleteIcloudEvent(job.tenantId, current.icloudEventUrl ?? null, current.id);
       await finish({ state: "conflict", lastError: result.error.slice(0, 500) });
     } else {
       const error = result.status === "failed" ? result.error : "O envio aguarda a integração ser religada.";

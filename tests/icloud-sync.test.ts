@@ -21,6 +21,8 @@ const appt = (id: string, extra: Record<string, unknown> = {}) => ({
   notes: null, agentId: "ag1", leadId: "l1", ...extra,
 });
 let rows: Record<string, ReturnType<typeof appt>>;
+let leftovers: { id: string; icloudEventUrl: string; icloudSyncAttempts: number }[];
+const dueQueries = () => db.appointment.findMany.mock.calls.map((c) => c[0]).filter((q) => q.where.status === "scheduled");
 let logged: string;
 
 beforeEach(() => {
@@ -28,8 +30,9 @@ beforeEach(() => {
   logged = "";
   vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { logged += a.map(String).join(" "); });
   rows = {};
+  leftovers = [];
   db.icloudCalendarIntegration.findMany.mockResolvedValue([{ tenantId: "t1" }]);
-  db.appointment.findMany.mockResolvedValue([]);
+  db.appointment.findMany.mockImplementation(async ({ where }: { where: { status: string } }) => (where.status === "canceled" ? leftovers : []));
   db.appointment.findFirst.mockImplementation(async ({ where }: { where: { id: string } }) => rows[where.id] ?? null);
   db.appointment.updateMany.mockResolvedValue({ count: 1 });
   db.lead.findFirst.mockResolvedValue({ phone: "5511999990000", isTest: false });
@@ -40,7 +43,8 @@ beforeEach(() => {
 
 const due = (...ids: string[]) => {
   for (const id of ids) rows[id] = appt(id);
-  db.appointment.findMany.mockResolvedValue(ids.map((id) => ({ id })));
+  db.appointment.findMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+    where.status === "canceled" ? leftovers : ids.map((id) => ({ id })));
 };
 
 describe("quem entra na varredura", () => {
@@ -54,7 +58,7 @@ describe("quem entra na varredura", () => {
 
   it("só consultas futuras, marcadas, sem endereço, fora do período de graça e com recuo vencido; da mais próxima à mais distante", async () => {
     await scanIcloudSync(NOW);
-    const q = db.appointment.findMany.mock.calls[0][0];
+    const q = dueQueries()[0];
     expect(q.where).toMatchObject({
       tenantId: "t1", status: "scheduled", startsAt: { gt: NOW }, icloudEventUrl: null,
       createdAt: { lt: new Date(NOW.getTime() - 2 * 60_000) },
@@ -66,12 +70,12 @@ describe("quem entra na varredura", () => {
 
   it("no máximo 50 por rodada, 10 por conta", async () => {
     db.icloudCalendarIntegration.findMany.mockResolvedValue(["a", "b", "c", "d", "e", "f", "g"].map((tenantId) => ({ tenantId })));
-    db.appointment.findMany.mockImplementation(async ({ where, take }: { where: { tenantId: string }; take: number }) =>
-      Array.from({ length: take }, (_, i) => { const id = `${where.tenantId}${i}`; rows[id] = appt(id); return { id }; }));
+    db.appointment.findMany.mockImplementation(async ({ where, take }: { where: { tenantId: string; status: string }; take: number }) =>
+      where.status === "canceled" ? [] : Array.from({ length: take }, (_, i) => { const id = `${where.tenantId}${i}`; rows[id] = appt(id); return { id }; }));
     const result = await scanIcloudSync(NOW);
     expect(result.sent).toBe(50);
     expect(icloud.push).toHaveBeenCalledTimes(50);
-    expect(db.appointment.findMany.mock.calls.map((c) => c[0].take)).toEqual([10, 10, 10, 10, 10]);
+    expect(dueQueries().map((q) => q.take)).toEqual([10, 10, 10, 10, 10]);
   });
 });
 
@@ -123,6 +127,57 @@ describe("enviar", () => {
   });
 });
 
+describe("eventos de consultas canceladas que sobraram no iPhone", () => {
+  const left = (id: string, attempts = 0) => ({ id, icloudEventUrl: URL_OF(id), icloudSyncAttempts: attempts });
+
+  it("só consultas canceladas, com endereço gravado, da conta e com o recuo vencido", async () => {
+    await scanIcloudSync(NOW);
+    const q = db.appointment.findMany.mock.calls.map((c) => c[0]).find((c) => c.where.status === "canceled");
+    expect(q.where).toEqual({
+      tenantId: "t1", status: "canceled", icloudEventUrl: { not: null },
+      OR: [{ icloudNextAttemptAt: null }, { icloudNextAttemptAt: { lte: NOW } }],
+    });
+    expect(q.take).toBe(10);
+  });
+
+  it("apaga o evento e esquece o endereço (a consulta cancelada não é apagada de novo)", async () => {
+    leftovers = [left("c1")];
+    const result = await scanIcloudSync(NOW);
+    expect(icloud.remove).toHaveBeenCalledWith("t1", URL_OF("c1"), "c1");
+    expect(db.appointment.updateMany).toHaveBeenCalledWith({
+      where: { id: "c1", tenantId: "t1", status: "canceled" },
+      data: { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: null },
+    });
+    expect(result.removed).toBe(1);
+  });
+
+  it("falha (iCloud fora do ar): recua 2, 4, 8… minutos e não insiste nas outras na mesma rodada", async () => {
+    leftovers = [left("c1", 2), left("c2")];
+    icloud.remove.mockResolvedValue(false);
+    const result = await scanIcloudSync(NOW);
+    expect(icloud.remove).toHaveBeenCalledTimes(1);
+    expect(db.appointment.updateMany).toHaveBeenCalledWith({
+      where: { id: "c1", tenantId: "t1", status: "canceled" },
+      data: { icloudSyncAttempts: 3, icloudNextAttemptAt: new Date(NOW.getTime() + 8 * 60_000) },
+    });
+    expect(result).toMatchObject({ removed: 0, failed: 1 });
+  });
+
+  it("limpa antes de enviar, na mesma rodada", async () => {
+    leftovers = [left("c1")];
+    due("a1");
+    const result = await scanIcloudSync(NOW);
+    expect(result).toMatchObject({ removed: 1, sent: 1 });
+  });
+
+  it("nunca lança, e a limpeza com erro não impede os envios", async () => {
+    icloud.remove.mockRejectedValue(new Error("boom"));
+    leftovers = [left("c1")];
+    due("a1");
+    await expect(scanIcloudSync(NOW)).resolves.toMatchObject({ sent: 1 });
+  });
+});
+
 describe("falhas", () => {
   it("5xx/timeout: recuo de 2, 4, 8… minutos até 60, sem desistir", () => {
     expect([1, 2, 3, 4, 5, 6, 7, 20].map(backoffMinutes)).toEqual([2, 4, 8, 16, 32, 60, 60, 60]);
@@ -167,7 +222,8 @@ describe("falhas", () => {
 
   it("uma conta com senha revogada não impede as outras", async () => {
     db.icloudCalendarIntegration.findMany.mockResolvedValue([{ tenantId: "t1" }, { tenantId: "t2" }]);
-    db.appointment.findMany.mockImplementation(async ({ where }: { where: { tenantId: string } }) => {
+    db.appointment.findMany.mockImplementation(async ({ where }: { where: { tenantId: string; status: string } }) => {
+      if (where.status === "canceled") return [];
       const id = `${where.tenantId}-a`; rows[id] = appt(id); return [{ id }];
     });
     icloud.push.mockResolvedValueOnce({ status: "failed", reason: "auth" });

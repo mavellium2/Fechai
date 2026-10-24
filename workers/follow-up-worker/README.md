@@ -29,7 +29,8 @@ envio concluir. Exige `db push` + client gerado nos processos web e worker.
 A fila `icloud-calendar` (Calendário da Apple) roda a cada `ICLOUD_SCAN_EVERY_SECONDS`
 (padrão 60, mínimo 15), com concorrência global 1, e faz duas coisas em ordem:
 `scanIcloudSync()` (`src/modules/scheduling/icloud-sync.ts`) envia ao iCloud as
-consultas **futuras** sem evento (inclusive as que já existiam quando a conta ligou
+consultas **futuras** sem evento — e apaga, com o mesmo recuo, o evento de consulta
+**cancelada** que sobrou no iPhone (o DELETE falhou na hora) — (inclusive as que já existiam quando a conta ligou
 o iCloud; 10 por conta e 50 por rodada, recuo de 2 a 60 min, sem limite de
 tentativas) e `scanIcloudHealth()` (`icloud-health.ts`) confere a senha de app e o
 calendário a cada 30 min por conta. Os lembretes **não esperam** o iCloud. O log

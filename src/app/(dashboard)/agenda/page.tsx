@@ -279,8 +279,8 @@ export default async function AgendaPage({
     const { byDay: icloudByDay, movedOnPhone } = phone?.status === "ok"
       ? placeIcloudItems(
           phone.items,
-          new Set([...monthRows.map((r) => r.id), ...reschedules.map((r) => r.appointmentId)]),
           monthRows,
+          reschedules.map((r) => r.appointmentId),
           config.timezone,
         )
       : { byDay: new Map<string, IcloudAgendaItem[]>(), movedOnPhone: new Map<string, Date>() };

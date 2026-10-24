@@ -451,6 +451,13 @@ export async function deleteIcloudEvent(tenantId: string, url: string | null, ap
     const res = await deleteEvent(credOf(integration), target);
     if (res.kind === "ok" || res.kind === "not_found") {
       clearIcloudAgendaCache(tenantId);
+      // O evento já não existe: esquecer o endereço é o que impede a varredura de apagar de novo.
+      await prisma.appointment
+        .updateMany({
+          where: { id: appointmentId, tenantId, icloudEventUrl: { not: null } },
+          data: { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: null },
+        })
+        .catch(() => {});
       return true;
     }
     console.error(`[icloud] remover evento falhou tenant=${tenantId} http=${res.status} tipo=${res.kind}`);
@@ -542,9 +549,12 @@ export async function listIcloudBusyBlocks(
       return null;
     }
 
-    const blocks = parseBusyBlocks(
-      results.flatMap((r) => (r.ok ? r.data : [])), day, timeZone, ignoreUid,
-    );
+    // Evento `fechai-<id>` de consulta que não está mais marcada (cancelada e o
+    // DELETE não chegou) não ocupa o horário: a nossa base já bloqueia as ativas.
+    // Sempre com tenantId — o id vem de um arquivo do cliente.
+    const ics = results.flatMap((r) => (r.ok ? r.data : []));
+    const stale = await staleFechaiUids(tenantId, ics);
+    const blocks = parseBusyBlocks(ics, day, timeZone, ignoreUid, stale);
     if (!blocks) {
       console.error(`[icloud] interpretar agenda do dia falhou tenant=${tenantId}`);
       await recordOutcome(tenantId, { ok: false, op: "read", kind: "rejected", status: 0 });
@@ -554,6 +564,21 @@ export async function listIcloudBusyBlocks(
     console.error(`[icloud] listar agenda do dia falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
     return null;
   }
+}
+
+/** UIDs `fechai-<id>` presentes nos arquivos cuja consulta não está `scheduled` (ou não existe nesta conta). */
+async function staleFechaiUids(tenantId: string, icsList: string[]): Promise<Set<string>> {
+  const uids = new Map<string, string>();
+  for (const ics of icsList) {
+    for (const m of ics.matchAll(/^UID:(fechai-([A-Za-z0-9_-]+)(?:@fechai)?)\s*$/gm)) uids.set(m[2], m[1]);
+  }
+  if (!uids.size) return new Set();
+  const active = await prisma.appointment.findMany({
+    where: { tenantId, id: { in: [...uids.keys()] }, status: "scheduled" },
+    select: { id: true },
+  });
+  const activeIds = new Set((active ?? []).map((a) => a.id));
+  return new Set([...uids].filter(([id]) => !activeIds.has(id)).map(([, uid]) => uid));
 }
 
 /**

@@ -25,30 +25,37 @@ describe("dias de um evento do iPhone", () => {
 
 describe("eventos do iPhone na lista do dia", () => {
   it("evento de fora aparece no seu dia", () => {
-    const { byDay } = placeIcloudItems([item("x", "2026-08-12T17:00:00Z")], new Set(), [], TZ);
+    const { byDay } = placeIcloudItems([item("x", "2026-08-12T17:00:00Z")], [], [], TZ);
     expect(byDay.get("2026-08-12")?.map((i) => i.uid)).toEqual(["x"]);
   });
 
   it("o evento que o fechai enviou não repete quando a consulta está no mês", () => {
     const rows = [row("abc", "2026-08-12T17:00:00Z")];
-    const { byDay, movedOnPhone } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T17:00:00Z")], new Set(["abc"]), rows, TZ);
+    const { byDay, movedOnPhone } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T17:00:00Z")], rows, [], TZ);
     expect(byDay.size).toBe(0);
     expect(movedOnPhone.size).toBe(0);
   });
 
   it("também não repete quando a consulta foi remarcada para outro mês (histórico do mês)", () => {
-    const { byDay } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T17:00:00Z")], new Set(["abc"]), [], TZ);
+    const { byDay } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T17:00:00Z")], [], ["abc"], TZ);
     expect(byDay.size).toBe(0);
   });
 
   it("UID do fechai sem consulta correspondente aparece normal", () => {
-    const { byDay } = placeIcloudItems([item("fechai-orfao@fechai", "2026-08-12T17:00:00Z")], new Set(["abc"]), [], TZ);
+    const { byDay } = placeIcloudItems([item("fechai-orfao@fechai", "2026-08-12T17:00:00Z")], [row("abc", "2026-08-12T17:00:00Z")], [], TZ);
     expect(byDay.get("2026-08-12")).toHaveLength(1);
+  });
+
+  it("evento do fechai de consulta CANCELADA que sobrou no iPhone aparece normal (não fica escondido bloqueando o horário)", () => {
+    const rows = [row("abc", "2026-08-12T17:00:00Z", { status: "canceled" })];
+    const { byDay, movedOnPhone } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T17:00:00Z")], rows, [], TZ);
+    expect(byDay.get("2026-08-12")?.map((i) => i.uid)).toEqual(["fechai-abc@fechai"]);
+    expect(movedOnPhone.size).toBe(0);
   });
 
   it("evento do fechai em outro horário no iPhone: aviso com o horário de lá, sem mexer na consulta", () => {
     const rows = [row("abc", "2026-08-12T17:00:00Z")];
-    const { byDay, movedOnPhone } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T19:00:00Z")], new Set(["abc"]), rows, TZ);
+    const { byDay, movedOnPhone } = placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T19:00:00Z")], rows, [], TZ);
     expect(byDay.size).toBe(0);
     expect(movedOnPhone.get("abc")?.toISOString()).toBe("2026-08-12T19:00:00.000Z");
     expect(rows[0].startsAt.toISOString()).toBe("2026-08-12T17:00:00.000Z");
@@ -57,11 +64,11 @@ describe("eventos do iPhone na lista do dia", () => {
   it("só o fim diferente também é alteração", () => {
     const rows = [row("abc", "2026-08-12T17:00:00Z")];
     const moved = item("fechai-abc@fechai", "2026-08-12T17:00:00Z", { endsAt: new Date("2026-08-12T19:00:00Z") });
-    expect(placeIcloudItems([moved], new Set(["abc"]), rows, TZ).movedOnPhone.has("abc")).toBe(true);
+    expect(placeIcloudItems([moved], rows, [], TZ).movedOnPhone.has("abc")).toBe(true);
   });
 
   it("consulta cancelada não gera aviso; evento igual não gera aviso", () => {
     const canceled = [row("abc", "2026-08-12T17:00:00Z", { status: "canceled" })];
-    expect(placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T19:00:00Z")], new Set(["abc"]), canceled, TZ).movedOnPhone.size).toBe(0);
+    expect(placeIcloudItems([item("fechai-abc@fechai", "2026-08-12T19:00:00Z")], canceled, [], TZ).movedOnPhone.size).toBe(0);
   });
 });

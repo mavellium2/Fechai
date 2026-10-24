@@ -270,7 +270,8 @@ export async function createAppointment(input: CreateAppointmentInput) {
   });
 
   // Lead de teste (chat do agente) marca o título e não leva o telefone ao iPhone.
-  const icloud = await pushEventToIcloud(
+  // Consulta que já passou (marcada à mão para registrar) nunca vai ao iPhone.
+  const icloud: IcloudSyncResult = input.startsAt.getTime() <= Date.now() ? { status: "skipped" } : await pushEventToIcloud(
     input.tenantId,
     {
       appointmentId: appointment.id, title: input.title, patientName: input.patientName, procedure: input.procedure,
@@ -447,6 +448,10 @@ export async function rescheduleAppointment(input: {
     : { status: "skipped" };
   // Não deu para mover o evento: esquece o endereço para a varredura reenviar o
   // horário atual (sobrescrevendo o antigo) assim que o iCloud responder.
+  // Envio desligado (ou senha revogada): o evento antigo não pode ficar no horário velho.
+  if (previous.icloudEventUrl && icloud.status === "skipped") {
+    await deleteIcloudEvent(input.tenantId, previous.icloudEventUrl, previous.id);
+  }
   const icloudData = !previous.icloudEventUrl || icloud.status === "synced" ? {}
     : { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: icloud.status === "failed" && icloud.reason === "transient" ? new Date(Date.now() + 2 * 60_000) : null };
   await prisma.appointment.updateMany({

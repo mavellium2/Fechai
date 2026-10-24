@@ -353,6 +353,13 @@ describe("reagendamento", () => {
       data: expect.objectContaining({ icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: expect.any(Date) }),
     }));
   });
+  it("envio ao iCloud desligado na remarcação: apaga o evento do horário antigo em vez de deixá-lo lá", async () => {
+    const url = "https://p1-caldav.icloud.com/c/fechai-consulta-1.ics";
+    db.appointment.findFirst.mockImplementation(async ({ where }) => where.id === appointment.id ? { ...appointment, icloudEventUrl: url } : null);
+    icloud.update.mockResolvedValue({ status: "skipped" });
+    expect(await reschedule()).toContain("reagendada");
+    expect(icloud.remove).toHaveBeenCalledWith(ctx.tenantId, url, appointment.id);
+  });
   it("consulta que nunca foi ao iCloud não é enviada na remarcação: a varredura lê o horário novo", async () => {
     await reschedule();
     expect(icloud.update).not.toHaveBeenCalled();
@@ -517,6 +524,20 @@ describe("nome da pessoa atendida", () => {
     expect(db.appointment.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ icloudEventUrl: "https://p1-caldav.icloud.com/c/fechai-nova-consulta.ics" }),
     }));
+  });
+
+  it("consulta no passado (marcada à mão para registrar) nunca vai ao iPhone", async () => {
+    db.appointment.create.mockResolvedValue({ id: "passada" });
+    db.appointment.update.mockResolvedValue({});
+    db.lead.findUnique.mockResolvedValue({ name: "Thalita", phone: "5511999999999", isTest: false });
+    const { createAppointment } = await import("@/modules/scheduling/repository");
+    const base = { tenantId: ctx.tenantId, title: "Antiga", durationMinutes: 30, source: "manual" as const, timezone: cfg.timezone, leadId: ctx.leadId };
+    await createAppointment({ ...base, startsAt: new Date("2026-09-10T17:00:00Z") });
+    expect(icloud.push).not.toHaveBeenCalled();
+    await createAppointment({ ...base, startsAt: new Date("2026-09-16T11:59:59Z") });
+    expect(icloud.push).not.toHaveBeenCalled();
+    await createAppointment({ ...base, startsAt: new Date("2026-09-17T17:00:00Z") });
+    expect(icloud.push).toHaveBeenCalledOnce();
   });
 
   it("falha do iCloud não desfaz a consulta", async () => {

@@ -205,6 +205,8 @@ export type ParseOptions = {
   timeZone: string;
   /** Ao remarcar, o próprio evento do fechai não ocupa o novo horário. */
   ignoreUid?: string;
+  /** Outros UIDs que não ocupam ninguém (eventos do fechai de consultas que já não estão marcadas). */
+  ignoreUids?: ReadonlySet<string>;
   /** Teto de ocorrências devolvidas (recorrência diária explode rápido). */
   limit?: number;
 };
@@ -358,6 +360,7 @@ export function parseIcsOccurrences(icsList: string[], opts: ParseOptions): Pars
 
   const push = (o: IcalOccurrence) => {
     if (opts.ignoreUid && o.uid === opts.ignoreUid) return;
+    if (opts.ignoreUids?.has(o.uid)) return;
     if (!overlaps(o, opts)) return;
     if (items.length >= limit) { truncated = true; return; }
     items.push(o);
@@ -445,11 +448,12 @@ export function parseBusyBlocks(
   day: string,
   timeZone: string,
   ignoreUid?: string,
+  ignoreUids?: ReadonlySet<string>,
 ): BusyBlock[] | null {
   const range = localDayRange(day, timeZone);
   if (!range) return null;
   const parsed = parseIcsOccurrences(icsList, {
-    rangeStart: range.start, rangeEnd: range.end, timeZone, ignoreUid, limit: 2000,
+    rangeStart: range.start, rangeEnd: range.end, timeZone, ignoreUid, ignoreUids, limit: 2000,
   });
   if (parsed.skipped > 0 || parsed.truncated) return null;
   return parsed.items

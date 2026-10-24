@@ -37,15 +37,18 @@ export type OwnAppointment = { id: string; status: string; startsAt: Date; endsA
  *   alguém arrastou o evento lá. O fechai continua sendo a fonte da verdade —
  *   nada volta para o iPhone nem para a consulta; só vira um aviso.
  *
- * `ownIds` são as consultas do mês e as do histórico de remarcação do mês;
- * `rows` as consultas do mês (as únicas que podem ter o evento comparado).
+ * Só consulta **marcada** (`scheduled`) e o histórico de remarcação do mês contam
+ * como "nossas": o evento de uma consulta cancelada que sobrou no iPhone (o
+ * DELETE falhou) não pode ficar escondido, senão bloqueia horário sem ninguém ver.
+ * `rows` são as consultas do mês (as únicas que podem ter o evento comparado).
  */
 export function placeIcloudItems(
   items: IcloudAgendaItem[],
-  ownIds: Set<string>,
   rows: OwnAppointment[],
+  rescheduledIds: Iterable<string>,
   timeZone: string,
 ): { byDay: Map<string, IcloudAgendaItem[]>; movedOnPhone: Map<string, Date> } {
+  const ownIds = new Set([...rows.filter((r) => r.status === "scheduled").map((r) => r.id), ...rescheduledIds]);
   const byDay = new Map<string, IcloudAgendaItem[]>();
   const ours = new Map<string, IcloudAgendaItem[]>();
   for (const item of items) {

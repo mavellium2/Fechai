@@ -85,9 +85,9 @@ async function main() {
       const sync = await scanIcloudSync();
       const health = await scanIcloudHealth();
       // Só contagens: nunca Apple ID, senha, endereço de calendário ou título de evento.
-      if (sync.sent || sync.failed || sync.revoked || health.revoked || health.calendarMissing) {
+      if (sync.sent || sync.removed || sync.failed || sync.revoked || health.revoked || health.calendarMissing) {
         console.log(
-          `[icloud] contas=${sync.tenants} enviados=${sync.sent} falhas=${sync.failed} senha_revogada=${sync.revoked + health.revoked} calendario_sumiu=${health.calendarMissing} checadas=${health.checked}`,
+          `[icloud] contas=${sync.tenants} enviados=${sync.sent} removidos=${sync.removed} falhas=${sync.failed} senha_revogada=${sync.revoked + health.revoked} calendario_sumiu=${health.calendarMissing} checadas=${health.checked}`,
         );
       }
       return { sync, health };

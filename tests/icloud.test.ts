@@ -305,6 +305,19 @@ describe("remarcar e apagar", () => {
     expect(fetchMock.mock.calls[0][0]).toBe(URL_OF);
   });
 
+  it("depois de 2xx ou 404 esquece o endereço da consulta (só desta conta); falha não esquece", async () => {
+    fetchMock.mockReturnValueOnce(reply(204)).mockReturnValueOnce(reply(404)).mockReturnValueOnce(reply(500));
+    await deleteIcloudEvent("t1", URL_OF, "abc123");
+    await deleteIcloudEvent("t1", URL_OF, "abc123");
+    expect(db.appointment.updateMany).toHaveBeenCalledTimes(2);
+    expect(db.appointment.updateMany).toHaveBeenCalledWith({
+      where: { id: "abc123", tenantId: "t1", icloudEventUrl: { not: null } },
+      data: { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: null },
+    });
+    await deleteIcloudEvent("t1", URL_OF, "abc123");
+    expect(db.appointment.updateMany).toHaveBeenCalledTimes(2);
+  });
+
   it("falha ao apagar devolve false e registra; senha revogada nem chama a Apple", async () => {
     fetchMock.mockReturnValueOnce(reply(500));
     expect(await deleteIcloudEvent("t1", URL_OF, "abc123")).toBe(false);
@@ -445,10 +458,40 @@ describe("disponibilidade: o que está ocupado no iPhone", () => {
     });
 
     it("remarcação ignora o próprio evento do fechai, e só ele", async () => {
+      db.appointment.findMany.mockResolvedValue([{ id: "abc123" }]); // consulta ativa: o evento bloqueia
       fetchMock.mockImplementation(() => report(ics.FECHAI_EVENT)); // 14:00–15:00 em Brasília = 17:00–18:00Z
       expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ)).toBe(true);
       expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ, "abc123")).toBe(false);
       expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ, "outra")).toBe(true);
+    });
+
+    it("evento fechai-<id> de consulta cancelada (o DELETE não chegou) não ocupa o horário", async () => {
+      db.appointment.findMany.mockResolvedValue([]); // nenhuma ativa
+      fetchMock.mockImplementation(() => report(ics.FECHAI_EVENT));
+      expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ)).toBe(false);
+      expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toEqual([]);
+      // A consulta é procurada na conta, só entre as marcadas.
+      expect(db.appointment.findMany).toHaveBeenCalledWith({
+        where: { tenantId: "t1", id: { in: ["abc123"] }, status: "scheduled" }, select: { id: true },
+      });
+    });
+
+    it("evento fechai-<id> de consulta ainda marcada continua ocupando; evento de fora também", async () => {
+      db.appointment.findMany.mockResolvedValue([{ id: "abc123" }]);
+      fetchMock.mockImplementation(() => report(ics.FECHAI_EVENT, ics.UTC_EVENT));
+      expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toHaveLength(2);
+    });
+
+    it("sem evento do fechai nos arquivos, nem consulta o banco", async () => {
+      fetchMock.mockImplementation(() => report(ics.UTC_EVENT));
+      await listIcloudBusyBlocks("t1", DAY, TZ);
+      expect(db.appointment.findMany).not.toHaveBeenCalled();
+    });
+
+    it("banco fora do ar ao conferir as consultas: disponibilidade desconhecida (null)", async () => {
+      db.appointment.findMany.mockRejectedValue(new Error("db"));
+      fetchMock.mockImplementation(() => report(ics.FECHAI_EVENT));
+      expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
     });
 
     it("falha de leitura = null (quem chama não confirma o horário)", async () => {

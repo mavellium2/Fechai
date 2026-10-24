@@ -24,6 +24,8 @@ const MAX_BACKOFF_MINUTES = 60;
 export type IcloudSyncScan = {
   tenants: number;
   sent: number;
+  /** Eventos de consultas canceladas que sobraram no iPhone e foram apagados agora. */
+  removed: number;
   failed: number;
   /** Contas paradas nesta rodada porque a Apple recusou a senha. */
   revoked: number;
@@ -35,7 +37,7 @@ export function backoffMinutes(attempts: number): number {
 }
 
 export async function scanIcloudSync(now = new Date()): Promise<IcloudSyncScan> {
-  const result: IcloudSyncScan = { tenants: 0, sent: 0, failed: 0, revoked: 0 };
+  const result: IcloudSyncScan = { tenants: 0, sent: 0, removed: 0, failed: 0, revoked: 0 };
   try {
     const accounts = await prisma.icloudCalendarIntegration.findMany({
       where: {
@@ -55,6 +57,15 @@ export async function scanIcloudSync(now = new Date()): Promise<IcloudSyncScan> 
     for (const { tenantId } of accounts) {
       if (budget <= 0) break;
       result.tenants++;
+
+      // Primeiro o que está sobrando: evento de consulta cancelada (o DELETE falhou
+      // na hora — iCloud fora, 5xx) continua bloqueando o horário no iPhone.
+      const leftovers = await removeLeftovers(tenantId, Math.min(PER_ACCOUNT, budget), now);
+      budget -= leftovers.tried;
+      result.removed += leftovers.removed;
+      result.failed += leftovers.failed;
+      if (budget <= 0) break;
+
       const due = await prisma.appointment.findMany({
         where: {
           tenantId,
@@ -83,6 +94,50 @@ export async function scanIcloudSync(now = new Date()): Promise<IcloudSyncScan> 
     console.error("[icloud] varredura de envio falhou", err instanceof Error ? err.name : "erro");
   }
   return result;
+}
+
+/**
+ * Apaga do iPhone os eventos de consultas canceladas que ainda têm endereço
+ * gravado, com o mesmo recuo (2, 4, 8… até 60 min) e sem limite de tentativas.
+ * `deleteIcloudEvent` esquece o endereço depois de 2xx ou 404; aqui também, por
+ * garantia. Para na primeira falha: iCloud fora do ar não pede dez timeouts seguidos.
+ */
+async function removeLeftovers(tenantId: string, take: number, now: Date) {
+  const out = { tried: 0, removed: 0, failed: 0 };
+  try {
+    const rows = await prisma.appointment.findMany({
+      where: {
+        tenantId,
+        status: "canceled",
+        icloudEventUrl: { not: null },
+        OR: [{ icloudNextAttemptAt: null }, { icloudNextAttemptAt: { lte: now } }],
+      },
+      orderBy: { updatedAt: "asc" },
+      take,
+      select: { id: true, icloudEventUrl: true, icloudSyncAttempts: true },
+    });
+    for (const row of rows) {
+      out.tried++;
+      if (await deleteIcloudEvent(tenantId, row.icloudEventUrl, row.id)) {
+        await prisma.appointment.updateMany({
+          where: { id: row.id, tenantId, status: "canceled" },
+          data: { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: null },
+        });
+        out.removed++;
+      } else {
+        const attempts = row.icloudSyncAttempts + 1;
+        await prisma.appointment.updateMany({
+          where: { id: row.id, tenantId, status: "canceled" },
+          data: { icloudSyncAttempts: attempts, icloudNextAttemptAt: new Date(now.getTime() + backoffMinutes(attempts) * 60_000) },
+        });
+        out.failed++;
+        break;
+      }
+    }
+  } catch (err) {
+    console.error(`[icloud] limpar eventos cancelados falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
+  }
+  return out;
 }
 
 type Outcome = "sent" | "failed" | "skipped" | "revoked" | "stop";
