@@ -284,6 +284,11 @@ export const AUDIT_EVENTS = {
   "admin.ip_blocked": { label: "Bloqueou um IP", kind: "create", group: "admin" },
   "admin.ip_unblocked": { label: "Desbloqueou um IP", kind: "delete", group: "admin" },
 
+  // Tokens da rota MCP do agente. Nunca revertíveis: revogar não se desfaz
+  // (emite-se outro token) e o token em claro não existe para ser regravado.
+  "mcp.token_issued": { label: "Emitiu um token de acesso MCP", kind: "create", group: "admin" },
+  "mcp.token_revoked": { label: "Revogou um token de acesso MCP", kind: "update", group: "admin" },
+
   "admin.impersonated": { label: "Entrou como o cliente", kind: "access", group: "admin" },
   "admin.impersonation_ended": { label: "Saiu do modo cliente", kind: "access", group: "admin" },
   "admin.agent_replicated": {
