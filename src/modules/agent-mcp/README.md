@@ -7,21 +7,24 @@ ferramenta de IA externa (Claude Code, por exemplo) **ler a configuração dos
 agentes de uma conta** e, com a permissão de simulação, **conversar com eles em
 modo de teste**, com um token emitido pelo superadmin. Parte A do plano: tokens,
 rota e leitura. Parte B: simulação (`simulate`), ver "Simulação pelo MCP".
-Propostas de mudança (`propose`) vêm na parte C; o escopo já existe no schema,
-mas ainda não pode ser emitido.
+Parte C: propostas de mudança (`propose`), ver "Propostas de mudança". **Nenhuma
+ferramenta MCP grava no agente**: a única escrita possível é a fila de propostas,
+e quem aplica é um superadmin, no painel.
 
 ## Arquivos
 
 - `tokens.ts` — emitir, listar, revogar. `fch_mcp_` + 32 bytes aleatórios em base64url.
 - `auth.ts` — `Authorization: Bearer`, busca por hash, recusa revogado/vencido, marca `lastUsedAt`.
 - `rpc.ts` — JSON-RPC 2.0 mínimo, sem estado e sem dependência (`initialize`, `ping`, `tools/list`, `tools/call`). Também os limites e o teto do corpo.
-- `tools.ts` — registro das ferramentas (`list_agents`, `get_agent_config`, `run_simulation`, `get_simulation`) e as `annotations` anunciadas em `tools/list`.
+- `tools.ts` — registro das ferramentas (`list_agents`, `get_agent_config`, `run_simulation`, `get_simulation`, `propose_change`, `get_proposal`) e as `annotations` anunciadas em `tools/list`.
 - `read.ts` — a leitura filtrada da configuração.
 - `simulate.ts` — simulação de conversa (`run_simulation`, `get_simulation`), limite de turnos por token e máscara da saída.
+- `proposals.ts` — criar (`createProposal`) e ler (`getProposalStatus`) propostas, diff por campo e por linha, e o prompt da variante `proposal`. **Não aplica nada.**
+- `proposal-decision.ts` — aprovar (aplica) e recusar. Só chamado pelas actions do superadmin.
 - `errors.ts` — `McpToolError` (vira `isError: true`) e `McpRateLimitedError` (vira 429).
-- Rota: `src/app/api/mcp/route.ts` (só POST, runtime Node). Admin: `src/app/(admin)/admin/agentes/mcp/`.
+- Rota: `src/app/api/mcp/route.ts` (só POST, runtime Node). Admin: `src/app/(admin)/admin/agentes/mcp/` (tokens) e `src/app/(admin)/admin/agentes/propostas/[id]/` (aprovação).
 - Exemplo de cliente: `.mcp.json.example` na raiz (sem token; o valor vem da variável `FECHAI_MCP_TOKEN`).
-- Testes: `tests/agent-mcp.test.ts`, `tests/agent-mcp-simulacao.test.ts` (parte B), mais `tests/autorizacao.test.ts` (rota com autenticação antes do corpo).
+- Testes: `tests/agent-mcp.test.ts`, `tests/agent-mcp-simulacao.test.ts` (parte B), `tests/agent-mcp-propostas.test.ts` (parte C), mais `tests/autorizacao.test.ts` (rota com autenticação antes do corpo).
 
 ## Regras que não podem ser quebradas
 
@@ -64,13 +67,17 @@ mas ainda não pode ser emitido.
 | `get_agent_config` | `read` | `{ agentId }` | persona, `systemPrompt`, `behavior`, `variables`, `actions`, `knowledge` |
 | `run_simulation` | `simulate` | `{ agentId, messages, variant? }` | `{ simulationId, runs: [{ variant, turns: [{ user, reply, toolsUsed, status }] }], dryRun: true }` |
 | `get_simulation` | `simulate` | `{ simulationId }` | `{ simulationId, agentId, runs: [{ variant, turns: [{ user, reply }] }], dryRun: true }` |
+| `propose_change` | `propose` | `{ agentId, changes: { persona?: {campos} }, reason }` | `{ proposalId, status: "pending", diff: [{ field, before, after }], promptDiff: [{ type, text }], approveUrl, expiresAt }` |
+| `get_proposal` | `propose` | `{ proposalId }` | `{ proposalId, status, decidedAt, decidedByRole, appliedAt, rejectReason }` |
 
-`list_agents`, `get_agent_config` e `get_simulation` se anunciam com
-`readOnlyHint: true`; `run_simulation` com `readOnlyHint: false` e
-`idempotentHint: false` (grava uma conversa de teste e custa LLM). Todas com
-`destructiveHint: false` e `openWorldHint: false`. As duas famílias são
-independentes: um token só com `simulate` não vê `list_agents`, então, para
-descobrir os ids, emita `read` + `simulate`.
+`run_simulation` também aceita `proposalId` (ver "Propostas de mudança").
+`list_agents`, `get_agent_config`, `get_simulation` e `get_proposal` se anunciam com
+`readOnlyHint: true`; `run_simulation` e `propose_change` com `readOnlyHint: false` e
+`idempotentHint: false` (a primeira grava uma conversa de teste e custa LLM; a
+segunda grava na fila de propostas, nunca no agente). Todas com
+`destructiveHint: false` e `openWorldHint: false`. As famílias são
+independentes: um token só com `simulate` ou `propose` não vê `list_agents`, então,
+para descobrir os ids, emita `read` junto.
 
 `get_agent_config` devolve: `persona` (nome do agente e da empresa, setor, tom,
 estilo, oferta, objetivo, regras), `systemPrompt`, `behavior` (ouvir áudio, parar
@@ -116,11 +123,10 @@ mais. Regras:
   `[número oculto]`). `toolsUsed` traz só os nomes das ferramentas, nunca
   argumentos ou resultados. Turno que lança vira `status: "error"`, sem detalhe
   técnico (vai ao log), e a simulação para ali; status diferente de `ok` também para.
-- **Variantes:** só `current` (o agente como está). `proposal` e `both` já estão no
-  esquema, para a API não mudar, mas respondem `isError` "Variante disponível após
-  a aprovação de propostas." (parte C). Quando chegarem, a proposta entra pelo
-  `systemPromptOverride` de `runAgentTurn` (ver `agent-engine/README.md`), que hoje
-  nenhum chamador liga.
+- **Variantes:** `current` (o agente como está, padrão), `proposal` (o agente com
+  uma proposta pendente) e `both` (as duas). Detalhes em "Propostas de mudança". A
+  proposta entra pelo `systemPromptOverride` de `runAgentTurn` (ver
+  `agent-engine/README.md`); nada é gravado no agente.
 - **Limite próprio:** 30 turnos a cada 10 minutos por token (`SIMULATION_LIMIT`,
   `rateLimitReserve("mcp:simulate", tokenId, …, n)`), além das 120 chamadas/min
   gerais. O saldo do pedido inteiro (`n` = número de mensagens) é reservado numa
@@ -137,11 +143,80 @@ mais. Regras:
 
 `get_simulation` relê o transcript (falas e respostas, mascaradas) só de conversa
 com `tenantId` do token, `isTest` no lead e na conversa, e telefone exatamente
-`mcp:<agente>:<simulationId>`. Conversa real, chat de teste do painel
+`mcp:<agente>:<simulationId>` (e `...:proposal` para a rodada da proposta, só com o
+escopo `propose`). Conversa real, chat de teste do painel
 (`sandbox:`) e simulação de outra conta respondem "Simulação não encontrada nesta
 conta.". Não traz `toolsUsed` nem `status` (o banco não guarda por turno) e não
 gasta o limite de turnos. `reply` vem `null` quando a fala não tem resposta
 gravada (o agente ficou calado naquele turno).
+
+## Propostas de mudança (escopo `propose`)
+
+Fluxo: **proposta → aprovação humana → aplicação**. O MCP só consegue o primeiro
+passo.
+
+1. `propose_change` valida `changes.persona` com os **mesmos validadores do painel**
+   (`persona-apply.ts`: `businessName` obrigatório etc., só os campos presentes, chave
+   desconhecida é parâmetro inválido, até 4000 caracteres por campo) e grava uma
+   linha `AgentChangeProposal` `pending`. Ela guarda `before`/`after` (só os campos
+   que mudam, mais o prompt composto antes e depois), `baseHash` e `expiresAt`
+   (7 dias). **Não faz `update` em `agent`**; só lê o agente, com o `tenantId` do
+   token. Recusa: agente de outra conta ou arquivado, proposta que não muda nada,
+   agente sem nome de negócio na persona (recompor o prompt a partir do nada
+   trocaria o prompt inteiro por um genérico) e mais de 10 pendentes por agente.
+   A saída traz o `diff` por campo, o `promptDiff` (por linha, `same`/`add`/`remove`)
+   e o `approveUrl` (`/admin/agentes/propostas/<id>`). Audita
+   `agent.change_proposed` (conta explícita, `meta: { via: "mcp", proposalId,
+   tokenPrefix }`).
+2. O superadmin abre o link, vê o diff e o prompt linha a linha e decide.
+   **Aprovar e gravar** ou **Recusar** (motivo obrigatório). Página e actions chamam
+   `requireSuperadmin` a cada chamada (`propostas/[id]/page.tsx`, `actions.ts`); a
+   regra mora em `proposal-decision.ts`.
+3. `get_proposal` devolve a situação (`decidedByRole` é só `superadmin`: quem foi, id
+   ou e-mail, não sai pelo MCP). Só do próprio tenant: id de outra conta responde
+   "Proposta não encontrada nesta conta.".
+
+**Situações:** `pending`, `applied`, `rejected`, `expired`, `stale`.
+
+- **`expired`:** passou de `expiresAt` sem decisão. Pendente vencida já é lida como
+  `expired` (`effectiveStatus`) mesmo antes de alguém tocá-la; ao tentar aprovar, a
+  linha é marcada e a aprovação é recusada, sem gravar.
+- **`stale`:** o agente mudou depois da proposta. O `baseHash` é o sha256 de nome,
+  prompt, objetivo e das oito respostas de persona/regras no momento da proposta;
+  qualquer salvamento no painel muda o hash. Aprovar recalcula e, se não bate,
+  marca `stale` e recusa. A gravação ainda leva `updatedAt` na condição, então uma
+  edição entre a conferência e o `update` também cai em `stale` e nada é gravado.
+- **Aplicar duas vezes** é recusado: a aprovação "reivindica" a linha com
+  `updateMany where { id, tenantId, status: "pending" }` antes de gravar; quem perde
+  a corrida (count 0) não grava. Se a gravação do agente falhar com exceção, a
+  proposta volta a `pending`.
+- **Aplicar** chama `applyPersonaAnswers` (o mesmo núcleo de `savePersona` e
+  `saveRules` do painel) com o superadmin como ator, e audita o evento normal da
+  mudança (`agent.persona_updated`; `agent.rules_updated` quando só as regras mudam)
+  com `tenantId` explícito e `meta: { via: "mcp", proposalId, tokenPrefix }`, além de
+  `decidedById`/`decidedByEmail`/`decidedAt`/`appliedAt` na proposta. Como os demais
+  eventos de persona, é revertível pela trilha de auditoria.
+- **Recusar** grava `status: "rejected"`, `rejectReason`, `decidedById`, `decidedAt`
+  e audita `agent.change_rejected`. O agente não muda.
+- O registro de auditoria identifica o token pelo prefixo; **nunca guarda o token nem
+  o hash**. Revogar o token depois não invalida propostas já feitas (o superadmin
+  decide o conteúdo, não o portador).
+
+**Simular uma proposta** (`run_simulation` com `variant: "proposal" | "both"`):
+
+- `proposalId` é **obrigatório** nessas variantes e **recusado** na `current`.
+- A proposta precisa estar `pending`, no prazo, ser do mesmo agente e o agente não
+  pode ter mudado desde então (mesmo `baseHash`). Senão: `isError`, antes de
+  qualquer custo.
+- O prompt é **recalculado** a partir do agente de agora com os campos da proposta
+  (a mesma conta da aprovação) e vai pelo `systemPromptOverride`, só nos turnos da
+  variante `proposal`. Nada é gravado no agente.
+- Exige `simulate` **e** `propose` no token (o conteúdo da proposta é do escopo
+  `propose`). A rodada da proposta é uma conversa de teste própria (telefone
+  `mcp:<agente>:<simulação>:proposal`) e `get_simulation` só a devolve para token
+  com `propose`.
+- `both` roda `current` e `proposal` em sequência; cada `runs[]` vem rotulado em
+  `variant`. Custa o dobro: o limite de 30 turnos reserva `mensagens × variantes`.
 
 ## Como emitir e revogar
 
@@ -155,13 +230,12 @@ validade (de 1 a 365 dias; padrão 30). O token aparece uma vez, com botão de
 copiar. Fechou a tela, não há como vê-lo de novo: emita outro e revogue o antigo.
 Emissão tem teto de 10 por minuto por superadmin.
 
-**Escopos `read` e `simulate` na emissão.** A tela lista os três escopos; "Ler a
-configuração do agente" e "Simular conversas (sem enviar nada)" estão
-habilitados, `propose` aparece desabilitado e `validateIssueInput` o recusa na
-action. A lista é `EMITTABLE_MCP_SCOPES` em `tokens.ts`: `MCP_SCOPES` mantém os
-três porque a autenticação e o schema já os conhecem (parte C). Liberar um escopo
-é ampliar `EMITTABLE_MCP_SCOPES`, e só faz sentido junto da ferramenta que o usa
-(`simulate` foi liberado na parte B, com `run_simulation`/`get_simulation`).
+**Escopos na emissão.** A tela lista os três: "Ler a configuração do agente",
+"Simular conversas (sem enviar nada)" e "Propor mudanças (nada é aplicado sem a sua
+aprovação)". A lista é `EMITTABLE_MCP_SCOPES` em `tokens.ts` (`validateIssueInput`
+recusa o que não está nela). Liberar um escopo é ampliar essa lista, e só faz sentido
+junto da ferramenta que o usa (`simulate` na parte B, `propose` na parte C).
+`propose` não dá poder de gravar no agente: toda proposta espera o superadmin.
 
 **Lista:** nome, conta, prefixo, permissões, situação (ativo, revogado ou vencido;
 revogado vence vencido), vencimento e último uso. Nunca mostra o hash.
@@ -203,7 +277,11 @@ mostrado uma vez fica inline, porque é conteúdo.
 | Ferramenta desconhecida, nome ausente, argumento inválido (inclui `tenantId`) | 200 | `-32602` | |
 | Agente de outra conta ou inexistente | 200 | resultado com `isError: true` | |
 | `run_simulation` com mais de 10 mensagens, mensagem vazia ou acima de 1000 caracteres | 200 | `-32602` | |
-| `run_simulation` com `variant` `proposal` ou `both` (parte C) | 200 | resultado com `isError: true` | |
+| `run_simulation` com `proposal`/`both` sem `proposalId`, com `proposalId` na `current`, com proposta que não está `pending` (aplicada, recusada, vencida, desatualizada), de outro agente ou de outra conta, ou sem o escopo `propose` | 200 | resultado com `isError: true` | |
+| `propose_change` ou `get_proposal` em token sem `propose` | 403 | `-32003` | |
+| `propose_change` com campo de persona desconhecido, `tenantId`, `businessName` vazio ou texto acima de 4000 caracteres | 200 | `-32602` | |
+| `propose_change` de agente de outra conta, proposta que não muda nada ou com 10 pendentes no agente | 200 | resultado com `isError: true` | |
+| `get_proposal` de outra conta ou inexistente | 200 | resultado com `isError: true` | |
 | Mais de 30 turnos de simulação em 10 min com o mesmo token | 429 | `-32029` | `Retry-After` |
 | `get_simulation` de outra conta, de conversa real ou do chat de teste do painel | 200 | resultado com `isError: true` | |
 | Notificação (sem `id`) | 202 | sem corpo | |
@@ -224,7 +302,7 @@ em pedaços e cancelado ao passar do limite (`readBodyWithinLimit`).
 Automático (sem banco nem Redis reais: `prisma` e `rate-limit` são simulados):
 
 ```
-npx vitest run tests/agent-mcp.test.ts tests/agent-mcp-simulacao.test.ts tests/autorizacao.test.ts tests/rate-limit-reserve.test.ts
+npx vitest run tests/agent-mcp.test.ts tests/agent-mcp-simulacao.test.ts tests/agent-mcp-propostas.test.ts tests/autorizacao.test.ts tests/rate-limit-reserve.test.ts
 ```
 
 Manual, contra um ambiente com token emitido (`FECHAI_MCP_TOKEN` exportado):
@@ -241,9 +319,11 @@ curl -s -X POST "$URL" -H "Authorization: Bearer $FECHAI_MCP_TOKEN" \
 
 Confira:
 
-- `tools/list` com `read` mostra só `list_agents` e `get_agent_config`; com `simulate`, também `run_simulation` e `get_simulation`.
+- `tools/list` com `read` mostra só `list_agents` e `get_agent_config`; com `simulate`, também `run_simulation` e `get_simulation`; com `propose`, `propose_change` e `get_proposal`.
+- `propose_change` com `{"agentId":"...","changes":{"persona":{"tone":"direto"}},"reason":"..."}`: `status: "pending"`, o agente **não muda**; abrir o `approveUrl` como superadmin mostra o diff e os botões.
+- Aprovar: o agente muda (veja a persona em `/agentes`), `/admin/logs` mostra `agent.persona_updated` com `via: "mcp"`, e `get_proposal` responde `applied`. Aprovar de novo é recusado.
 - `run_simulation` com `{"agentId":"...","messages":["Oi","Quero marcar sexta às 14h"]}`: resposta com `dryRun: true`, nada novo em `/agenda`, nenhuma mensagem no WhatsApp, e a conversa na aba de testes de `/conversas`.
-- `run_simulation` com `variant: "proposal"`: `isError: true`.
+- `run_simulation` com `variant: "proposal"` sem `proposalId`: `isError: true`. Com `proposalId` pendente (token `simulate` + `propose`): `runs[0].variant` é `proposal`.
 - `get_simulation` com o `simulationId` devolvido: as mesmas falas (mascaradas), sem `toolsUsed`.
 - Sem o header `Authorization`: 401 com `WWW-Authenticate`.
 - `list_agents` com `arguments: {"tenantId": "..."}`: `-32602`.
@@ -277,6 +357,12 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
   até revogar ou até vencer. Padrão de 30 dias, teto de 365. O remédio é revogar e
   emitir outro. Com `simulate`, também gasta LLM da plataforma (até 30 turnos a
   cada 10 min) e grava conversas de teste na conta.
+- **Token com `propose` pode encher a fila de revisão.** Limite: 10 propostas
+  pendentes por agente e 120 chamadas/min por token; propostas vencidas deixam de
+  contar e ficam no banco (sem limpeza automática). A proposta aprovada só reflete
+  o que o superadmin viu: o diff é montado pelo servidor e a aprovação confere o
+  `baseHash`, mas o texto do campo é do portador do token, então leia antes de
+  aprovar (principalmente `avoid`, as regras).
 - **Conversas de simulação acumulam.** Cada `run_simulation` cria um lead/conversa
   de teste novo; não há limpeza automática.
 
@@ -296,7 +382,13 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
 `tokenPrefix`, `scopes`, `expiresAt`, `revokedAt`, `lastUsedAt` e quem emitiu e
 revogou (`createdById`/`createdByEmail`, `revokedById`).
 
-**Passo pendente de deploy:** a tabela é nova. Antes de subir o código, rode
+`AgentChangeProposal` (parte C; cascade com `Tenant` e `Agent`, `@@index([tenantId, status])`
+e `@@index([agentId])`): `status` (`pending|applied|rejected|expired|stale`),
+`reason`, `before`/`after` (Json), `baseHash`, `expiresAt`, quem decidiu
+(`decidedById`/`decidedByEmail`/`decidedAt`), `appliedAt` e `rejectReason`. `tokenId`
+é só o id (sem relação), e nunca o token. Mudança aditiva: uma tabela nova.
+
+**Passo pendente de deploy (partes A e C):** as tabelas são novas. Antes de subir o código, rode
 `npm run db:push` (ou `npx prisma db push`) e `npx prisma generate` **nos dois
 processos** (web e worker). A rota lê `prisma.mcpToken` a cada chamada, então sem o
 client novo ela falha. Se o deploy recusar um índice único, não use
@@ -306,7 +398,10 @@ dev server e rode de novo.
 
 ## O que NÃO faz (ainda)
 
-- Não grava nada no agente nem propõe mudança (parte C). A simulação só grava a
-  própria conversa de teste.
-- Não roda a variante `proposal`/`both` da simulação (parte C).
+- Não grava nada no agente, nunca: a simulação só grava a própria conversa de teste
+  e a proposta só grava a fila de propostas. Aplicar é do superadmin, no painel.
+- Não propõe mudança em habilidades, base de conhecimento, voz ou comportamento;
+  `changes` só tem `persona` (campos de persona e regras).
+- Não tem lista de propostas no admin: a entrada é o `approveUrl` devolvido pela
+  ferramenta (o evento `agent.change_proposed` também aparece em `/admin/logs`).
 - Não tem sessão, SSE nem lote JSON-RPC: GET devolve 405.
