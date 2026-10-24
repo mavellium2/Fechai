@@ -44,7 +44,17 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rate }));
 
 import { POST, GET } from "@/app/api/mcp/route";
-import { issueMcpToken, revokeMcpToken, hashMcpToken, MCP_TOKEN_PATTERN } from "@/modules/agent-mcp/tokens";
+import {
+  EMITTABLE_MCP_SCOPES,
+  MCP_SCOPES,
+  issueMcpToken,
+  revokeMcpToken,
+  hashMcpToken,
+  validateIssueInput,
+  MCP_TOKEN_PATTERN,
+} from "@/modules/agent-mcp/tokens";
+import { MAX_MCP_BODY_BYTES, readBodyWithinLimit } from "@/modules/agent-mcp/rpc";
+import { errorToResult } from "@/components/ui/toast/save-service";
 import { AUDIT_EVENTS, isRevertibleEvent } from "@/modules/audit/events";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -486,6 +496,37 @@ describe("Tokens: emissão, listagem e revogação", () => {
     expect(mocks.tokenCreate).not.toHaveBeenCalled();
   });
 
+  it("só `read` é emitível; simulate e propose existem no schema mas são recusados na emissão", async () => {
+    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read"]);
+    // A lista de escopos conhecidos (parte C) continua com os três.
+    expect([...MCP_SCOPES]).toEqual(["read", "simulate", "propose"]);
+
+    for (const scopes of [["simulate"], ["propose"], ["read", "simulate"], ["read", "propose"]]) {
+      const valid = validateIssueInput({ label: "x", scopes });
+      expect(valid.ok).toBe(false);
+      if (!valid.ok) expect(valid.error).toMatch(/ainda não pode ser emitida/);
+      const result = await issueMcpToken({ tenantId: "t", label: "x", scopes });
+      expect(result.ok).toBe(false);
+    }
+    // Escopo que nem existe segue com a mensagem própria.
+    const unknown = validateIssueInput({ label: "x", scopes: ["admin"] });
+    expect(unknown.ok === false && unknown.error).toBe("Permissão desconhecida.");
+    expect(mocks.tokenCreate).not.toHaveBeenCalled();
+
+    expect(validateIssueInput({ label: "x", scopes: ["read"] })).toMatchObject({ ok: true, scopes: ["read"] });
+  });
+
+  it("a action de emissão passa pela mesma validação antes de tocar no banco", () => {
+    const actions = readFileSync(path.join(ROOT, "src/app/(admin)/admin/agentes/mcp/actions.ts"), "utf8");
+    expect(actions).toContain("validateIssueInput(parsed.data)");
+    expect(actions.indexOf("validateIssueInput(parsed.data)")).toBeLessThan(actions.indexOf("prisma.tenant.findUnique"));
+  });
+
+  it("a autenticação continua aceitando os três escopos conhecidos no token", async () => {
+    mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["read", "simulate", "propose"] }));
+    expect((await call(rpc("ping"))).status).toBe(200);
+  });
+
   it("revogar filtra por conta e por não revogado, e vale na hora", async () => {
     mocks.tokenFindFirst.mockResolvedValue({ label: "Claude Code", revokedAt: null });
     mocks.tokenUpdateMany.mockResolvedValue({ count: 1 });
@@ -535,7 +576,9 @@ describe("Auditoria e admin", () => {
   it("a rota autentica antes de ler o corpo e aceita só POST", () => {
     const rpcSource = readFileSync(path.join(ROOT, "src/modules/agent-mcp/rpc.ts"), "utf8");
     expect(rpcSource.indexOf("authenticateMcp(request)")).toBeGreaterThan(-1);
-    expect(rpcSource.indexOf("authenticateMcp(request)")).toBeLessThan(rpcSource.indexOf("request.text()"));
+    expect(rpcSource.indexOf("authenticateMcp(request)")).toBeLessThan(rpcSource.indexOf("await readBodyWithinLimit(request"));
+    // Nunca o corpo inteiro de uma vez: o teto vale antes da leitura.
+    expect(rpcSource).not.toContain("request.text()");
     const route = readFileSync(path.join(ROOT, "src/app/api/mcp/route.ts"), "utf8");
     expect(route).toContain('export const runtime = "nodejs"');
     expect(route).not.toMatch(/export async function (PUT|PATCH|DELETE)/);
@@ -549,5 +592,142 @@ describe("Auditoria e admin", () => {
       headers: { Authorization: "Bearer ${FECHAI_MCP_TOKEN}" },
     });
     expect(example).not.toMatch(/fch_mcp_[A-Za-z0-9_-]{10,}/);
+  });
+
+  it(".mcp.json (com token real) fica fora do git; o exemplo continua versionado", () => {
+    const ignore = readFileSync(path.join(ROOT, ".gitignore"), "utf8").split(/\r?\n/);
+    expect(ignore).toContain(".mcp.json");
+    expect(ignore).not.toContain(".mcp.json.example");
+  });
+});
+
+describe("Teto do corpo da requisição", () => {
+  const MAX = MAX_MCP_BODY_BYTES;
+
+  /** Stream que conta quantos pedaços foram puxados e se foi cancelado. */
+  function chunkedBody(chunkBytes: number, chunks: number) {
+    const state = { pulled: 0, cancelled: false };
+    const piece = new Uint8Array(chunkBytes).fill(0x20);
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (state.pulled >= chunks) return controller.close();
+          state.pulled += 1;
+          controller.enqueue(piece);
+        },
+        cancel() {
+          state.cancelled = true;
+        },
+      },
+      // Sem pré-leitura: só conta o que alguém realmente puxou.
+      { highWaterMark: 0 },
+    );
+    return { body, state };
+  }
+
+  function streamRequest(body: ReadableStream<Uint8Array>, headers: Record<string, string> = {}) {
+    return new Request("https://fechai.test/api/mcp", {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, ...headers },
+      body,
+      duplex: "half",
+    } as RequestInit);
+  }
+
+  it("Content-Length acima do teto responde 413 sem ler o corpo", async () => {
+    const { body, state } = chunkedBody(1024, 4);
+    const res = await POST(streamRequest(body, { "content-length": String(MAX + 1) }));
+    expect(res.status).toBe(413);
+    expect((await json(res)).error.message).toMatch(/grande demais/i);
+    expect(state.pulled).toBe(0);
+  });
+
+  it("corpo chunked sem Content-Length que passa do teto: 413 e leitura cancelada no meio", async () => {
+    const chunk = 16 * 1024;
+    const chunks = 100; // 1,6 MB se lesse tudo
+    const { body, state } = chunkedBody(chunk, chunks);
+    const request = streamRequest(body);
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const res = await POST(request);
+    expect(res.status).toBe(413);
+    expect(state.cancelled).toBe(true);
+    // Parou logo depois de passar do teto, longe de ler os 1,6 MB.
+    expect(state.pulled).toBeLessThan(chunks);
+    expect(state.pulled * chunk).toBeLessThanOrEqual(MAX + 4 * chunk);
+  });
+
+  it("Content-Length que mente (menor que o corpo real) também é barrado pelo stream", async () => {
+    const { body, state } = chunkedBody(16 * 1024, 100);
+    const text = await readBodyWithinLimit(streamRequest(body, { "content-length": "10" }), MAX);
+    expect(text).toBeNull();
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("corpo exatamente no teto passa; um byte a mais não", async () => {
+    const base = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: { a: "" } });
+    const atLimit = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "ping",
+      params: { a: "x".repeat(MAX - Buffer.byteLength(base)) },
+    });
+    expect(Buffer.byteLength(atLimit)).toBe(MAX);
+    const make = (body: string) => new Request("https://fechai.test/x", { method: "POST", body });
+    expect(await readBodyWithinLimit(make(atLimit), MAX)).toBe(atLimit);
+    expect(await readBodyWithinLimit(make(atLimit + " "), MAX)).toBeNull();
+
+    // Multibyte: o teto é em bytes, não em caracteres.
+    expect(await readBodyWithinLimit(make("é".repeat(MAX / 2 + 1)), MAX)).toBeNull();
+    expect(await readBodyWithinLimit(make("é".repeat(MAX / 2)), MAX)).toBe("é".repeat(MAX / 2));
+
+    expect((await call(rpc("ping"))).status).toBe(200);
+  });
+
+  it("sem corpo vira JSON inválido (400), não erro interno", async () => {
+    const res = await POST(new Request("https://fechai.test/api/mcp", { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("Feedback do admin no padrão de toast", () => {
+  const dir = path.join(ROOT, "src/app/(admin)/admin/agentes/mcp");
+  const issuer = readFileSync(path.join(dir, "McpTokenIssuer.tsx"), "utf8");
+  const revoke = readFileSync(path.join(dir, "RevokeMcpTokenButton.tsx"), "utf8");
+
+  // Não há jsdom/testing-library neste repositório (vitest roda em node, só .ts),
+  // então o componente não é renderizado aqui: o que se prova é a fiação (código)
+  // e o caminho que ela usa (errorToResult), que é onde a falha vira toast.
+  it("emitir e revogar usam useSaveFeedback().run, sem estado de erro nem aviso inline", () => {
+    for (const source of [issuer, revoke]) {
+      expect(source).toContain("useSaveFeedback");
+      expect(source).toMatch(/save\.run\(/);
+      expect(source).not.toContain("useTransition");
+      expect(source).not.toMatch(/setError|text-danger/);
+    }
+    // Só o bloco do token (conteúdo) fica inline; o carregando vem do hook.
+    expect(issuer).toContain("loading={save.saving}");
+    expect(issuer).not.toMatch(/tone="danger"/);
+    expect(revoke).toContain("router.refresh()");
+  });
+
+  it("o `run` do hook converte exceção em erro via errorToResult (action que rejeita não fica muda)", () => {
+    const hook = readFileSync(path.join(ROOT, "src/components/ui/toast/use-save-feedback.ts"), "utf8");
+    expect(hook).toMatch(/catch \(error\)[\s\S]*errorToResult\(error\)/);
+
+    const rejected = errorToResult(new Error("Failed to fetch"));
+    expect(rejected.ok).toBe(false);
+    expect(rejected.code).toBe("network");
+    // Detalhe técnico não vai à tela.
+    expect(errorToResult(new Error("PrismaClientKnownRequestError P2002 at src/x.ts:10")).error).toBeUndefined();
+  });
+
+  it("o ConfirmButton não tem catch: por isso a revogação passa o erro pelo run", () => {
+    const confirm = readFileSync(path.join(ROOT, "src/components/ui/confirm-dialog.tsx"), "utf8");
+    const start = confirm.indexOf("async function handleConfirm");
+    const handler = confirm.slice(start, confirm.indexOf("return (", start));
+    expect(handler).toContain("finally");
+    expect(handler).not.toContain("catch");
+    expect(revoke).toMatch(/onConfirm=\{async \(\) => \{\s*const result = await save\.run\(/);
   });
 });

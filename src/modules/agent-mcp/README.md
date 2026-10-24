@@ -67,8 +67,37 @@ validade. O token aparece uma vez com botão de copiar. As actions
 chamada e gravam `mcp.token_issued` / `mcp.token_revoked` na auditoria (não
 revertíveis).
 
+**Só `read` é emitível** (`EMITTABLE_MCP_SCOPES` em `tokens.ts`): `MCP_SCOPES`
+mantém os três para a parte C, mas `validateIssueInput` recusa na emissão
+`simulate`/`propose` ("ainda não pode ser emitida"). A validação de escopo na
+autenticação segue sobre `MCP_SCOPES`. Liberar um escopo é ampliar aquela lista.
+
+**Feedback no admin:** emitir e revogar usam `useSaveFeedback(...).run(...)`
+(toast: carregando, erro, sucesso; ver `components/ui/toast/TOASTS.md`). Só o
+token mostrado uma vez fica inline, porque é conteúdo. `.mcp.json` está no
+`.gitignore`; só o `.mcp.json.example` é versionado.
+
 Uso no cliente: copie `.mcp.json.example` para `.mcp.json` e exporte
 `FECHAI_MCP_TOKEN` (e, fora de produção, `FECHAI_MCP_URL`).
+
+## Corpo da requisição
+
+Teto de 64 KB (`MAX_MCP_BODY_BYTES`), aplicado **antes** de ler: `Content-Length`
+acima do teto responde 413 sem tocar no corpo, e sem ele (chunked) o stream é lido
+em pedaços e cancelado ao passar do limite (`readBodyWithinLimit`).
+
+## Riscos conhecidos
+
+Registrados, não corrigidos (comportamento atual de propósito até haver decisão):
+
+- **Limite de falhas por IP falha aberto.** `rateLimit("mcp:auth-fail", ip, ...)`
+  libera tudo se o Redis cair; sem Redis não há freio a tentativa de token. O
+  token tem 256 bits, então adivinhar não é o risco, e sim a carga na rota.
+- **O banco é consultado antes do limite.** `authenticateMcp` busca o token por
+  hash antes de o limite de falhas ser conferido (ele só é contado depois da
+  falha), então um IP bloqueado ainda custa uma consulta por requisição. Um
+  freio antes da consulta exigiria contar por IP também nas tentativas, não só nas
+  falhas.
 
 ## Schema
 
