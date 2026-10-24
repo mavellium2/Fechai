@@ -5,6 +5,7 @@ import { getOrCreateConversation } from "@/modules/agent-engine/conversation";
 import { runAgentTurn, type TurnStatus } from "@/modules/agent-engine/orchestrator";
 import { maskText } from "@/modules/knowledge-gaps/mask";
 import { McpRateLimitedError, McpToolError } from "./errors";
+import { proposalPromptOverride } from "./proposals";
 
 /**
  * Simulação de conversa pelo MCP (escopo `simulate`).
@@ -15,6 +16,10 @@ import { McpRateLimitedError, McpToolError } from "./errors";
  * simulação não alcança — e a conversa nasce `isTest: true`, o que a deixa fora de
  * cota, relatórios, lembretes, follow-up e pesquisa de satisfação (todos filtram
  * por `isTest`). Regras em `README.md`.
+ *
+ * Variante `proposal`: o mesmo turno, com o prompt do agente trocado pelo da
+ * proposta pendente (`systemPromptOverride`, só naquele turno). Nada é gravado
+ * no agente.
  */
 
 export const SIMULATION_PHONE_PREFIX = "mcp:";
@@ -24,11 +29,17 @@ export const MAX_SIMULATION_MESSAGE_CHARS = 1000;
 export const SIMULATION_LIMIT = { max: 30, windowSeconds: 10 * 60 } as const;
 export const SIMULATION_VARIANTS = ["current", "proposal", "both"] as const;
 export type SimulationVariant = (typeof SIMULATION_VARIANTS)[number];
+type RunVariant = "current" | "proposal";
 
-const PROPOSAL_UNAVAILABLE = "Variante disponível após a aprovação de propostas.";
+const PROPOSAL_ID_REQUIRED = "Informe proposalId (devolvido por propose_change) para simular a proposta.";
+const PROPOSAL_ID_UNUSED = 'proposalId só vale com variant "proposal" ou "both".';
+const PROPOSAL_NEEDS_PROPOSE = "Simular uma proposta exige as permissões simulate e propose no token.";
 const AGENT_NOT_FOUND = "Agente não encontrado nesta conta.";
 const SIMULATION_NOT_FOUND = "Simulação não encontrada nesta conta.";
+/** `mcp:<agente>:<simulação>`; a rodada da proposta leva `:proposal` no fim. */
 const PHONE_PATTERN = /^mcp:([^:]+):([^:]+)$/;
+const PROPOSAL_PHONE_SUFFIX = ":proposal";
+const PROPOSAL_PHONE_PATTERN = /^mcp:([^:]+):([^:]+):proposal$/;
 
 export type SimulationTurn = {
   user: string;
@@ -41,7 +52,8 @@ export type SimulationTurn = {
 
 export type SimulationResult = {
   simulationId: string;
-  runs: { variant: "current"; turns: SimulationTurn[] }[];
+  /** Cada rodada vem rotulada pela variante: `current` (como está) e/ou `proposal` (com a proposta). */
+  runs: { variant: RunVariant; turns: SimulationTurn[] }[];
   dryRun: true;
 };
 
@@ -66,12 +78,15 @@ async function reserveTurns(tokenId: string, turns: number): Promise<void> {
 }
 
 export async function runSimulation(
-  ctx: { tenantId: string; tokenId: string },
-  input: { agentId: string; messages: string[]; variant: SimulationVariant },
+  ctx: { tenantId: string; tokenId: string; scopes?: readonly string[] },
+  input: { agentId: string; messages: string[]; variant: SimulationVariant; proposalId?: string },
 ): Promise<SimulationResult> {
-  // A variante "proposta" depende de propostas aprovadas (parte C). O enum já
-  // está no schema para a API não mudar; aqui só a atual roda.
-  if (input.variant !== "current") throw new McpToolError(PROPOSAL_UNAVAILABLE);
+  const variants: RunVariant[] = input.variant === "both" ? ["current", "proposal"] : [input.variant];
+  const wantsProposal = variants.includes("proposal");
+  if (wantsProposal && !input.proposalId) throw new McpToolError(PROPOSAL_ID_REQUIRED);
+  if (!wantsProposal && input.proposalId) throw new McpToolError(PROPOSAL_ID_UNUSED);
+  // O conteúdo da proposta é do escopo `propose`: quem só simula não o alcança.
+  if (wantsProposal && !ctx.scopes?.includes("propose")) throw new McpToolError(PROPOSAL_NEEDS_PROPOSE);
 
   // `tenantId` do token na consulta: id de outra conta responde igual a inexistente.
   const agent = await prisma.agent.findFirst({
@@ -80,29 +95,64 @@ export async function runSimulation(
   });
   if (!agent) throw new McpToolError(AGENT_NOT_FOUND);
 
-  await reserveTurns(ctx.tokenId, input.messages.length);
+  // Pendente, no prazo e em cima do mesmo estado do agente — antes de qualquer custo.
+  const proposalPrompt =
+    wantsProposal && input.proposalId
+      ? await proposalPromptOverride(ctx.tenantId, input.proposalId, agent.id)
+      : undefined;
+
+  // Cada variante é uma rodada inteira de LLM: o saldo reservado é o do pedido todo.
+  await reserveTurns(ctx.tokenId, input.messages.length * variants.length);
 
   const simulationId = randomUUID();
-  const { lead, conversation } = await getOrCreateConversation(
-    ctx.tenantId,
-    `${SIMULATION_PHONE_PREFIX}${agent.id}:${simulationId}`,
-    "Simulação MCP",
-    { isTest: true },
-  );
-
-  const turns: SimulationTurn[] = [];
-  for (const message of input.messages) {
-    try {
-      const turn = await runAgentTurn({
+  const runs: SimulationResult["runs"] = [];
+  for (const variant of variants) {
+    const suffix = variant === "proposal" ? PROPOSAL_PHONE_SUFFIX : "";
+    const { lead, conversation } = await getOrCreateConversation(
+      ctx.tenantId,
+      `${SIMULATION_PHONE_PREFIX}${agent.id}:${simulationId}${suffix}`,
+      variant === "proposal" ? "Simulação MCP (proposta)" : "Simulação MCP",
+      { isTest: true },
+    );
+    runs.push({
+      variant,
+      turns: await runTurns({
         tenantId: ctx.tenantId,
+        agentId: agent.id,
         conversationId: conversation.id,
         leadId: lead.id,
+        messages: input.messages,
+        systemPromptOverride: variant === "proposal" ? proposalPrompt : undefined,
+      }),
+    });
+  }
+
+  return { simulationId, runs, dryRun: true };
+}
+
+async function runTurns(params: {
+  tenantId: string;
+  agentId: string;
+  conversationId: string;
+  leadId: string;
+  messages: string[];
+  systemPromptOverride?: string;
+}): Promise<SimulationTurn[]> {
+  const turns: SimulationTurn[] = [];
+  for (const message of params.messages) {
+    try {
+      const turn = await runAgentTurn({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        leadId: params.leadId,
         userMessage: message,
-        agentId: agent.id,
+        agentId: params.agentId,
         // Mesmas três travas do chat de teste (`/api/sandbox`).
         skipUsageCheck: true,
         skipEnabledCheck: true,
         dryRunScheduling: true,
+        // Só a variante `proposal`: o prompt da proposta vale neste turno e nada é gravado no agente.
+        ...(params.systemPromptOverride ? { systemPromptOverride: params.systemPromptOverride } : {}),
       });
       turns.push({
         user: safe(message),
@@ -120,35 +170,27 @@ export async function runSimulation(
       break;
     }
   }
-
-  return { simulationId, runs: [{ variant: "current", turns }], dryRun: true };
+  return turns;
 }
 
 export type StoredSimulation = {
   simulationId: string;
   agentId: string;
-  runs: { variant: "current"; turns: { user: string; reply: string | null }[] }[];
+  runs: { variant: RunVariant; turns: { user: string; reply: string | null }[] }[];
   dryRun: true;
 };
 
-/**
- * Relê o transcript de uma simulação. Só conversas de teste com telefone `mcp:` da
- * conta do token; id de outra conta, de conversa real ou do chat de teste do
- * painel respondem igual a inexistente. O banco guarda as falas, não as
- * ferramentas nem o status de cada turno — esses só vêm no retorno de
- * `run_simulation`.
- */
-export async function getSimulation(tenantId: string, simulationId: string): Promise<StoredSimulation> {
-  const conversation = await prisma.conversation.findFirst({
-    where: {
-      tenantId,
-      isTest: true,
-      lead: {
-        tenantId,
-        isTest: true,
-        phone: { startsWith: SIMULATION_PHONE_PREFIX, endsWith: `:${simulationId}` },
-      },
-    },
+type StoredConversation = {
+  lead: { phone: string } | null;
+  messages: { role: string; content: string }[];
+};
+
+async function readConversation(
+  tenantId: string,
+  phone: { startsWith: string; endsWith: string },
+): Promise<StoredConversation | null> {
+  return prisma.conversation.findFirst({
+    where: { tenantId, isTest: true, lead: { tenantId, isTest: true, phone } },
     select: {
       lead: { select: { phone: true } },
       messages: {
@@ -159,12 +201,11 @@ export async function getSimulation(tenantId: string, simulationId: string): Pro
       },
     },
   });
-  // Confere de novo o formato exato: o filtro acima é só o caminho do índice.
-  const match = PHONE_PATTERN.exec(conversation?.lead?.phone ?? "");
-  if (!conversation || !match || match[2] !== simulationId) throw new McpToolError(SIMULATION_NOT_FOUND);
+}
 
+function transcript(messages: { role: string; content: string }[]): { user: string; reply: string | null }[] {
   const turns: { user: string; reply: string | null }[] = [];
-  for (const message of conversation.messages) {
+  for (const message of messages) {
     if (message.role === "user") {
       turns.push({ user: safe(message.content), reply: null });
     } else {
@@ -172,5 +213,47 @@ export async function getSimulation(tenantId: string, simulationId: string): Pro
       if (last && last.reply === null) last.reply = safe(message.content);
     }
   }
-  return { simulationId, agentId: match[1], runs: [{ variant: "current", turns }], dryRun: true };
+  return turns;
+}
+
+/**
+ * Relê o transcript de uma simulação. Só conversas de teste com telefone `mcp:` da
+ * conta do token; id de outra conta, de conversa real ou do chat de teste do
+ * painel respondem igual a inexistente. O banco guarda as falas, não as
+ * ferramentas nem o status de cada turno — esses só vêm no retorno de
+ * `run_simulation`. A rodada da proposta (`:proposal`) só sai para token com o
+ * escopo `propose` (`includeProposal`).
+ */
+export async function getSimulation(
+  tenantId: string,
+  simulationId: string,
+  options: { includeProposal?: boolean } = {},
+): Promise<StoredSimulation> {
+  const current = await readConversation(tenantId, {
+    startsWith: SIMULATION_PHONE_PREFIX,
+    endsWith: `:${simulationId}`,
+  });
+  const proposal = options.includeProposal
+    ? await readConversation(tenantId, {
+        startsWith: SIMULATION_PHONE_PREFIX,
+        endsWith: `:${simulationId}${PROPOSAL_PHONE_SUFFIX}`,
+      })
+    : null;
+
+  // Confere de novo o formato exato: o filtro acima é só o caminho do índice.
+  const currentMatch = PHONE_PATTERN.exec(current?.lead?.phone ?? "");
+  const proposalMatch = PROPOSAL_PHONE_PATTERN.exec(proposal?.lead?.phone ?? "");
+
+  const runs: StoredSimulation["runs"] = [];
+  let agentId = "";
+  if (current && currentMatch && currentMatch[2] === simulationId) {
+    agentId = currentMatch[1];
+    runs.push({ variant: "current", turns: transcript(current.messages) });
+  }
+  if (proposal && proposalMatch && proposalMatch[2] === simulationId) {
+    agentId = agentId || proposalMatch[1];
+    runs.push({ variant: "proposal", turns: transcript(proposal.messages) });
+  }
+  if (runs.length === 0) throw new McpToolError(SIMULATION_NOT_FOUND);
+  return { simulationId, agentId, runs, dryRun: true };
 }

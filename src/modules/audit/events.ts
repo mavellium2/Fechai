@@ -106,6 +106,12 @@ export const AUDIT_EVENTS = {
     group: "agente",
     revertible: true,
   },
+  // Propostas de mudança vindas do MCP. A aprovação grava o evento normal da
+  // mudança (`agent.persona_updated`/`agent.rules_updated`, com `meta.via: "mcp"`);
+  // estes dois são só os fatos "propôs" e "recusou", que não mudam o agente e por
+  // isso não são revertíveis.
+  "agent.change_proposed": { label: "Recebeu uma proposta de mudança do agente (MCP)", kind: "create", group: "agente" },
+  "agent.change_rejected": { label: "Recusou uma proposta de mudança do agente", kind: "update", group: "agente" },
   "agent.behavior_updated": {
     label: "Mudou um comportamento do agente",
     kind: "update",

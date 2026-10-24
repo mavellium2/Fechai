@@ -162,7 +162,7 @@ export async function handleMcpPost(request: Request): Promise<Response> {
           capabilities: { tools: { listChanged: false } },
           serverInfo: MCP_SERVER_INFO,
           instructions:
-            "Acesso aos agentes de UMA conta, definida pelo token: leitura da configuração e, com a permissão de simulação, conversas de teste que não enviam nada. Nenhuma ferramenta aceita o id da conta como argumento.",
+            "Acesso aos agentes de UMA conta, definida pelo token: leitura da configuração, conversas de teste que não enviam nada (simulação) e propostas de mudança que só valem depois da aprovação de um superadmin. Nenhuma ferramenta altera o agente nem aceita o id da conta como argumento.",
         });
       }
       case "ping":
@@ -204,7 +204,7 @@ async function callTool(id: RpcId, params: unknown, auth: McpAuth): Promise<Resp
   }
 
   try {
-    const output = await tool.run({ tenantId: auth.tenantId, tokenId: auth.tokenId }, parsed.data);
+    const output = await tool.run({ tenantId: auth.tenantId, tokenId: auth.tokenId, scopes: auth.scopes }, parsed.data);
     return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(output) }], isError: false });
   } catch (error) {
     if (error instanceof McpToolError) {
