@@ -160,6 +160,10 @@ gravada (o agente ficou calado naquele turno).
 Fluxo: **proposta → aprovação humana → aplicação**. O MCP só consegue o primeiro
 passo.
 
+**Escopos:** `propose_change` exige `propose` **e** `read`; `get_proposal` exige
+`propose`; simular uma proposta (`run_simulation` com `variant` `proposal` ou `both`)
+exige `simulate` **e** `propose`. Nenhuma das três grava nada no agente.
+
 1. `propose_change` valida `changes.persona` com os **mesmos validadores do painel**
    (`persona-apply.ts`: `businessName` obrigatório etc., só os campos presentes, chave
    desconhecida é parâmetro inválido, até 4000 caracteres por campo) e grava uma
@@ -171,8 +175,8 @@ passo.
    trocaria o prompt inteiro por um genérico) e mais de 10 pendentes por agente.
    A saída traz o `diff` por campo, o `promptDiff` (por linha, `same`/`add`/`remove`)
    e o `approveUrl` (`/admin/agentes/propostas/<id>`). Audita
-   `agent.change_proposed` (conta explícita, `meta: { via: "mcp", proposalId,
-   tokenPrefix }`).
+   `agent.change_proposed` com ator `MCP` (sem id de usuário), conta explícita e
+   `meta: { via: "mcp", proposalId, tokenPrefix }`.
 2. O superadmin abre o link, vê o diff e o prompt linha a linha e decide.
    **Aprovar e gravar** ou **Recusar** (motivo obrigatório). Página e actions chamam
    `requireSuperadmin` a cada chamada (`propostas/[id]/page.tsx`, `actions.ts`); a
@@ -181,7 +185,16 @@ passo.
    ou e-mail, não sai pelo MCP). Só do próprio tenant: id de outra conta responde
    "Proposta não encontrada nesta conta.".
 
-**Situações:** `pending`, `applied`, `rejected`, `expired`, `stale`.
+**Situações:**
+
+| situação | quando | quem grava |
+| --- | --- | --- |
+| `pending` | criada por `propose_change`, dentro do prazo e sem decisão | `propose_change` |
+| `applied` | superadmin aprovou; o agente foi gravado no mesmo commit | aprovação (`approveProposal`) |
+| `rejected` | superadmin recusou com motivo; o agente não muda | recusa (`rejectProposal`) |
+| `expired` | passou de `expiresAt` (7 dias) sem decisão | a leitura já mostra; a linha só é marcada ao tentar aprovar |
+| `stale` | o agente mudou depois da proposta, ou entre a conferência e a gravação | aprovação, que não grava nada no agente |
+
 
 - **`expired`:** passou de `expiresAt` sem decisão. Pendente vencida já é lida como
   `expired` (`effectiveStatus`) mesmo antes de alguém tocá-la; ao tentar aprovar, a
@@ -199,7 +212,8 @@ passo.
   desfaz o claim e a proposta continua `pending` (nunca `applied` sem ter aplicado;
   não há mais reversão manual no `catch`). Duas aprovações simultâneas: a segunda
   espera o lock da linha no Postgres, vê `applied` e perde o claim; os testes, com
-  banco em memória, só provam a lógica, a garantia real é do Postgres. A auditoria
+  banco em memória, só provam a lógica, a garantia real é do Postgres (lista em
+  "Como testar"). A auditoria
   (`recordChange`, que nunca lança) sai **depois do commit** (`applied.audit()`),
   para não registrar uma mudança que a transação poderia desfazer. Proposta
   `stale` não tem decisor: `decidedById`, `decidedByEmail`, `decidedAt` e
@@ -319,6 +333,26 @@ Automático (sem banco nem Redis reais: `prisma` e `rate-limit` são simulados):
 npx vitest run tests/agent-mcp.test.ts tests/agent-mcp-simulacao.test.ts tests/agent-mcp-propostas.test.ts tests/autorizacao.test.ts tests/rate-limit-reserve.test.ts
 ```
 
+**Só o Postgres real prova** (o teste automático acima simula o `prisma` e a
+transação; hoje não existe teste de integração com banco, e `vitest.config.ts` não
+tem setup de banco). Até existir, a garantia abaixo depende de revisão de código:
+
+- **Duas aprovações simultâneas:** a segunda `UPDATE ... WHERE status = 'pending'`
+  espera o lock da linha e, em `READ COMMITTED` (o padrão do Postgres, que o Prisma
+  não muda), reavalia a condição e não casa (`count` 0). Teste: duas
+  `approveProposal` em paralelo contra banco real; esperar uma `applied`, uma
+  gravação no agente e uma auditoria.
+- **`count` real do teto de pendentes:** o mock só entende igualdade e `gt`; o filtro
+  `status` + `expiresAt > now` precisa ser conferido no banco.
+- **Rollback real:** se a gravação do agente lança dentro da `$transaction`, a
+  proposta volta a `pending` no banco, com `appliedAt` e `decidedById` nulos. O mock
+  desfaz um array em memória.
+- **`updatedAt` na condição (`expectedBaseHash`):** a igualdade com o `updatedAt` do
+  Postgres (precisão do Prisma) precisa de teste real. Editar o agente entre a leitura
+  e o `update` tem de dar `count` 0 e `stale`, sem gravar.
+- **`stale` com commit:** a marcação `stale` depois de uma gravação recusada sai no
+  commit (a função retorna, não lança). Confirmar no banco que não sobra `applied`.
+
 Manual, contra um ambiente com token emitido (`FECHAI_MCP_TOKEN` exportado):
 
 ```
@@ -377,6 +411,17 @@ Registrados, não corrigidos (comportamento atual de propósito até haver decis
   o que o superadmin viu: o diff é montado pelo servidor e a aprovação confere o
   `baseHash`, mas o texto do campo é do portador do token, então leia antes de
   aprovar (principalmente `avoid`, as regras).
+- **O teste do `tx` usa os mesmos mocks do `prisma` global.** O `$transaction`
+  simulado entrega como `tx` objetos com as mesmas funções (`proposalUpdateMany`,
+  `agentUpdateMany`) do cliente global. Um código que chame
+  `prisma.agentChangeProposal.updateMany` dentro da transação, em vez de `tx.`, passa
+  no teste. O teste prova a ordem (commit, depois auditoria) e o rollback do estado em
+  memória, não qual cliente foi usado.
+- **A garantia de concorrência é do Postgres e precisa de teste de integração.** Duas
+  aprovações simultâneas, o `count` real e o rollback real só são provados com banco
+  de verdade (lista em "Como testar"). Não há suíte de integração com Postgres no
+  repositório hoje; o remédio é uma suíte separada, com Postgres descartável, fora do
+  `vitest run` padrão.
 - **O teto de 10 pendentes não é atômico.** `createProposal` conta as pendentes e
   depois cria, em duas operações; chamadas concorrentes do mesmo token podem passar
   da contagem e ultrapassar 10. Não há lock (decisão: não implementar agora). O
@@ -424,3 +469,7 @@ dev server e rode de novo.
 - Não tem lista de propostas no admin: a entrada é o `approveUrl` devolvido pela
   ferramenta (o evento `agent.change_proposed` também aparece em `/admin/logs`).
 - Não tem sessão, SSE nem lote JSON-RPC: GET devolve 405.
+- Não avisa o superadmin: nenhum e-mail, push ou contador no painel. A entrada é o
+  `approveUrl` devolvido pela ferramenta ou o evento `agent.change_proposed` no log.
+- Não aprova em lote nem expira propostas sozinha: a vencida só vira `expired` na
+  leitura ou ao tentar aprovar, e a linha fica no banco.

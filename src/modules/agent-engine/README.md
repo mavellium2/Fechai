@@ -247,7 +247,10 @@ prompt, objetivo e as oito respostas) é conferido: **`stale`** = o agente mudou
 desde a proposta (nada é gravado; peça outra); **`expired`** = passou de 7 dias.
 Com `expectedBaseHash`, a gravação leva `updatedAt` na condição para uma edição no
 meio do caminho não ser sobrescrita. Detalhes e erros em `agent-mcp/README.md`,
-seção "Propostas de mudança".
+seção "Propostas de mudança". Só a aprovação usa `options.tx` (claim e gravação na
+mesma `$transaction`); o painel não abre transação. Riscos de teste (mocks do `tx`,
+concorrência provada só pelo Postgres) estão em `agent-mcp/README.md`, "Riscos
+conhecidos".
 
 ### Resposta manual e humano assumindo a conversa (`sendManualReply`, `agentPaused`)
 
