@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { phoneLabel } from "@/lib/format";
 import type { ClinicorpAgendaItem } from "@/modules/scheduling/clinicorp";
+import type { IcloudAgendaItem } from "@/modules/scheduling/icloud";
 import type { ReminderRule } from "@/modules/scheduling/config";
 import type { listMonthAppointments, listMonthAppointmentReschedules } from "@/modules/scheduling/repository";
 import { parseReminderOverride } from "@/modules/scheduling/reminder-override";
@@ -30,29 +31,32 @@ import { AppointmentActions } from "./AppointmentActions";
 import { AppointmentClassification } from "./AppointmentClassification";
 import { AppointmentReminders } from "./AppointmentReminders";
 import { ClinicorpAppointmentItem } from "./ClinicorpAppointmentItem";
+import { IcloudEventItem } from "./IcloudEventItem";
 import { AppointmentRescheduleItem } from "./AppointmentRescheduleItem";
 import { NewAppointmentDialog } from "./NewAppointmentDialog";
 
 type MonthAppointment = Awaited<ReturnType<typeof listMonthAppointments>>["rows"][number];
 
-/** Um item da lista do dia: compromisso do fechai ou consulta lida do Clinicorp. */
+/** Um item da lista do dia: compromisso do fechai, consulta do Clinicorp ou evento do iPhone. */
 export type DayEntry =
   | { kind: "fechai"; at: Date; appointment: MonthAppointment }
   | { kind: "reschedule"; at: Date; history: Awaited<ReturnType<typeof listMonthAppointmentReschedules>>[number] }
-  | { kind: "clinicorp"; at: Date; item: ClinicorpAgendaItem };
+  | { kind: "clinicorp"; at: Date; item: ClinicorpAgendaItem }
+  | { kind: "icloud"; at: Date; item: IcloudAgendaItem };
 
 /**
  * O dia escolhido, à direita do calendário.
  *
  * Separado da página porque é desenhado duas vezes na troca de mês: primeiro
- * só com o que está no nosso banco (`clinicorpLoading`), na hora, e de novo
- * quando a agenda do Clinicorp chega por streaming — ver `page.tsx`.
+ * só com o que está no nosso banco (`externalLoading`), na hora, e de novo
+ * quando as agendas externas (Clinicorp, Calendário da Apple) chegam por
+ * streaming — ver `page.tsx`.
  */
 export function DayPanel({
   label,
   isToday,
   entries,
-  clinicorpLoading,
+  externalLoading,
   timezone,
   clinicorpEnabled,
   agentReminders,
@@ -60,14 +64,15 @@ export function DayPanel({
   reminderSentAt,
   confirmationStatuses,
   originByAppointment,
+  movedOnPhone,
   now,
   dialog,
 }: {
   label: string | null;
   isToday: boolean;
   entries: DayEntry[];
-  /** A agenda do Clinicorp ainda está chegando: a lista pode crescer. */
-  clinicorpLoading: boolean;
+  /** As agendas externas ainda estão chegando: a lista pode crescer. */
+  externalLoading: boolean;
   timezone: string;
   clinicorpEnabled: boolean;
   /** Lembretes gerais da conta, já vazios quando a ação está desligada. */
@@ -78,17 +83,20 @@ export function DayPanel({
   confirmationStatuses: Map<string, ReminderStatus>;
   /** Horário de origem por compromisso, calculado na leitura (`originHours`). */
   originByAppointment: Map<string, OriginHours>;
+  /** Consultas cujo evento no iPhone está em outro horário: id → onde está lá. */
+  movedOnPhone: Map<string, Date>;
   /** Um relógio só para a lista inteira: o que é "passado" não muda no meio do desenho. */
   now: Date;
   dialog: Omit<ComponentProps<typeof NewAppointmentDialog>, "triggerLabel">;
 }) {
-  const dayStatuses = entries.filter((entry) => entry.kind !== "reschedule").map((entry) => {
+  const dayStatuses = entries.filter((entry) => entry.kind === "fechai" || entry.kind === "clinicorp").map((entry) => {
     const source = entry.kind === "clinicorp" ? `clinicorp:${entry.item.id}` : entry.appointment.clinicorpAppointmentId ? `clinicorp:${entry.appointment.clinicorpAppointmentId}` : `appointment:${entry.appointment.id}`;
     return confirmationStatuses.get(`${source}|${entry.at.getTime()}`);
   });
   const handledCount = dayStatuses.filter((s) => s?.state === "sent" || s?.state === "manual").length;
   const attentionCount = dayStatuses.filter((s) => s?.state === "unknown" || s?.state === "blocked" || s?.deliveryStatus === "failed").length;
   const clinicorpCount = entries.filter((e) => e.kind === "clinicorp").length;
+  const icloudCount = entries.filter((e) => e.kind === "icloud").length;
 
   return (
     <Card className="flex flex-col p-5 lg:p-6 lg:col-span-5 xl:col-span-5 max-h-[33rem]">
@@ -107,7 +115,8 @@ export function DayPanel({
           <p className="mt-0.5 font-mono text-micro uppercase tracking-wider text-white/45">
             {entries.length} {entries.length === 1 ? "registro na agenda" : "registros na agenda"}
             {clinicorpCount > 0 && ` · ${clinicorpCount} no Clinicorp`}
-            {clinicorpLoading && " · buscando no Clinicorp…"}
+            {icloudCount > 0 && ` · ${icloudCount} no iPhone`}
+            {externalLoading && " · buscando agendas externas…"}
           </p>
         </div>
 
@@ -119,10 +128,10 @@ export function DayPanel({
           <div className="flex h-full flex-col items-center justify-center py-10 text-center">
             <EmptyState
               icon={CalendarX2}
-              title={clinicorpLoading ? "Buscando consultas do Clinicorp" : "Nenhum horário marcado"}
+              title={externalLoading ? "Buscando agendas externas" : "Nenhum horário marcado"}
               description={
-                clinicorpLoading
-                  ? "Nada marcado pelo fechai neste dia. As consultas do Clinicorp aparecem aqui em instantes."
+                externalLoading
+                  ? "Nada marcado pelo fechai neste dia. O que está no Clinicorp e no iPhone aparece aqui em instantes."
                   : "Quando o agente agendar no WhatsApp, o horário aparece aqui automaticamente."
               }
               action={<NewAppointmentDialog {...dialog} triggerLabel="Marcar horário neste dia" />}
@@ -135,6 +144,7 @@ export function DayPanel({
           <ul className="space-y-3">
             {entries.map((entry) => {
               if (entry.kind === "reschedule") return <AppointmentRescheduleItem key={`reschedule-${entry.history.id}`} history={entry.history} timezone={timezone} />;
+              if (entry.kind === "icloud") return <IcloudEventItem key={`icloud-${entry.item.uid}-${entry.item.startsAt.getTime()}`} item={entry.item} timezone={timezone} />;
               if (entry.kind === "clinicorp") {
                 return (
                   <ClinicorpAppointmentItem
@@ -239,6 +249,13 @@ export function DayPanel({
                         </div>
                       )}
 
+                      {movedOnPhone.has(appointment.id) && appointment.status === "scheduled" && (
+                        <p className="mt-1.5 rounded-control border border-warn/30 bg-warn/10 px-2.5 py-1 text-xs text-warn">
+                          Horário alterado no iPhone: lá está às {timeInZone(movedOnPhone.get(appointment.id)!, timezone)}. O fechai
+                          mantém o horário combinado com o paciente — para mudar de verdade, remarque pelo fechai.
+                        </p>
+                      )}
+
                       {appointment.notes && (
                         <p className="mt-1.5 whitespace-pre-line rounded-control border border-white/5 bg-black/20 px-2.5 py-1 text-xs leading-relaxed text-white/70">
                           {appointment.notes}
@@ -250,6 +267,13 @@ export function DayPanel({
                           <span className="inline-flex items-center gap-1.5 font-mono text-micro uppercase tracking-wide text-white/40">
                             <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
                             Google Agenda
+                          </span>
+                        )}
+
+                        {appointment.icloudEventUrl && appointment.status === "scheduled" && (
+                          <span className="inline-flex items-center gap-1.5 font-mono text-micro uppercase tracking-wide text-white/40">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white/60" />
+                            Calendário da Apple
                           </span>
                         )}
 

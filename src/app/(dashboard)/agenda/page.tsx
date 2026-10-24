@@ -20,7 +20,8 @@ import {
   type ClinicorpAgenda,
   type ClinicorpAgendaItem,
 } from "@/modules/scheduling/clinicorp";
-import { getIcloudStatus } from "@/modules/scheduling/icloud";
+import { AGENDA_MAX_OCCURRENCES, getIcloudStatus, listIcloudAgenda, type IcloudAgenda, type IcloudAgendaItem } from "@/modules/scheduling/icloud";
+import { placeIcloudItems } from "@/modules/scheduling/icloud-agenda-view";
 import { listMonthAppointments, listMonthAppointmentReschedules } from "@/modules/scheduling/repository";
 import { loadAppointmentOriginHours } from "@/modules/reports/origin-hours";
 import { clockInZone, dayKeyInZone, todayInZone } from "@/modules/scheduling/time";
@@ -31,6 +32,9 @@ import { CalendarMonth } from "./CalendarMonth";
 import { DayPanel, type DayEntry } from "./DayPanel";
 import { NewAppointmentDialog, type ContactOption } from "./NewAppointmentDialog";
 import { CalendarSyncStatus, type CalendarSyncItem } from "./CalendarSyncStatus";
+
+/** As agendas de fora que a página espera juntas: Clinicorp e Calendário da Apple. */
+type ExternalAgendas = [ClinicorpAgenda, IcloudAgenda];
 
 /** Quantos contatos mostrar no painel lateral — o resto fica em /contatos. */
 const SIDEBAR_CONTACTS = 6;
@@ -47,14 +51,15 @@ async function Await<T>({ promise, children }: { promise: Promise<T>; children: 
  * data combinada se perdia na conversa. Esta tela é o outro lado dela: o que o
  * agente marca no WhatsApp aparece aqui, junto do que foi marcado à mão.
  *
- * **Trocar de mês não espera o Clinicorp.** A página sai com o que está no
- * nosso banco, e a agenda de lá entra por streaming num `<Suspense>` com a
- * chave do mês — chave nova é o que faz o React mostrar o fallback na
- * navegação, em vez de segurar a tela antiga até o Clinicorp responder. Por
- * isso calendário e dia são desenhados duas vezes: com `agenda: null` (buscando)
- * e com a agenda. Os meses vizinhos já ficam aquecidos no cache do servidor
- * (`after` + `warmNeighborMonths`) e pré-carregados no navegador
- * (`prefetch` em ‹ ›, ver `CalendarMonth`).
+ * **Trocar de mês não espera o Clinicorp nem o iPhone.** A página sai com o que
+ * está no nosso banco, e as agendas de lá (Clinicorp e Calendário da Apple)
+ * entram juntas por streaming num `<Suspense>` com a chave do mês — chave nova
+ * é o que faz o React mostrar o fallback na navegação, em vez de segurar a
+ * tela antiga até um deles responder. Por isso calendário e dia são desenhados
+ * duas vezes: com `agendas: null` (buscando) e com as agendas. Os meses
+ * vizinhos já ficam aquecidos no cache do servidor (`after` +
+ * `warmNeighborMonths`) e pré-carregados no navegador (`prefetch` em ‹ ›, ver
+ * `CalendarMonth`). **Não mova a leitura de fora do Suspense.**
  */
 export default async function AgendaPage({
   searchParams,
@@ -120,6 +125,14 @@ export default async function AgendaPage({
   const clinicorpAgenda: Promise<ClinicorpAgenda> = clinicorpActive
     ? listClinicorpAgenda(tenantId, from, to, config.timezone)
     : Promise.resolve({ status: "off" });
+  // Calendário da Apple: habilitado, com calendário escolhido e senha ainda
+  // válida (revogada, a tela já avisa e não há o que ler).
+  const icloudActive = Boolean(features.icloudEnabled && icloud?.calendarUrl && !icloud.authFailedAt);
+  const icloudAgenda: Promise<IcloudAgenda> = icloudActive
+    ? listIcloudAgenda(tenantId, from, to, config.timezone)
+    : Promise.resolve({ status: "off" });
+  const externalActive = clinicorpActive || icloudActive;
+  const externalAgendas: Promise<ExternalAgendas> = Promise.all([clinicorpAgenda, icloudAgenda]);
   const [{ rows: monthRows, byDay }, reschedules] = await Promise.all([
     listMonthAppointments(tenantId, year, month, config.timezone),
     listMonthAppointmentReschedules(tenantId, year, month, config.timezone),
@@ -139,8 +152,8 @@ export default async function AgendaPage({
 
 
   // Depois da resposta: o mês anterior e o seguinte ficam no cache, e o
-  // clique em ‹ › não espera o Clinicorp.
-  if (clinicorpActive) after(() => warmNeighborMonths(tenantId, year, month, config.timezone));
+  // clique em ‹ › não espera as agendas externas.
+  if (externalActive) after(() => warmNeighborMonths(tenantId, year, month, config.timezone));
 
   const hrefFor = ({
     year: y = year,
@@ -231,19 +244,24 @@ export default async function AgendaPage({
   const renderedAt = renderedDate.getTime();
   const updatedAt = clockInZone(renderedDate, config.timezone);
 
-  // `agenda: null` = a do Clinicorp ainda está chegando (fallback do Suspense).
-  const liveRefresh = (agenda: ClinicorpAgenda | null) => (
-    <AgendaLiveRefresh
-      year={year}
-      month={month}
-      version={agenda ? agendaVersion(local, agenda) : null}
-      // Do cache, a leitura pode ser de minutos atrás: a tela confere na hora.
-      dataAsOf={agenda?.status === "ok" ? agenda.fetchedAt : agenda ? renderedAt : null}
-      updatedAt={updatedAt}
-    />
-  );
+  // `agendas: null` = as externas ainda estão chegando (fallback do Suspense).
+  const liveRefresh = (agendas: ExternalAgendas | null) => {
+    // Do cache, a leitura pode ser de minutos atrás: vale a mais antiga, e a tela confere na hora.
+    const fetched = agendas ? agendas.filter((a) => a.status === "ok").map((a) => (a as { fetchedAt: number }).fetchedAt) : [];
+    return (
+      <AgendaLiveRefresh
+        year={year}
+        month={month}
+        version={agendas ? agendaVersion(local, agendas[0], agendas[1]) : null}
+        dataAsOf={agendas ? (fetched.length ? Math.min(...fetched) : renderedAt) : null}
+        updatedAt={updatedAt}
+      />
+    );
+  };
 
-  const monthView = (agenda: ClinicorpAgenda | null, reminderSentAt: Map<string, Date>) => {
+  const monthView = (agendas: ExternalAgendas | null, reminderSentAt: Map<string, Date>) => {
+    const agenda = agendas?.[0] ?? null;
+    const phone = agendas?.[1] ?? null;
     // O que o fechai já espelhou lá aparece uma vez só: como o nosso
     // compromisso, que tem lembretes e ações.
     const mirrored = new Set([...monthRows, ...reschedules].map((row) => row.clinicorpAppointmentId).filter(Boolean));
@@ -256,8 +274,19 @@ export default async function AgendaPage({
       }
     }
 
+    // Eventos do iPhone: os de fora, o que o fechai mesmo enviou (que não repete)
+    // e o aviso de "horário alterado no iPhone" — ver `placeIcloudItems`.
+    const { byDay: icloudByDay, movedOnPhone } = phone?.status === "ok"
+      ? placeIcloudItems(
+          phone.items,
+          new Set([...monthRows.map((r) => r.id), ...reschedules.map((r) => r.appointmentId)]),
+          monthRows,
+          config.timezone,
+        )
+      : { byDay: new Map<string, IcloudAgendaItem[]>(), movedOnPhone: new Map<string, Date>() };
+
     const countByDay = new Map<string, number>();
-    for (const [key, rows] of [...byDay, ...clinicorpByDay, ...historyByDay]) {
+    for (const [key, rows] of [...byDay, ...clinicorpByDay, ...icloudByDay, ...historyByDay]) {
       countByDay.set(key, (countByDay.get(key) ?? 0) + rows.length);
     }
 
@@ -266,6 +295,7 @@ export default async function AgendaPage({
           ...(byDay.get(selectedKey) ?? []).map((appointment) => ({ kind: "fechai" as const, at: appointment.startsAt, appointment })),
           ...(historyByDay.get(selectedKey) ?? []).map((history) => ({ kind: "reschedule" as const, at: history.startsAt, history })),
           ...(clinicorpByDay.get(selectedKey) ?? []).map((item) => ({ kind: "clinicorp" as const, at: item.startsAt, item })),
+          ...(icloudByDay.get(selectedKey) ?? []).map((item) => ({ kind: "icloud" as const, at: item.startsAt, item })),
         ].sort((a, b) => a.at.getTime() - b.at.getTime())
       : [];
 
@@ -276,6 +306,26 @@ export default async function AgendaPage({
           <Alert tone="warn" title="Consultas do Clinicorp não carregaram">
             {agenda.error} O calendário abaixo mostra só o que foi marcado pelo fechai.
             A agenda tenta de novo sozinha a cada 15 segundos, ou clique em Atualizar.
+          </Alert>
+        )}
+        {phone?.status === "error" && (
+          <Alert tone="warn" title="Eventos do Calendário da Apple não carregaram">
+            {phone.error} O calendário abaixo não mostra o que está no iPhone, e o agente só oferece horários se
+            conseguir conferir lá. A agenda tenta de novo sozinha a cada 15 segundos, ou clique em Atualizar.
+          </Alert>
+        )}
+        {phone?.status === "ok" && phone.skipped > 0 && (
+          <Alert tone="info">
+            {phone.skipped === 1
+              ? "1 evento do Calendário da Apple não pôde ser lido e não aparece no calendário."
+              : `${phone.skipped} eventos do Calendário da Apple não puderam ser lidos e não aparecem no calendário.`}{" "}
+            Confira direto no iPhone.
+          </Alert>
+        )}
+        {phone?.status === "ok" && phone.truncated && (
+          <Alert tone="info">
+            O iPhone tem mais de {AGENDA_MAX_OCCURRENCES} ocorrências neste mês (uma repetição sem fim, por exemplo).
+            A agenda mostra só as primeiras.
           </Alert>
         )}
         {agenda?.status === "ok" && agenda.skipped > 0 && (
@@ -296,7 +346,7 @@ export default async function AgendaPage({
               today={today}
               countByDay={countByDay}
               hrefFor={hrefFor}
-              busy={agenda === null}
+              busy={agendas === null}
             />
           </Card>
 
@@ -304,7 +354,7 @@ export default async function AgendaPage({
             label={selectedLabel}
             isToday={selectedDay === today.day && month === today.month && year === today.year}
             entries={entries}
-            clinicorpLoading={agenda === null}
+            externalLoading={agendas === null}
             timezone={config.timezone}
             clinicorpEnabled={features.clinicorpEnabled}
             // Mesma regra do worker: lembrete só sai com a ação ligada.
@@ -313,6 +363,7 @@ export default async function AgendaPage({
             reminderSentAt={reminderSentAt}
             confirmationStatuses={confirmationStatuses}
             originByAppointment={originByAppointment}
+            movedOnPhone={movedOnPhone}
             now={renderedDate}
             dialog={dialog}
           />
@@ -331,18 +382,20 @@ export default async function AgendaPage({
         eyebrow="agenda"
         title="Agenda"
         description={
-          clinicorpActive
-            ? "Os horários que seu agente marcou nas conversas, o que você marcar à mão e as consultas do Clinicorp."
+          clinicorpActive || icloudActive
+            ? `Os horários que seu agente marcou nas conversas, o que você marcar à mão${
+                clinicorpActive && icloudActive ? ", as consultas do Clinicorp e os eventos do iPhone"
+                  : clinicorpActive ? " e as consultas do Clinicorp" : " e os eventos do iPhone"}.`
             : "Os horários que seu agente marcou nas conversas, mais o que você marcar à mão."
         }
         actions={
           <>
-            {clinicorpActive ? (
+            {externalActive ? (
               <Suspense key={monthKey} fallback={liveRefresh(null)}>
-                <Await promise={clinicorpAgenda}>{(agenda) => liveRefresh(agenda)}</Await>
+                <Await promise={externalAgendas}>{(agendas) => liveRefresh(agendas)}</Await>
               </Suspense>
             ) : (
-              liveRefresh({ status: "off" })
+              liveRefresh([{ status: "off" }, { status: "off" }])
             )}
             <NewAppointmentDialog {...dialog} />
           </>
@@ -387,14 +440,14 @@ export default async function AgendaPage({
         </Alert>
       )}
 
-      {clinicorpActive ? (
+      {externalActive ? (
         <Suspense key={monthKey} fallback={monthView(null, new Map())}>
-          <Await promise={clinicorpAgenda}>
-            {async (agenda) => monthView(agenda, await sentClinicorpReminders(tenantId, agenda))}
+          <Await promise={externalAgendas}>
+            {async (agendas) => monthView(agendas, await sentClinicorpReminders(tenantId, agendas[0]))}
           </Await>
         </Suspense>
       ) : (
-        monthView({ status: "off" }, new Map())
+        monthView([{ status: "off" }, { status: "off" }], new Map())
       )}
 
       {/* Linha de Apoio: Horário de atendimento, Sincronização e Contatos em 3 colunas */}

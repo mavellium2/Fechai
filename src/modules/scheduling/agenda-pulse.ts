@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { listClinicorpAgenda, type ClinicorpAgenda } from "./clinicorp";
+import { listIcloudAgenda, type IcloudAgenda } from "./icloud";
 import { parseScheduleConfig } from "./config";
 import { clockInZone, monthRangeUtc } from "./time";
 
@@ -24,9 +25,9 @@ export function monthDays(year: number, month: number): { from: string; to: stri
 }
 
 /**
- * Deixa o mês anterior e o seguinte no cache do Clinicorp (`listClinicorpAgenda`
- * sem `fresh`: o que já está lá não é relido). Roda em `after()`, depois da
- * resposta: o clique em ‹ › acha a agenda de lá pronta. Nunca lança.
+ * Deixa o mês anterior e o seguinte no cache do Clinicorp e do Calendário da
+ * Apple (sem `fresh`: o que já está lá não é relido). Roda em `after()`, depois
+ * da resposta: o clique em ‹ › acha a agenda de lá pronta. Nunca lança.
  */
 export async function warmNeighborMonths(tenantId: string, year: number, month: number, timeZone: string): Promise<void> {
   const neighbors = [
@@ -35,7 +36,10 @@ export async function warmNeighborMonths(tenantId: string, year: number, month: 
   ];
   await Promise.all(neighbors.map(({ y, m }) => {
     const { from, to } = monthDays(y, m);
-    return listClinicorpAgenda(tenantId, from, to, timeZone);
+    return Promise.all([
+      listClinicorpAgenda(tenantId, from, to, timeZone),
+      listIcloudAgenda(tenantId, from, to, timeZone),
+    ]);
   }));
 }
 
@@ -44,10 +48,14 @@ export async function warmNeighborMonths(tenantId: string, year: number, month: 
  * a última alteração — status, horário e exclusão mudam um dos dois) e as
  * consultas do Clinicorp. A ordem das consultas não entra: duas no mesmo
  * horário podem vir trocadas de uma leitura para outra sem nada ter mudado.
+ *
+ * O Calendário da Apple só entra na impressão quando existe (`icloud` ausente
+ * ou `off`): a versão de uma conta sem iCloud é exatamente a de antes dele.
  */
 export function agendaVersion(
   local: { count: number; lastUpdate: Date | null; reminderUpdate?: Date | null; historyCount?: number; historyUpdate?: Date | null },
   clinicorp: ClinicorpAgenda,
+  icloud?: IcloudAgenda,
 ): string {
   const parts = [`fechai:${local.count}:${local.lastUpdate?.getTime() ?? 0}`, `clinicorp:${clinicorp.status}`];
   if ("reminderUpdate" in local) parts.push(`confirmations:${local.reminderUpdate?.getTime() ?? 0}`);
@@ -63,6 +71,17 @@ export function agendaVersion(
     );
   }
   if (clinicorp.status === "error") parts.push(clinicorp.error);
+  if (icloud && icloud.status !== "off") {
+    parts.push(`icloud:${icloud.status}`);
+    if (icloud.status === "ok") {
+      parts.push(
+        `icloud-skipped:${icloud.skipped}:${icloud.truncated}`,
+        ...icloud.items
+          .map((i) => [i.uid, i.startsAt.getTime(), i.endsAt?.getTime() ?? "", i.allDay, i.title, i.calendarName, i.free].join(""))
+          .sort(),
+      );
+    } else parts.push(icloud.error);
+  }
   return createHash("sha1").update(parts.join("\u0002")).digest("hex").slice(0, 16);
 }
 
@@ -77,9 +96,10 @@ async function agendaTimezone(tenantId: string): Promise<string> {
 }
 
 /**
- * A versão atual do mês, com o Clinicorp relido de verdade (`fresh`). Essa
- * leitura reabastece o cache, então a página refeita logo depois já nasce com
- * ela, sem outra chamada.
+ * A versão atual do mês, com o Clinicorp relido de verdade (`fresh`) e o
+ * Calendário da Apple conferido pelo `getctag` (relê só o que mudou). Essas
+ * leituras reabastecem o cache, então a página refeita logo depois já nasce com
+ * elas, sem outra chamada.
  */
 export async function readAgendaPulse(
   tenantId: string,
@@ -89,7 +109,7 @@ export async function readAgendaPulse(
   const timezone = await agendaTimezone(tenantId);
   const { start, end } = monthRangeUtc(year, month, timezone);
   const { from, to } = monthDays(year, month);
-  const [local, clinicorp, confirmations, history] = await Promise.all([
+  const [local, clinicorp, icloud, confirmations, history] = await Promise.all([
     // Mesmo filtro de `listMonthAppointments`.
     prisma.appointment.aggregate({
       where: { tenantId, startsAt: { gte: start, lt: end } },
@@ -97,12 +117,13 @@ export async function readAgendaPulse(
       _max: { updatedAt: true },
     }),
     listClinicorpAgenda(tenantId, from, to, timezone, { fresh: true }),
+    listIcloudAgenda(tenantId, from, to, timezone, { fresh: true }),
     prisma.reminderDispatch.aggregate({ where: { tenantId, startsAt: { gte: start, lt: end } }, _max: { updatedAt: true } }),
     prisma.appointmentReschedule.aggregate({ where: { tenantId, appointment: { tenantId }, startsAt: { gte: start, lt: end } }, _count: { _all: true }, _max: { createdAt: true } }),
   ]);
   return {
     version: agendaVersion({ count: local._count._all, lastUpdate: local._max.updatedAt, reminderUpdate: confirmations._max.updatedAt,
-      historyCount: history._count._all, historyUpdate: history._max.createdAt }, clinicorp),
+      historyCount: history._count._all, historyUpdate: history._max.createdAt }, clinicorp, icloud),
     checkedAt: clockInZone(new Date(), timezone),
   };
 }

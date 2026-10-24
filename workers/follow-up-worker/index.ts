@@ -9,6 +9,8 @@ import { touchBroadcastWorker } from "../../src/modules/broadcasts/health";
 import { scanKnowledgeGaps } from "../../src/modules/knowledge-gaps/notify";
 import { scanBitrixSync } from "../../src/modules/bitrix/worker";
 import { scanClinicorpSync } from "../../src/modules/scheduling/clinicorp-sync";
+import { scanIcloudSync } from "../../src/modules/scheduling/icloud-sync";
+import { scanIcloudHealth } from "../../src/modules/scheduling/icloud-health";
 
 // Worker de mensagens no tempo. Follow-up/lembretes rodam na cadência comercial
 // configurada; a saúde do WhatsApp tem um job próprio, mais rápido:
@@ -52,6 +54,13 @@ const KNOWLEDGE_GAP_EVERY_MS =
 const SATISFACTION_EVERY_MS =
   Number(process.env.SATISFACTION_SCAN_EVERY_MINUTES ?? 5) * 60_000;
 
+// Calendário da Apple (iCloud): envia ao iPhone as consultas que ainda não foram e
+// confere a senha de app/calendário. A Apple não documenta o ritmo que tolera;
+// um minuto basta para o horário chegar logo depois de um iCloud que voltou, e a
+// checagem de saúde tem o próprio intervalo (30 min por conta).
+const ICLOUD_QUEUE = "icloud-calendar";
+const ICLOUD_EVERY_MS = Math.max(15, Number(process.env.ICLOUD_SCAN_EVERY_SECONDS ?? 60)) * 1000;
+
 async function main() {
   const followUpQueue = new Queue(FOLLOWUP_QUEUE, { connection });
   const reminderQueue = new Queue(REMINDER_QUEUE, { connection });
@@ -66,6 +75,26 @@ async function main() {
   await clinicorpSyncQueue.upsertJobScheduler("clinicorp-sync-scheduler", { every: 30_000 }, { name: "clinicorp-sync" });
   const clinicorpSyncWorker = new Worker("clinicorp-appointment-sync", async () => scanClinicorpSync(), { connection, concurrency: 1 });
   clinicorpSyncWorker.on("failed", (job, err) => console.error(`[clinicorp envio] job ${job?.id} falhou`, err));
+  const icloudQueue = new Queue(ICLOUD_QUEUE, { connection });
+  // Uma varredura por vez: duas ao mesmo tempo enviariam a mesma consulta duas vezes.
+  await icloudQueue.setGlobalConcurrency(1);
+  await icloudQueue.upsertJobScheduler("icloud-scheduler", { every: ICLOUD_EVERY_MS }, { name: "icloud-calendar" });
+  const icloudWorker = new Worker(
+    ICLOUD_QUEUE,
+    async () => {
+      const sync = await scanIcloudSync();
+      const health = await scanIcloudHealth();
+      // Só contagens: nunca Apple ID, senha, endereço de calendário ou título de evento.
+      if (sync.sent || sync.failed || sync.revoked || health.revoked || health.calendarMissing) {
+        console.log(
+          `[icloud] contas=${sync.tenants} enviados=${sync.sent} falhas=${sync.failed} senha_revogada=${sync.revoked + health.revoked} calendario_sumiu=${health.calendarMissing} checadas=${health.checked}`,
+        );
+      }
+      return { sync, health };
+    },
+    { connection, concurrency: 1 },
+  );
+  icloudWorker.on("failed", (job, err) => console.error(`[icloud] job ${job?.id} falhou`, err));
   const bitrixQueue = new Queue("bitrix-crm-sync", { connection });
   await bitrixQueue.setGlobalConcurrency(1);
   await bitrixQueue.upsertJobScheduler("bitrix-sync-scheduler", { every: 30_000 }, { name: "bitrix-sync" });
@@ -241,6 +270,7 @@ async function main() {
       `lembretes do Clinicorp a cada ${CLINICORP_REMINDER_EVERY_MS / 60000} min; ` +
       `avisos de perguntas sem resposta a cada ${KNOWLEDGE_GAP_EVERY_MS / 60000} min; ` +
       `pesquisa de satisfação a cada ${SATISFACTION_EVERY_MS / 60000} min; ` +
+      `Calendário da Apple a cada ${ICLOUD_EVERY_MS / 1000} s; ` +
       `saúde do WhatsApp a cada ${HEALTH_EVERY_MS / 60000} min`,
   );
 }

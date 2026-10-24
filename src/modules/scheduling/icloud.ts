@@ -1,13 +1,16 @@
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import type { IcloudCalendarIntegration } from "@prisma/client";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getCalendarFeatures } from "./features";
 import { parseScheduleConfig } from "./config";
 import {
-  deleteEvent, discoverCalendarHome, discoverPrincipal, listCalendars, putEvent, queryEvents, resolveIcloudUrl,
+  deleteEvent, discoverCalendarHome, discoverPrincipal, getCtag, listCalendars, putEvent, queryEvents, resolveIcloudUrl,
   type CalDavCalendar, type CaldavCredentials, type CaldavKind, type CaldavResponse,
 } from "./caldav";
-import { buildEvent, eventUid, localDayRange, parseBusyBlocks, type BusyBlock, type IcloudEventInput } from "./ical";
+import {
+  buildEvent, eventUid, localDayRange, parseBusyBlocks, parseIcsOccurrences, type BusyBlock, type IcloudEventInput,
+} from "./ical";
 import { dayKeyInZone } from "./time";
 
 /**
@@ -107,6 +110,11 @@ export function clearIcloudAgendaCache(tenantId?: string): void {
   const store = icloudAgendaCache();
   for (const key of [...store.keys()]) {
     if (!tenantId || key.startsWith(`${tenantId}|`)) store.delete(key);
+  }
+  // Os nomes dos calendários (chave = tenant): trocar de conta ou de calendário os invalida.
+  const names = namesCache();
+  for (const key of [...names.keys()]) {
+    if (!tenantId || key === tenantId) names.delete(key);
   }
 }
 
@@ -572,5 +580,240 @@ export async function hasIcloudConflict(
   } catch (err) {
     console.error(`[icloud] consultar agenda falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Saúde da conexão (o monitor do worker chama; `icloud-health.ts`)
+// ---------------------------------------------------------------------------
+
+export const CALENDAR_NOT_FOUND_MESSAGE = "O calendário escolhido não foi encontrado no iCloud. Escolha outro em Integrações.";
+
+export type IcloudHealth = "ok" | "auth" | "calendar" | "unreachable" | "skipped";
+
+/**
+ * Uma checagem barata (PROPFIND Depth 0 no calendário de gravação) para a
+ * senha revogada ou o calendário apagado aparecerem na tela **antes** de o
+ * próximo horário falhar.
+ *
+ * - 207: está tudo certo — limpa só `connectionError` (nunca `lastError`, que é
+ *   de envio/leitura e some com o próximo sucesso);
+ * - 401: `authFailedAt` e o aviso, e tudo para até reconectar;
+ * - 404/403: o calendário sumiu ou ficou somente leitura;
+ * - 5xx/timeout/rede: a Apple oscilou — não grava nada (não é problema da conta).
+ *
+ * Nunca lança, nunca loga credencial.
+ */
+export async function checkIcloudCalendar(tenantId: string): Promise<IcloudHealth> {
+  try {
+    const integration = await getIntegration(tenantId);
+    if (!integration || integration.authFailedAt || !integration.calendarUrl) return "skipped";
+    const res = await getCtag(credOf(integration), integration.calendarUrl);
+    const now = new Date();
+    if (res.ok) {
+      if (integration.connectionError) {
+        await prisma.icloudCalendarIntegration.update({ where: { tenantId }, data: { connectionError: null, connectionErrorAt: null } });
+      }
+      return "ok";
+    }
+    if (res.kind === "auth") {
+      await prisma.icloudCalendarIntegration.update({
+        where: { tenantId },
+        data: { authFailedAt: now, connectionError: AUTH_MESSAGE, connectionErrorAt: now },
+      });
+      return "auth";
+    }
+    if (res.kind === "not_found" || res.kind === "forbidden") {
+      await prisma.icloudCalendarIntegration.update({
+        where: { tenantId },
+        data: { connectionError: CALENDAR_NOT_FOUND_MESSAGE, connectionErrorAt: now },
+      });
+      return "calendar";
+    }
+    return "unreachable";
+  } catch (err) {
+    console.error(`[icloud] checar conexão falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
+    return "unreachable";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agenda: o que está no iPhone, para a /agenda (só leitura)
+// ---------------------------------------------------------------------------
+
+export type IcloudAgendaItem = {
+  uid: string;
+  startsAt: Date;
+  /** Null quando o evento é um instante, sem fim. Dia inteiro sempre tem. */
+  endsAt: Date | null;
+  allDay: boolean;
+  /** Só o título. DESCRIPTION e LOCATION não saem do módulo: são do dono do calendário. */
+  title: string;
+  calendarName: string;
+  /** Marcado como "livre" no iPhone: aparece, mas não bloqueia horário. */
+  free: boolean;
+};
+
+export type IcloudAgenda =
+  | { status: "off" }
+  /** `fetchedAt`: quando a leitura saiu da Apple — do cache, pode ser de minutos atrás. */
+  | { status: "ok"; items: IcloudAgendaItem[]; skipped: number; truncated: boolean; fetchedAt: number }
+  | { status: "error"; error: string };
+
+/** Mesma política do Clinicorp: longa, porque o pulso (`fresh`) é quem garante que não fica velha. */
+const AGENDA_CACHE_MS = 30 * 60_000;
+const AGENDA_ERROR_CACHE_MS = 10_000;
+const NAMES_CACHE_MS = 10 * 60_000;
+const AGENDA_CACHE_MAX = 300;
+/** Teto de ocorrências de um mês: uma recorrência diária sem fim não pode travar a tela. */
+export const AGENDA_MAX_OCCURRENCES = 500;
+
+type AgendaPayload = { agenda: IcloudAgenda; ctags: Record<string, string | null> };
+type AgendaEntry = { at: number; ttl: number; value: Promise<AgendaPayload> };
+
+function namesCache(): Map<string, { at: number; names: Map<string, string> }> {
+  const g = globalThis as unknown as { __icloudNamesCache?: Map<string, { at: number; names: Map<string, string> }> };
+  g.__icloudNamesCache ??= new Map();
+  return g.__icloudNamesCache;
+}
+
+async function readCtags(cred: CaldavCredentials, urls: string[]): Promise<Record<string, string | null>> {
+  const rows = await Promise.all(urls.map(async (url) => {
+    const res = await getCtag(cred, url).catch(() => null);
+    return [url, res && res.ok ? res.data : null] as const;
+  }));
+  return Object.fromEntries(rows);
+}
+
+/** URL → nome do calendário. O de gravação vem do banco; os outros, da lista (guardada 10 min). */
+async function calendarNames(integration: DecryptedIntegration, urls: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (integration.calendarUrl && integration.calendarName) names.set(integration.calendarUrl, integration.calendarName);
+  if (urls.every((u) => names.has(u))) return names;
+
+  const store = namesCache();
+  const key = integration.tenantId;
+  const hit = store.get(key);
+  if (hit && Date.now() - hit.at < NAMES_CACHE_MS) {
+    for (const [url, name] of hit.names) if (!names.has(url)) names.set(url, name);
+    return names;
+  }
+  const list = await listCalendars(credOf(integration), integration.calendarHomeUrl).catch(() => null);
+  if (list && list.ok) {
+    const all = new Map(list.data.map((c) => [c.url, c.name] as const));
+    store.set(key, { at: Date.now(), names: all });
+    for (const [url, name] of all) if (!names.has(url)) names.set(url, name);
+  }
+  return names;
+}
+
+async function fetchAgenda(
+  integration: DecryptedIntegration,
+  urls: string[],
+  from: string,
+  to: string,
+  timeZone: string,
+): Promise<AgendaPayload> {
+  const fail = (error: string): AgendaPayload => ({ agenda: { status: "error", error }, ctags: {} });
+  try {
+    const start = localDayRange(from, timeZone)?.start;
+    const end = localDayRange(to, timeZone)?.end;
+    if (!start || !end) return fail("Período inválido para ler o Calendário da Apple.");
+
+    const cred = credOf(integration);
+    const [names, ctags] = await Promise.all([calendarNames(integration, urls), readCtags(cred, urls)]);
+    const results = await Promise.all(urls.map((url) => queryEvents(cred, url, start, end)));
+    const failed = results.find((r) => !r.ok);
+    if (failed && !failed.ok) {
+      console.error(`[icloud] ler agenda do período falhou tenant=${integration.tenantId} http=${failed.status} tipo=${failed.kind}`);
+      return fail(failed.kind === "auth"
+        ? "A senha de app foi revogada ou o Apple ID mudou. Reconecte em Integrações."
+        : "Não foi possível ler a agenda do Calendário da Apple.");
+    }
+
+    const items: IcloudAgendaItem[] = [];
+    let skipped = 0;
+    let truncated = false;
+    results.forEach((r, i) => {
+      if (!r.ok) return;
+      const parsed = parseIcsOccurrences(r.data, { rangeStart: start, rangeEnd: end, timeZone, limit: AGENDA_MAX_OCCURRENCES });
+      skipped += parsed.skipped;
+      truncated ||= parsed.truncated;
+      for (const o of parsed.items) {
+        items.push({ ...o, calendarName: names.get(urls[i]) ?? "Calendário" });
+      }
+    });
+    items.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    if (items.length > AGENDA_MAX_OCCURRENCES) { items.length = AGENDA_MAX_OCCURRENCES; truncated = true; }
+    return { agenda: { status: "ok", items, skipped, truncated, fetchedAt: Date.now() }, ctags };
+  } catch (err) {
+    console.error(`[icloud] ler agenda do período falhou tenant=${integration.tenantId}`, err instanceof Error ? err.name : "erro");
+    return fail("Não foi possível ler a agenda do Calendário da Apple.");
+  }
+}
+
+/**
+ * Os eventos do iPhone num período (dias locais, inclusive) para a `/agenda`.
+ *
+ * **Só leitura**: o item não vira `Appointment` — sem relatório, sem ação, sem
+ * lembrete —, e o que o fechai mesmo enviou (`fechai-<id>`) quem deduplica é a
+ * tela. Nunca lança e **não grava `lastError`**: ler para desenhar a tela não é
+ * envio, e um erro aqui não pode apagar nem mascarar o aviso de um envio.
+ *
+ * Mesmo desenho do Clinicorp: cache no servidor (promessa compartilhada, 30 min;
+ * falha 10 s; teto de 300 entradas) e, no pulso ao vivo, `fresh` — que pergunta
+ * só o `getctag` de cada calendário e reaproveita os eventos quando nada mudou,
+ * em vez de reler o mês inteiro a cada 15 s.
+ */
+export async function listIcloudAgenda(
+  tenantId: string,
+  from: string,
+  to: string,
+  timeZone: string,
+  { fresh = false }: { fresh?: boolean } = {},
+): Promise<IcloudAgenda> {
+  try {
+    let state = "configured" as IcloudIntegrationState;
+    const integration = await getIntegration(tenantId, { onInactive: (s) => { state = s; } });
+    if (!integration) {
+      return state === "unavailable"
+        ? { status: "error", error: "Não foi possível carregar a configuração do Calendário da Apple." }
+        : { status: "off" };
+    }
+    // Sem calendário escolhido ou com a senha revogada não há o que ler (a tela já avisa).
+    if (!integration.calendarUrl || integration.authFailedAt) return { status: "off" };
+
+    const urls = [...new Set([integration.calendarUrl, ...integration.busyCalendarUrls])];
+    const store = icloudAgendaCache();
+    const key = [tenantId, createHash("sha1").update(urls.join("\n")).digest("hex").slice(0, 10), from, to, timeZone].join("|");
+    const hit = store.get(key) as AgendaEntry | undefined;
+    const live = Boolean(hit) && Date.now() - hit!.at < hit!.ttl;
+    if (!fresh && live) return (await hit!.value).agenda;
+
+    if (fresh && live) {
+      const previous = await hit!.value;
+      if (previous.agenda.status === "ok") {
+        const ctags = await readCtags(credOf(integration), urls);
+        if (urls.every((u) => ctags[u] && ctags[u] === previous.ctags[u])) {
+          const value = Promise.resolve<AgendaPayload>({ agenda: { ...previous.agenda, fetchedAt: Date.now() }, ctags });
+          store.delete(key);
+          store.set(key, { at: Date.now(), ttl: AGENDA_CACHE_MS, value } satisfies AgendaEntry);
+          return (await value).agenda;
+        }
+      }
+    }
+
+    // A promessa entra no cache antes de resolver: duas abas esperam a mesma chamada.
+    const entry: AgendaEntry = { at: Date.now(), ttl: AGENDA_CACHE_MS, value: fetchAgenda(integration, urls, from, to, timeZone) };
+    store.delete(key);
+    store.set(key, entry);
+    while (store.size > AGENDA_CACHE_MAX) store.delete(store.keys().next().value!);
+    const result = await entry.value;
+    // Falha fica pouco: o pulso seguinte já tenta de novo.
+    if (result.agenda.status !== "ok") entry.ttl = AGENDA_ERROR_CACHE_MS;
+    return result.agenda;
+  } catch (err) {
+    console.error(`[icloud] ler agenda do período falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
+    return { status: "error", error: "Não foi possível ler a agenda do Calendário da Apple." };
   }
 }
