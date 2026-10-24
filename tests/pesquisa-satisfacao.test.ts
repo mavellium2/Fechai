@@ -17,8 +17,10 @@ import type { IncomingMessage, WhatsAppProvider } from "@/modules/whatsapp/provi
 
 const db = vi.hoisted(() => ({
   conversation: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-  satisfactionSurvey: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
-  satisfactionSurveySettings: { findUnique: vi.fn() },
+  satisfactionSurvey: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
+  satisfactionSurveySettings: { findUnique: vi.fn(), upsert: vi.fn() },
+  agent: { findMany: vi.fn() },
+  lead: { findFirst: vi.fn() },
   whatsappInstance: { findMany: vi.fn(), findFirst: vi.fn() },
   message: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
 }));
@@ -78,6 +80,10 @@ import { nextFollowUp } from "../workers/follow-up-worker/scan";
 import { DEFAULT_FOLLOWUP_CONFIG } from "@/modules/follow-up/config";
 import { parseTopics } from "@/modules/satisfaction/classify";
 import { cleanTopics } from "@/modules/satisfaction/categories";
+import { averageIsReliable, summarizeSurveys } from "@/modules/satisfaction/summary";
+import { saveSurveySettings, surveySettingsFormSchema } from "@/modules/satisfaction/settings-store";
+import { normalizeTestPhone, sendSurveyTest } from "@/modules/satisfaction/test-send";
+import { loadSatisfaction } from "@/modules/satisfaction/queries";
 
 const TENANT = "tenant-1";
 // 12:00 UTC = 09:00 em São Paulo: dentro da faixa 8h–20h.
@@ -550,5 +556,128 @@ describe("classificação", () => {
   });
   it("limita a 3 e remove repetidas", () => {
     expect(cleanTopics(["demora", "demora", "preco", "outro", "nao_entendeu"])).toEqual(["demora", "preco", "outro"]);
+  });
+});
+
+describe("agregados do painel", () => {
+  const rated = (rating: number, topics: string[] = [], hasComment = false, classified = true) => ({ rating, topics, hasComment, classified });
+
+  it("média de uma casa, distribuição que soma as respostas e taxa limitada a 100%", () => {
+    const s = summarizeSurveys(5, [rated(5), rated(4), rated(4), rated(1), rated(2)]);
+    expect(s.answered).toBe(5);
+    expect(s.distribution).toEqual([1, 1, 0, 2, 1]);
+    expect(s.distribution.reduce((a, b) => a + b, 0)).toBe(s.answered);
+    expect(s.average).toBe(3.2);
+    expect(s.responseRatePercent).toBe(100);
+    expect(summarizeSurveys(2, [rated(5), rated(5), rated(5)]).responseRatePercent).toBe(100);
+    expect(summarizeSurveys(0, []).average).toBeNull();
+    expect(summarizeSurveys(0, []).responseRatePercent).toBeNull();
+  });
+
+  it("top 3 só com chaves do conjunto fechado; comentário sem motivo é contado à parte", () => {
+    const s = summarizeSurveys(9, [
+      rated(1, ["demora"], true), rated(2, ["demora", "preco"], true), rated(2, ["preco"], true),
+      rated(3, ["tom_robotico"], true), rated(3, ["nao_entendeu"], true), rated(4, ["chave_inventada"], true),
+      rated(4, [], true, false), rated(5),
+    ]);
+    expect(s.topTopics.map((t) => t.key)).toEqual(["demora", "preco", "nao_entendeu"]);
+    expect(s.topics.some((t) => t.key === "chave_inventada")).toBe(false);
+    expect(s.unclassified).toBe(1);
+    expect(s.withComment).toBe(7);
+  });
+
+  it("a média só é confiável com 5 respostas", () => {
+    expect(averageIsReliable(4)).toBe(false);
+    expect(averageIsReliable(5)).toBe(true);
+  });
+});
+
+describe("configuração: validação e gravação", () => {
+  const form = { enabled: "on", delayMinutes: "180", windowStartHour: "8", windowEndHour: "20", timezone: "America/Sao_Paulo", ratingText: "", lowText: "", highText: "", thanksText: "" };
+
+  it("recusa espera fora de 30 min a 20 h e janela invertida", () => {
+    expect(surveySettingsFormSchema.safeParse({ ...form, delayMinutes: "10" }).success).toBe(false);
+    expect(surveySettingsFormSchema.safeParse({ ...form, delayMinutes: "1300" }).success).toBe(false);
+    expect(surveySettingsFormSchema.safeParse({ ...form, windowStartHour: "20", windowEndHour: "8" }).success).toBe(false);
+    expect(surveySettingsFormSchema.safeParse({ ...form, timezone: "Marte/Olympus" }).success).toBe(false);
+    expect(surveySettingsFormSchema.safeParse(form).success).toBe(true);
+  });
+
+  it("texto vazio ou igual ao padrão não é gravado (volta ao padrão)", async () => {
+    db.satisfactionSurveySettings.upsert.mockImplementation(async (args: { create: Record<string, unknown> }) => args.create);
+    const parsed = surveySettingsFormSchema.parse({ ...form, ratingText: DEFAULT_SURVEY_TEXTS.rating, lowText: "Sentimos muito.", highText: "" });
+    const saved = await saveSurveySettings(TENANT, parsed);
+    const call = db.satisfactionSurveySettings.upsert.mock.calls[0][0] as { create: Record<string, unknown> };
+    expect(call.create).toMatchObject({ ratingText: null, lowText: "Sentimos muito.", highText: null, thanksText: null, enabled: true });
+    expect(saved.texts.low).toBe("Sentimos muito.");
+    expect(saved.texts.rating).toBe(DEFAULT_SURVEY_TEXTS.rating);
+  });
+});
+
+describe("envio de teste", () => {
+  it("normaliza o número e recusa o que não parece telefone", () => {
+    expect(normalizeTestPhone("(11) 98765-4321")).toBe("5511987654321");
+    expect(normalizeTestPhone("+55 11 98765-4321")).toBe("5511987654321");
+    expect(normalizeTestPhone("12345")).toBeNull();
+  });
+
+  it("não usa o número do chat de teste do painel", async () => {
+    db.lead.findFirst.mockResolvedValue({ phone: "sandbox", isTest: true });
+    const res = await sendSurveyTest(TENANT, "(11) 98765-4321");
+    expect(res.ok).toBe(false);
+    expect(engine.getOrCreateConversation).not.toHaveBeenCalled();
+  });
+
+  it("grava a pesquisa de teste na conversa real do número", async () => {
+    db.lead.findFirst.mockResolvedValue({ phone: "5511987654321", isTest: false });
+    engine.getOrCreateConversation.mockResolvedValue({ conversation: { id: "conv-1" }, lead: { id: "lead-1" } });
+    db.satisfactionSurvey.findFirst.mockResolvedValue(null);
+    db.conversation.findFirst.mockResolvedValue({
+      id: "conv-1", agentId: "agent-1", isTest: false, needsHuman: false, agentPaused: false, followUpReason: null,
+      whatsappProvider: "meta", lead: { phone: "5511987654321", isTest: false },
+    });
+    db.whatsappInstance.findMany.mockResolvedValue([{
+      provider: "meta", status: "connected", externalId: "meta-1", agentReplies: true,
+      metaPhoneNumberId: null, metaBusinessAccountId: null, metaAccessTokenEncrypted: null,
+    }]);
+    const res = await sendSurveyTest(TENANT, "(11) 98765-4321");
+    expect(res.ok).toBe(true);
+    expect(db.satisfactionSurvey.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ isTest: true, conversationId: "conv-1" }) }));
+  });
+});
+
+describe("painel: leitura", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: "s1", conversationId: "conv-1", rating: 2, topics: ["demora"], comment: "Falei com Maria Souza no 11 98765-4321 e demorou",
+    commentAudioUrl: null, classifiedAt: new Date(), classifiedBy: "ai", ratedAt: NOW, reviewedAt: null,
+    agent: { name: "Ana" }, conversation: { lead: { name: "Maria Souza", phone: "5511987654321" } }, ...over,
+  });
+
+  beforeEach(() => {
+    db.satisfactionSurvey.count.mockResolvedValue(3);
+    db.satisfactionSurvey.findMany.mockResolvedValue([row()]);
+    db.agent.findMany.mockResolvedValue([{ id: "agent-1", name: "Ana" }]);
+  });
+
+  it("para quem não é da clínica o comentário vem mascarado", async () => {
+    const masked = await loadSatisfaction(TENANT, { from: ago(60 * 24 * 30), to: NOW }, { maskComments: true });
+    expect(masked.rows[0].comment).not.toContain("Maria");
+    expect(masked.rows[0].comment).not.toContain("98765");
+    const clear = await loadSatisfaction(TENANT, { from: ago(60 * 24 * 30), to: NOW });
+    expect(clear.rows[0].comment).toContain("Maria Souza");
+  });
+
+  it("a linha nunca leva nome ou telefone do contato", async () => {
+    const res = await loadSatisfaction(TENANT, { from: null, to: NOW });
+    expect(JSON.stringify(res.rows)).not.toContain("5511987654321");
+    expect(Object.keys(res.rows[0])).not.toContain("phone");
+    expect(res.summary.average).toBe(2);
+  });
+
+  it("consulta sempre pela conta e sem testes", async () => {
+    await loadSatisfaction(TENANT, { from: ago(100), to: NOW });
+    for (const [arg] of db.satisfactionSurvey.findMany.mock.calls as [{ where: Record<string, unknown> }][]) {
+      expect(arg.where).toMatchObject({ tenantId: TENANT, isTest: false });
+    }
   });
 });

@@ -11,6 +11,7 @@ import { SendMessageForm } from "./SendMessageForm";
 import { DeleteTestConversationButton } from "./DeleteTestConversationButton";
 import { AgentPauseButton } from "./AgentPauseButton";
 import { ConversationVariables } from "./ConversationVariables";
+import { SurveyThreadCard, type ThreadSurvey } from "./SurveyThreadCard";
 
 type ThreadMessage = {
   id: string;
@@ -32,11 +33,14 @@ type ThreadMessage = {
 export function ConversationThread({
   conversation,
   messages,
+  survey = null,
   backHref,
   voiceReady = false,
 }: {
   conversation: LeadPanelData;
   messages: ThreadMessage[];
+  /** Pesquisa de satisfação que o contato recebeu: aparece na linha do tempo, não como mensagem. */
+  survey?: ThreadSurvey | null;
   /** Volta para a lista no celular, onde só um painel aparece por vez. */
   backHref: string;
   /** O agente desta conversa tem voz gravada — habilita os botões de voz. */
@@ -47,6 +51,9 @@ export function ConversationThread({
 
   // Quem escreveu cada mensagem: o lead ("user"), a IA ("assistant" de
   // "agent") ou o dono da conta respondendo à mão ("assistant" de "human").
+  // Posição da pesquisa na linha do tempo: depois da última mensagem anterior ao envio.
+  const surveyAfter = survey ? messages.filter((m) => m.createdAt <= survey.sentAt).length - 1 : -2;
+
   function senderLabel(m: ThreadMessage) {
     if (m.role === "user") return name;
     return m.sentBy === "human" ? "você" : "agente";
@@ -139,6 +146,7 @@ export function ConversationThread({
         scrollKey={conversation.id}
         className="flex-1 space-y-0 p-4"
       >
+        {survey && surveyAfter === -1 && <SurveyThreadCard survey={survey} />}
         {messages.map((m, i) => {
           const previous = messages[i - 1];
           const newDay =
@@ -175,6 +183,7 @@ export function ConversationThread({
                   {m.content}
                 </ChatBubble>
               </div>
+              {survey && surveyAfter === i && <SurveyThreadCard survey={survey} />}
             </div>
           );
         })}

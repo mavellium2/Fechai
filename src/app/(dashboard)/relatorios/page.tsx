@@ -34,22 +34,25 @@ import { loadLeadQuality } from "@/modules/lead-insights/queries";
 import { RangePicker } from "./RangePicker";
 import { StatusBreakdown } from "./StatusBreakdown";
 import { ContactContextSummary } from "./ContactContextSummary";
+import { SatisfactionView } from "./SatisfactionView";
+import { loadSatisfaction } from "@/modules/satisfaction/queries";
+import { getSurveySettings } from "@/modules/satisfaction/settings-store";
 
 const PERIODS: PeriodKey[] = ["hoje", "7", "30", "mes", "ano", "tudo"];
 // A aba "Afiliados" só existe para quem está no programa — o filtro abaixo
 // remove a opção de quem não é afiliado, e a página cai na visão padrão se
 // alguém digitar ?visao=afiliados na URL sem ter cadastro.
-const VIEWS = ["operacional", "financeiro", "leads", "mensal", "afiliados"] as const;
+const VIEWS = ["operacional", "financeiro", "leads", "satisfacao", "mensal", "afiliados"] as const;
 type View = (typeof VIEWS)[number];
 
 export default async function RelatoriosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ periodo?: string; de?: string; ate?: string; visao?: string; mes?: string }>;
+  searchParams: Promise<{ periodo?: string; de?: string; ate?: string; visao?: string; mes?: string; nota?: string; agente?: string }>;
 }) {
   const { tenantId } = await requireTenant();
   const session = await requireOwner();
-  const { periodo, de, ate, visao, mes } = await searchParams;
+  const { periodo, de, ate, visao, mes, nota, agente } = await searchParams;
   const period = (PERIODS as string[]).includes(periodo ?? "") ? (periodo as PeriodKey) : "30";
 
   // O afiliado é do USUÁRIO, não do tenant: a mesma pessoa pode ser cliente e
@@ -85,6 +88,21 @@ export default async function RelatoriosPage({
     // Amadurece as comissões antes de somar, para o card bater com o painel.
     await approveMaturedCommissions(affiliate.id);
   }
+
+  const ratingFilter = /^[1-5]$/.test(nota ?? "") ? Number(nota) : null;
+  const agentFilter = agente && agente.length <= 40 ? agente : null;
+  // Para quem não é da clínica (Mavellium personificando), o comentário chega mascarado.
+  const [satisfaction, surveySettings] =
+    view === "satisfacao"
+      ? await Promise.all([
+          loadSatisfaction(
+            tenantId,
+            { from: range.from, to: new Date(range.to.getTime() + 1), rating: ratingFilter, agentId: agentFilter },
+            { maskComments: session.user.impersonating === true },
+          ),
+          getSurveySettings(tenantId),
+        ])
+      : [null, null];
 
   const [hasAnyData, report, financial, leadQuality, affiliateOverview] = await Promise.all([
     affiliateOnly ? 1 : prisma.lead.count({ where: { tenantId, isTest: false } }),
@@ -132,6 +150,18 @@ export default async function RelatoriosPage({
     return `/relatorios?${qs.toString()}`;
   };
 
+  // Filtros da lista de satisfação; mantém visão e período.
+  const satisfactionHref = ({ nota: n, agente: a }: { nota?: string | null; agente?: string | null }) => {
+    const qs = new URLSearchParams();
+    if (de) qs.set("de", de);
+    if (ate) qs.set("ate", ate);
+    if (!de) qs.set("periodo", period);
+    qs.set("visao", "satisfacao");
+    if (n) qs.set("nota", n);
+    if (a) qs.set("agente", a);
+    return `/relatorios?${qs.toString()}`;
+  };
+
   const exportQs = new URLSearchParams();
   if (de) exportQs.set("de", de);
   if (ate) exportQs.set("ate", ate);
@@ -151,6 +181,8 @@ export default async function RelatoriosPage({
               ? `Retorno estimado do investimento no projeto — ${range.label}.`
             : view === "leads"
               ? `De onde vêm os leads, o que perguntam e por que não fecham — ${range.label}.`
+            : view === "satisfacao"
+              ? `O que os contatos acharam do atendimento — ${range.label}.`
               : `Acompanhe a evolução da conta — ${range.label}.`
         }
       />
@@ -165,6 +197,7 @@ export default async function RelatoriosPage({
                 { key: "operacional", label: "Operacional" },
                 { key: "financeiro", label: "Financeiro" },
                 { key: "leads", label: "Qualidade dos leads" },
+                { key: "satisfacao", label: "Satisfação" },
                 ...(publishedMonths.length ? [{ key: "mensal", label: "Relatório mensal" }] : []),
                 ...(affiliate ? [{ key: "afiliados", label: "Afiliados" }] : []),
               ]}
@@ -372,6 +405,18 @@ export default async function RelatoriosPage({
       ) : view === "leads" && leadQuality ? (
         <FadeIn>
           <LeadQualityView quality={leadQuality} period={range.label} />
+        </FadeIn>
+      ) : view === "satisfacao" && satisfaction && surveySettings ? (
+        <FadeIn>
+          <SatisfactionView
+            overview={satisfaction}
+            settings={surveySettings}
+            period={range.label}
+            ratingFilter={ratingFilter}
+            agentFilter={agentFilter}
+            hrefFor={satisfactionHref}
+            linkConversations={session.user.impersonating !== true}
+          />
         </FadeIn>
       ) : view === "afiliados" && affiliateOverview ? (
         <AfiliadoView overview={affiliateOverview} />

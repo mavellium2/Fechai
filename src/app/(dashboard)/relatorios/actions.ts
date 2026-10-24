@@ -5,6 +5,10 @@ import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { recordAudit } from "@/modules/audit/log";
+import { requireProductAccess } from "@/lib/require-product";
+import { isSurveyTopic } from "@/modules/satisfaction/categories";
+import { getSurveySettings, saveSurveySettings, surveySettingsFormSchema } from "@/modules/satisfaction/settings-store";
+import { sendSurveyTest } from "@/modules/satisfaction/test-send";
 import {
   MAX_HOURLY_COST_CENTS,
   MAX_MINUTES_PER_LEAD,
@@ -111,4 +115,68 @@ export async function saveAttendanceCost(
 
   revalidatePath("/relatorios");
   return { ok: true, info: "Custo salvo — períodos já iniciados mantêm o custo anterior." };
+}
+
+/**
+ * Pesquisa de satisfação: ligar, esperar e os textos. O texto "aprovado" é
+ * combinado com a Mavellium fora do sistema — aqui só se edita; a pesquisa sai
+ * quando está ligada.
+ */
+export async function saveSurveySettingsAction(_prev: Result | null, formData: FormData): Promise<Result> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+  const { session } = await requireProductAccess();
+  const tenantId = session.user.tenantId;
+
+  const parsed = surveySettingsFormSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const before = await getSurveySettings(tenantId);
+  const after = await saveSurveySettings(tenantId, parsed.data);
+  await recordAudit({
+    event: "survey.settings_updated",
+    target: { type: "SatisfactionSurveySettings", id: tenantId, label: "Pesquisa de satisfação" },
+    before,
+    after,
+  });
+  revalidatePath("/relatorios");
+  return { ok: true, info: "Pesquisa de satisfação salva." };
+}
+
+/** Envia a pergunta da nota para um número, agora (teste). */
+export async function sendSurveyTestAction(_prev: Result | null, formData: FormData): Promise<Result> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+  const { session } = await requireProductAccess();
+  const tenantId = session.user.tenantId;
+  const result = await sendSurveyTest(tenantId, String(formData.get("phone") ?? "").slice(0, 40));
+  if (!result.ok) return { ok: false, error: result.error };
+  await recordAudit({ event: "survey.test_sent", target: { type: "SatisfactionSurveySettings", id: tenantId, label: "Pesquisa de satisfação" } });
+  return { ok: true, info: result.info };
+}
+
+/** Correção humana do motivo: vale mais que a classificação da IA e nunca é sobrescrita por ela. */
+export async function setSurveyTopicAction(surveyId: string, topic: string): Promise<Result> {
+  const { session } = await requireProductAccess();
+  if (topic !== "" && !isSurveyTopic(topic)) return { ok: false, error: "Motivo inválido." };
+  const res = await prisma.satisfactionSurvey.updateMany({
+    where: { id: surveyId, tenantId: session.user.tenantId, rating: { not: null } },
+    data: { topics: topic ? [topic] : [], classifiedBy: "human", classifiedAt: new Date() },
+  });
+  if (!res.count) return { ok: false, error: "Avaliação não encontrada." };
+  revalidatePath("/relatorios");
+  return { ok: true, info: "Motivo atualizado." };
+}
+
+/** Marca a avaliação baixa como revisada: sai do alerta do início. */
+export async function markSurveyReviewedAction(surveyId: string): Promise<Result> {
+  const { session } = await requireProductAccess();
+  const res = await prisma.satisfactionSurvey.updateMany({
+    where: { id: surveyId, tenantId: session.user.tenantId, reviewedAt: null },
+    data: { reviewedAt: new Date(), reviewedById: session.user.id },
+  });
+  if (!res.count) return { ok: false, error: "Avaliação não encontrada ou já revisada." };
+  revalidatePath("/relatorios");
+  revalidatePath("/inicio");
+  return { ok: true, info: "Avaliação marcada como revisada." };
 }

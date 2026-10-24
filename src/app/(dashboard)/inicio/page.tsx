@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import { ArrowUpRight, Bot, FileText, MessagesSquare, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Bot, FileText, MessagesSquare, Star, TriangleAlert } from "lucide-react";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getWhatsappStatus } from "@/modules/whatsapp/instances";
@@ -16,10 +16,12 @@ import { FilterTabs } from "@/components/ui/filter-tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import { Stat } from "@/components/ui/stat";
 import { shortAge } from "@/lib/format";
+import { countLowRatingsToReview, listLowRatingsToReview } from "@/modules/satisfaction/queries";
 import { leadStatusLabel } from "../conversas/leadStatus";
 import { HealthStrip } from "./HealthStrip";
 import { SetupSteps } from "./SetupSteps";
 import { Sparkline } from "./Sparkline";
+import { ReviewSurveyButton } from "./ReviewSurveyButton";
 
 const PERIODS = [
   { key: "7", label: "7 dias" },
@@ -138,7 +140,7 @@ export default async function InicioPage({
   }
 
   // ── Fase 2: a conta está no ar ──────────────────────────────────────────────
-  const [summary, needsHuman, recent, whatsappStatus, agentReady, usage] =
+  const [summary, needsHuman, recent, whatsappStatus, agentReady, usage, lowRatings, lowRatingCount] =
     await Promise.all([
       computeHomeSummary(tenantId, days),
       // `isTest: false` em toda a home: o chat de teste não é atendimento e
@@ -164,6 +166,10 @@ export default async function InicioPage({
       // A mesma fonte da sidebar e de /configuracoes — a home mostrava um
       // contador próprio (conversas do mês) que não era mais a cota real.
       getUsageSummary(tenantId),
+      // Notas 1 e 2 da pesquisa de satisfação que ninguém revisou. Falha aqui
+      // não derruba a home: o alerta some e o resto continua.
+      listLowRatingsToReview(tenantId, 4).catch(() => []),
+      countLowRatingsToReview(tenantId).catch(() => 0),
     ]);
 
   const plan = planOf(tenant?.planKey);
@@ -303,6 +309,44 @@ export default async function InicioPage({
               </ul>
             )}
           </Card>
+
+          {lowRatingCount > 0 && (
+            <Card>
+              <CardTitle
+                hintInline
+                hint="Contatos que deram nota 1 ou 2 na pesquisa de satisfação. Abra a conversa e veja o que aconteceu."
+                action={
+                  <Badge tone="warn" icon={<Star size={11} />}>
+                    {lowRatingCount}
+                  </Badge>
+                }
+              >
+                Avaliações baixas para revisar
+              </CardTitle>
+              <ul className="-mx-3 space-y-0.5">
+                {lowRatings.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-3 rounded-surface px-3 py-2">
+                    <Link
+                      href={`/conversas?status=all&id=${r.conversationId}`}
+                      className="min-w-0 text-sm text-white/80 underline-offset-4 hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
+                    >
+                      Nota {r.rating} · {shortAge(r.ratedAt)}
+                      {r.agentName && <span className="text-white/50"> · {r.agentName}</span>}
+                    </Link>
+                    <ReviewSurveyButton surveyId={r.id} />
+                  </li>
+                ))}
+              </ul>
+              {lowRatingCount > lowRatings.length && (
+                <Link
+                  href="/relatorios?visao=satisfacao&periodo=30"
+                  className="mt-3 inline-block rounded-control font-mono text-micro uppercase tracking-wide text-iris underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
+                >
+                  Ver todas
+                </Link>
+              )}
+            </Card>
+          )}
 
           <Card>
             <CardTitle as="h2">Atalhos</CardTitle>

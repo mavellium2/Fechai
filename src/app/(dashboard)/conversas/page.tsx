@@ -74,6 +74,13 @@ export default async function ConversasPage({
             // pode oferecer os botões de voz — ver `voiceReady` abaixo.
             agent: { select: { name: true, enabled: true, archived: true, voiceId: true, variableDefinitions: true } },
             messages: { orderBy: { createdAt: "asc" } },
+            // A pesquisa de satisfação não é mensagem: vira um cartão na linha do tempo.
+            satisfactionSurveys: {
+              where: { status: { in: ["sending", "awaiting_rating", "awaiting_comment", "completed", "no_reply", "unknown"] } },
+              orderBy: { sentAt: "desc" },
+              take: 1,
+              select: { status: true, sentAt: true, rating: true, comment: true, commentAudioUrl: true, isTest: true },
+            },
             _count: { select: { messages: true } },
           },
         })
@@ -139,6 +146,7 @@ export default async function ConversasPage({
           variables: withContactDefaults(parseConversationVariables(selected.variables), selected.lead),
         },
         messages: selected.messages,
+        survey: selected.satisfactionSurveys[0] ?? null,
       }
     : null;
 
@@ -235,6 +243,7 @@ export default async function ConversasPage({
             <ConversationThread
               conversation={detail.data}
               messages={detail.messages}
+              survey={detail.survey}
               backHref={params({ id: undefined })}
               voiceReady={voiceReady}
             />
