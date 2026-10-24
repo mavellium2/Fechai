@@ -4,10 +4,11 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getCalendarFeatures } from "./features";
 import { parseScheduleConfig } from "./config";
 import {
-  deleteEvent, discoverCalendarHome, discoverPrincipal, listCalendars, putEvent, resolveIcloudUrl,
+  deleteEvent, discoverCalendarHome, discoverPrincipal, listCalendars, putEvent, queryEvents, resolveIcloudUrl,
   type CalDavCalendar, type CaldavCredentials, type CaldavKind, type CaldavResponse,
 } from "./caldav";
-import { buildEvent, type IcloudEventInput } from "./ical";
+import { buildEvent, eventUid, localDayRange, parseBusyBlocks, type BusyBlock, type IcloudEventInput } from "./ical";
+import { dayKeyInZone } from "./time";
 
 /**
  * Espelho opcional no Calendário da Apple (iCloud, por CalDAV).
@@ -127,6 +128,9 @@ export function describeFailure(op: IcloudOp, kind: CaldavKind, status: number):
   if (kind === "auth") return AUTH_MESSAGE;
   if (kind === "forbidden" || kind === "not_found") return CALENDAR_GONE_MESSAGE;
   const target = "Calendário da Apple";
+  if (op === "read" && kind === "rejected") {
+    return `Não foi possível ler a agenda do ${target} (resposta inesperada do iCloud). Novos horários não serão oferecidos até a leitura funcionar.`;
+  }
   if (kind === "server" || kind === "timeout" || kind === "network") {
     return op === "read"
       ? `Não foi possível conferir a disponibilidade no ${target} (o iCloud não respondeu). Novos horários não serão oferecidos até a leitura funcionar.`
@@ -480,5 +484,93 @@ export async function scheduleContextFor(
   } catch {
     const cfg = parseScheduleConfig(null);
     return { timeZone: cfg.timezone, location: "" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Disponibilidade: o que já está ocupado no iPhone
+// ---------------------------------------------------------------------------
+
+export type IcloudBusyBlock = BusyBlock;
+
+/**
+ * Tudo que está ocupado no Calendário da Apple num dia local — o calendário que
+ * recebe os horários mais os que a pessoa marcou como "considerar ocupado".
+ * Uma leitura por calendário e por dia, direto na Apple (sem cache: horário
+ * oferecido com base em leitura velha é consulta duplicada).
+ *
+ * Desligado, não conectado ou leitura desligada (`checkAvailability`) devolve
+ * `[]`. **Falha devolve `null`** — nunca transforma disponibilidade
+ * desconhecida em agenda vazia (mesma regra do Clinicorp): quem chama não
+ * oferece nem confirma horário. Com a senha revogada (`authFailedAt`) devolve
+ * `null` sem nem chamar a Apple. `ignoreUid` tira o evento do próprio fechai
+ * ao remarcar, senão a consulta bateria em si mesma.
+ */
+export async function listIcloudBusyBlocks(
+  tenantId: string,
+  day: string,
+  timeZone: string,
+  ignoreUid?: string,
+): Promise<IcloudBusyBlock[] | null> {
+  try {
+    let unavailable = false;
+    const integration = await getIntegration(tenantId, { onUnavailable: () => { unavailable = true; } });
+    if (unavailable) return null;
+    if (!integration || !integration.checkAvailability) return [];
+    if (integration.authFailedAt) return null;
+
+    const calendars = [...new Set([integration.calendarUrl, ...integration.busyCalendarUrls].filter((u): u is string => Boolean(u)))];
+    // Nenhum calendário escolhido ainda: não há o que ler (e a tela já pede a escolha).
+    if (!calendars.length) return [];
+    const range = localDayRange(day, timeZone);
+    if (!range) return null;
+
+    const cred = credOf(integration);
+    const results = await Promise.all(calendars.map((url) => queryEvents(cred, url, range.start, range.end)));
+    const failed = results.find((r) => !r.ok);
+    if (failed && !failed.ok) {
+      console.error(`[icloud] ler agenda do dia falhou tenant=${tenantId} http=${failed.status} tipo=${failed.kind}`);
+      await recordOutcome(tenantId, { ok: false, op: "read", kind: failed.kind, status: failed.status });
+      return null;
+    }
+
+    const blocks = parseBusyBlocks(
+      results.flatMap((r) => (r.ok ? r.data : [])), day, timeZone, ignoreUid,
+    );
+    if (!blocks) {
+      console.error(`[icloud] interpretar agenda do dia falhou tenant=${tenantId}`);
+      await recordOutcome(tenantId, { ok: false, op: "read", kind: "rejected", status: 0 });
+    }
+    return blocks;
+  } catch (err) {
+    console.error(`[icloud] listar agenda do dia falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
+    return null;
+  }
+}
+
+/**
+ * O horário está ocupado no Calendário da Apple? `false` quando desligado,
+ * `null` quando não foi possível conferir. Encostar não é conflito (14:00–15:00
+ * e 15:00–16:00 convivem), a mesma regra de `hasConflict`. Consulta que
+ * atravessa a meia-noite lê os dois dias.
+ */
+export async function hasIcloudConflict(
+  tenantId: string,
+  startsAt: Date,
+  endsAt: Date,
+  timeZone: string,
+  ignoreAppointmentId?: string,
+): Promise<boolean | null> {
+  try {
+    const ignoreUid = ignoreAppointmentId ? eventUid(ignoreAppointmentId) : undefined;
+    const first = dayKeyInZone(startsAt, timeZone);
+    const last = dayKeyInZone(new Date(Math.max(startsAt.getTime(), endsAt.getTime() - 1)), timeZone);
+    const days = first === last ? [first] : [first, last];
+    const lists = await Promise.all(days.map((d) => listIcloudBusyBlocks(tenantId, d, timeZone, ignoreUid)));
+    if (lists.some((l) => l === null)) return null;
+    return lists.flat().some((b) => b !== null && startsAt < b.endsAt && endsAt > b.startsAt);
+  } catch (err) {
+    console.error(`[icloud] consultar agenda falhou tenant=${tenantId}`, err instanceof Error ? err.name : "erro");
+    return null;
   }
 }

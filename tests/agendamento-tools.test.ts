@@ -28,6 +28,8 @@ vi.mock("@/modules/agent-engine/handoff", async (importOriginal) => ({
 import { getToolSchemas, runToolHandler, type ToolContext } from "@/modules/agent-engine/tools";
 import { parseScheduleConfig } from "@/modules/scheduling/config";
 import { leadAppointmentsContext, offerAlternativeSlots } from "@/modules/agent-engine/scheduling-tools";
+import { listFreeSlots } from "@/modules/scheduling/repository";
+import { AvailabilityUnavailableError } from "@/modules/scheduling/availability-error";
 import { emptyWeek } from "@/modules/scheduling/weekly-availability";
 
 const ctx = { tenantId: "conta-1", leadId: "cliente-1", agentId: "agente-1", conversationId: "conversa-1" };
@@ -109,6 +111,56 @@ describe("agenda externa sem disponibilidade confirmada", () => {
     expect(result).toContain("Não foi possível conferir");
     expect(turn.replyOverride).toContain("Ainda não confirmei");
     expect(db.appointment.create).not.toHaveBeenCalled();
+  });
+  it("não oferece horários quando não consegue ler o Calendário da Apple", async () => {
+    const turn: ToolContext = { ...ctx };
+    icloud.busy.mockResolvedValue(null);
+    const result = await runToolHandler("list_available_slots", turn, { date: "2026-09-17", days: 1 });
+    expect(result).toContain("Não foi possível conferir");
+    expect(turn.replyOverride).toContain("Ainda não confirmei");
+    expect(db.appointment.create).not.toHaveBeenCalled();
+  });
+  it("tira dos horários livres o que está ocupado no iPhone", async () => {
+    db.appointment.findMany.mockResolvedValue([]);
+    icloud.busy.mockResolvedValue([{ startsAt: new Date("2026-09-17T17:00:00Z"), endsAt: new Date("2026-09-17T18:00:00Z") }]);
+    const slots = await listFreeSlots(ctx.tenantId, cfg, "2026-09-17", new Date("2026-09-16T12:00:00Z"));
+    const hours = slots.map((s) => s.toISOString());
+    expect(hours).not.toContain("2026-09-17T17:00:00.000Z");
+    expect(hours).not.toContain("2026-09-17T17:30:00.000Z");
+    expect(hours).toContain("2026-09-17T18:00:00.000Z");
+    expect(icloud.busy).toHaveBeenCalledWith(ctx.tenantId, "2026-09-17", cfg.timezone);
+  });
+  it("lê os horários livres de um dia com falha do iCloud como indisponível, não como agenda vazia", async () => {
+    db.appointment.findMany.mockResolvedValue([]);
+    icloud.busy.mockResolvedValue(null);
+    await expect(listFreeSlots(ctx.tenantId, cfg, "2026-09-17", new Date("2026-09-16T12:00:00Z"))).rejects.toBeInstanceOf(AvailabilityUnavailableError);
+  });
+  it("não cria reserva se o iCloud não pôde ser conferido", async () => {
+    db.appointment.findMany.mockResolvedValue([]);
+    icloud.conflict.mockResolvedValue(null);
+    const turn: ToolContext = { ...ctx };
+    await runToolHandler("schedule_meeting", turn, { date: "2026-09-17", time: "14:00", patientName: "Paciente" });
+    expect(turn.replyOverride).toContain("Ainda não confirmei");
+    expect(db.appointment.create).not.toHaveBeenCalled();
+    expect(mirrors.clinicorpPush).not.toHaveBeenCalled();
+  });
+  it("horário ocupado só no iPhone é recusado com alternativas", async () => {
+    db.appointment.findMany.mockResolvedValue([]);
+    icloud.conflict.mockResolvedValue(true);
+    const turn: ToolContext = { ...ctx };
+    const result = await runToolHandler("schedule_meeting", turn, { date: "2026-09-17", time: "14:00", patientName: "Paciente" });
+    expect(result).toContain("Encontrei estas opções disponíveis");
+    expect(db.appointment.create).not.toHaveBeenCalled();
+  });
+  it("remarcar não bate no próprio evento: o id da consulta vai para ser ignorado", async () => {
+    await reschedule();
+    expect(icloud.conflict).toHaveBeenCalledWith(ctx.tenantId, new Date("2026-09-18T17:00:00Z"), new Date("2026-09-18T17:30:00Z"), cfg.timezone, appointment.id);
+  });
+  it("preserva o horário original quando o iCloud não responde na remarcação", async () => {
+    icloud.conflict.mockResolvedValue(null);
+    expect(await reschedule()).toContain("Não foi possível conferir");
+    expect(db.appointment.updateMany).not.toHaveBeenCalled();
+    delete (ctx as ToolContext).replyOverride;
   });
   it("não cria reserva se a checagem final falha", async () => {
     db.appointment.findMany.mockResolvedValue([]);

@@ -12,7 +12,9 @@ import {
 import { dayKeyInZone, monthRangeUtc, parseLocalDateTime, partsInZone, timeInZone, zonedTimeToUtc } from "./time";
 import { canConfirm, canMarkAttendance, type AppointmentKind, type Attendance } from "./dimensions";
 import { syncAppointmentToClinicorp } from "./clinicorp-sync";
-import { deleteIcloudEvent, pushEventToIcloud, updateIcloudEvent, type IcloudSyncResult } from "./icloud";
+import {
+  deleteIcloudEvent, hasIcloudConflict, listIcloudBusyBlocks, pushEventToIcloud, updateIcloudEvent, type IcloudSyncResult,
+} from "./icloud";
 
 /**
  * Leitura e escrita da agenda. Toda query filtra por tenantId (regra do
@@ -88,8 +90,9 @@ export async function hasConflict(
 }
 
 /**
- * Como `hasConflict`, mas olhando também a agenda do Clinicorp quando a conta
- * está conectada.
+ * Como `hasConflict`, mas olhando também a agenda do Clinicorp e o Calendário
+ * da Apple (iCloud) quando a conta os conectou. As agendas se somam: horário
+ * ocupado em qualquer uma delas não é oferecido.
  *
  * Existe separado porque a nossa agenda não é a agenda inteira da clínica: a
  * recepção marca gente direto no sistema deles o dia todo, e o agente não pode
@@ -106,9 +109,16 @@ export async function hasConflictAnywhere(
   ignoreClinicorpId?: string,
 ): Promise<boolean> {
   if (await hasConflict(tenantId, startsAt, endsAt, ignoreId)) return true;
-  const conflict = await hasClinicorpConflict(tenantId, startsAt, endsAt, timezone, ignoreClinicorpId);
-  if (conflict === null) throw new AvailabilityUnavailableError();
-  return conflict;
+  // Em paralelo: duas ligações de rede em série segurariam o turno do agente.
+  // Remarcando, o evento do próprio fechai no iPhone (`fechai-<id>`) é ignorado.
+  const [clinicorp, icloud] = await Promise.all([
+    hasClinicorpConflict(tenantId, startsAt, endsAt, timezone, ignoreClinicorpId),
+    hasIcloudConflict(tenantId, startsAt, endsAt, timezone, ignoreId),
+  ]);
+  // Sem conferir uma das agendas não se confirma horário: oferecer às cegas
+  // é marcar em cima de um compromisso que o cliente já tem.
+  if (clinicorp === null || icloud === null) throw new AvailabilityUnavailableError();
+  return clinicorp || icloud;
 }
 
 /**
@@ -118,7 +128,7 @@ export async function hasConflictAnywhere(
  * contato aceitava e o `schedule_meeting` recusava — o agente então voltava
  * atrás e pedia outra data. Aqui o horário só aparece se passar pelas mesmas
  * regras da gravação: dia atendido, expediente, pausas, antecedência e
- * conflito na nossa base e no Clinicorp.
+ * conflito na nossa base, no Clinicorp e no Calendário da Apple.
  *
  * Candidatos: a grade do expediente (e recomeçada ao fim de cada pausa) mais o
  * fim de cada compromisso ocupado, para uma consulta às 09:30 não esconder o
@@ -145,15 +155,16 @@ export async function listFreeSlots(
   const dayEnd = zonedTimeToUtc(localDay.year, localDay.month, localDay.day + 1, 0, 0, cfg.timezone);
   if (!dayStart || !dayEnd || !grid.length) return [];
 
-  const [local, clinicorp] = await Promise.all([
+  const [local, clinicorp, icloud] = await Promise.all([
     prisma.appointment.findMany({
       where: { tenantId, status: "scheduled", startsAt: { lt: dayEnd }, endsAt: { gt: dayStart } },
       select: { startsAt: true, endsAt: true },
     }),
     listClinicorpBusyBlocks(tenantId, date, cfg.timezone),
+    listIcloudBusyBlocks(tenantId, date, cfg.timezone),
   ]);
-  if (clinicorp === null) throw new AvailabilityUnavailableError();
-  const busy = [...local, ...clinicorp];
+  if (clinicorp === null || icloud === null) throw new AvailabilityUnavailableError();
+  const busy = [...local, ...clinicorp, ...icloud];
 
   const candidates = new Map<number, Date>();
   for (const at of [...grid, ...busy.map((b) => b.endsAt).filter(valid)]) candidates.set(at.getTime(), at);

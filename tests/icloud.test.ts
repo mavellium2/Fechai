@@ -11,13 +11,14 @@ vi.mock("@/lib/prisma", () => ({ prisma: db }));
 
 import { encryptSecret } from "@/lib/crypto";
 import {
-  clearIcloudAgendaCache, deleteIcloudEvent, disconnectIcloud, eventUrl, getIcloudStatus, icloudAgendaCache,
-  listIcloudCalendars, maskAppleId, moveIcloudEvents, pushEventToIcloud, saveIcloudCredentials, testIcloudConnection,
+  clearIcloudAgendaCache, deleteIcloudEvent, disconnectIcloud, eventUrl, getIcloudStatus, hasIcloudConflict, icloudAgendaCache,
+  listIcloudBusyBlocks, listIcloudCalendars, maskAppleId, moveIcloudEvents, pushEventToIcloud, saveIcloudCredentials, testIcloudConnection,
   updateIcloudEvent, verifyIcloudCredentials,
 } from "@/modules/scheduling/icloud";
 import { setCalendarFeature } from "@/modules/scheduling/features";
 import type { IcloudEventInput } from "@/modules/scheduling/ical";
 import * as xml from "./fixtures/icloud/caldav";
+import * as ics from "./fixtures/icloud/ics";
 
 const APPLE_ID = "dona.clinica@icloud.com";
 const PASSWORD = "abcd-efgh-ijkl-mnop";
@@ -335,5 +336,131 @@ describe("remarcar e apagar", () => {
     await moveIcloudEvents("t1");
     expect(fetchMock.mock.calls[0][0]).toBe("https://p1-caldav.icloud.com/old/fechai-a1.ics");
     expect(db.appointment.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { icloudEventUrl: null, icloudSyncAttempts: 0, icloudNextAttemptAt: null } }));
+  });
+});
+
+describe("disponibilidade: o que está ocupado no iPhone", () => {
+  const DAY = "2026-08-12";
+  const TZ = "America/Sao_Paulo";
+  const report = (...list: string[]) => reply(207, xml.reportOf(list));
+  const CAL_WORK_URL = xml.CAL_WORK;
+
+  it.each([
+    ["integração desabilitada em /integracoes", () => db.calendarFeatures.findUnique.mockResolvedValue({ icloudEnabled: false })],
+    ["leitura desligada (checkAvailability)", () => { row = { ...baseRow(), checkAvailability: false }; }],
+    ["conta não conectada", () => { row = null; }],
+    ["nenhum calendário escolhido ainda", () => { row = { ...baseRow(), calendarUrl: null }; }],
+  ])("%s: nada ocupado e sem chamar a Apple", async (_name, arrange) => {
+    arrange();
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("senha revogada: desconhecido (null), sem insistir na Apple", async () => {
+    row = { ...baseRow(), authFailedAt: new Date() };
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
+    expect(await hasIcloudConflict("t1", new Date("2026-08-12T17:00:00Z"), new Date("2026-08-12T18:00:00Z"), TZ)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("lê o calendário de gravação e os marcados como ocupado, um REPORT por calendário, no dia local", async () => {
+    row = { ...baseRow(), busyCalendarUrls: [CAL_WORK_URL] };
+    fetchMock.mockReturnValueOnce(report(ics.FLOATING)).mockReturnValueOnce(report(ics.UTC_EVENT));
+    const blocks = await listIcloudBusyBlocks("t1", DAY, TZ);
+    expect(blocks?.map((b) => b.startsAt.toISOString()).sort()).toEqual(["2026-08-12T12:00:00.000Z", "2026-08-12T17:00:00.000Z"]);
+    expect(fetchMock.mock.calls.map((c) => c[0]).sort()).toEqual([xml.CAL_URL, CAL_WORK_URL].sort());
+    // dia local 12/08 em Brasília = 03:00Z até 03:00Z do dia seguinte
+    expect(String((fetchMock.mock.calls[0][1] as RequestInit).body)).toContain('start="20260812T030000Z" end="20260813T030000Z"');
+  });
+
+  it("recorrência, dia inteiro, livre e cancelado", async () => {
+    fetchMock.mockReturnValueOnce(report(ics.WEEKLY, ics.ALL_DAY, ics.TRANSPARENT, ics.CANCELLED));
+    const blocks = (await listIcloudBusyBlocks("t1", "2026-08-10", TZ))!;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].startsAt.toISOString()).toBe("2026-08-10T13:00:00.000Z");
+    fetchMock.mockReturnValueOnce(report(ics.WEEKLY, ics.ALL_DAY, ics.TRANSPARENT, ics.CANCELLED));
+    const full = (await listIcloudBusyBlocks("t1", DAY, TZ))!;
+    expect(full).toHaveLength(1);
+    expect(full[0].endsAt.getTime() - full[0].startsAt.getTime()).toBe(48 * 3_600_000);
+  });
+
+  it("401: devolve null, grava a queda da senha e para tudo", async () => {
+    fetchMock.mockReturnValueOnce(reply(401));
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
+    const data = lastWrite();
+    expect(data.authFailedAt).toBeInstanceOf(Date);
+    expect(String(data.connectionError)).toContain("senha de app foi revogada");
+    noSecrets();
+  });
+
+  it.each([
+    ["5xx", () => fetchMock.mockReturnValueOnce(reply(503))],
+    ["timeout", () => fetchMock.mockRejectedValueOnce(Object.assign(new Error("t"), { name: "TimeoutError" }))],
+    ["rede", () => fetchMock.mockRejectedValueOnce(new Error("ECONNRESET"))],
+    ["resposta que não é CalDAV", () => fetchMock.mockReturnValueOnce(reply(207, xml.NOT_XML))],
+    ["arquivo de calendário ilegível", () => fetchMock.mockReturnValueOnce(report(ics.BROKEN))],
+  ])("falha (%s) = null, nunca agenda vazia, e a tela explica", async (_name, arrange) => {
+    arrange();
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
+    expect(String(lastWrite().lastError)).toContain("Novos horários não serão oferecidos");
+    noSecrets();
+  });
+
+  it("um dos calendários falhando já torna o dia desconhecido", async () => {
+    row = { ...baseRow(), busyCalendarUrls: [CAL_WORK_URL] };
+    fetchMock.mockReturnValueOnce(report(ics.FLOATING)).mockReturnValueOnce(reply(500));
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
+  });
+
+  it("credencial ilegível ou banco fora do ar: null (não conseguiu conferir)", async () => {
+    row = { ...baseRow(), appPassword: "v1:lixo:lixo:lixo" };
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
+    row = baseRow();
+    db.calendarFeatures.findUnique.mockRejectedValue(new Error("db"));
+    expect(await listIcloudBusyBlocks("t1", DAY, TZ)).toBeNull();
+    db.icloudCalendarIntegration.findUnique.mockRejectedValue(new Error("db"));
+    await expect(listIcloudBusyBlocks("t1", DAY, TZ)).resolves.toBeNull();
+  });
+
+  it("dia inválido não explode", async () => {
+    expect(await listIcloudBusyBlocks("t1", "2026-99-99", TZ)).toBeNull();
+  });
+
+  it("não usa cache: cada conferência lê na Apple", async () => {
+    fetchMock.mockImplementation(() => report(ics.FLOATING));
+    await listIcloudBusyBlocks("t1", DAY, TZ);
+    await listIcloudBusyBlocks("t1", DAY, TZ);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe("conflito de um horário", () => {
+    const at = (h: string) => new Date(`2026-08-12T${h}:00Z`);
+
+    it("sobreposição conflita; encostar não", async () => {
+      fetchMock.mockImplementation(() => report(ics.UTC_EVENT)); // 17:00–18:00Z
+      expect(await hasIcloudConflict("t1", at("17:30"), at("18:30"), TZ)).toBe(true);
+      expect(await hasIcloudConflict("t1", at("16:30"), at("17:30"), TZ)).toBe(true);
+      expect(await hasIcloudConflict("t1", at("16:00"), at("17:00"), TZ)).toBe(false);
+      expect(await hasIcloudConflict("t1", at("18:00"), at("19:00"), TZ)).toBe(false);
+    });
+
+    it("remarcação ignora o próprio evento do fechai, e só ele", async () => {
+      fetchMock.mockImplementation(() => report(ics.FECHAI_EVENT)); // 14:00–15:00 em Brasília = 17:00–18:00Z
+      expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ)).toBe(true);
+      expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ, "abc123")).toBe(false);
+      expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ, "outra")).toBe(true);
+    });
+
+    it("falha de leitura = null (quem chama não confirma o horário)", async () => {
+      fetchMock.mockReturnValueOnce(reply(500));
+      expect(await hasIcloudConflict("t1", at("17:00"), at("18:00"), TZ)).toBeNull();
+    });
+
+    it("consulta que atravessa a meia-noite local confere os dois dias", async () => {
+      fetchMock.mockImplementation(() => report());
+      // 12/08 23:30 em Brasília até 13/08 00:30
+      await hasIcloudConflict("t1", new Date("2026-08-13T02:30:00Z"), new Date("2026-08-13T03:30:00Z"), TZ);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 });
