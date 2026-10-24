@@ -171,6 +171,10 @@ export const AUDIT_EVENTS = {
   "knowledge.gap_resumed": { label: "Retomou contatos com a resposta aprovada", kind: "update", group: "conhecimento" },
   "knowledge.gap_settings_updated": { label: "Alterou a regra e os avisos das perguntas sem resposta", kind: "update", group: "conhecimento" },
 
+  // Pesquisa de satisfação pós-conversa.
+  "survey.settings_updated": { label: "Alterou a pesquisa de satisfação", kind: "update", group: "conta" },
+  "survey.test_sent": { label: "Enviou um teste da pesquisa de satisfação", kind: "create", group: "conta" },
+
   // ── contatos / agenda ─────────────────────────────────────────────────
   "lead.created": { label: "Cadastrou um contato", kind: "create", group: "contatos" },
   "lead.updated": {

@@ -18,6 +18,8 @@ import { agentRepliesOn, isWhatsappProviderName, setConversationChannel } from "
 import type { IncomingMessage, WhatsAppProvider } from "./provider";
 import { shouldPauseAgentForReaction } from "./reactions";
 import { sendAgentReply } from "./send-agent-reply";
+import { handleSurveyReply } from "@/modules/satisfaction/capture";
+import { isSurveyOutbound } from "@/modules/satisfaction/echo";
 
 export type IncomingWebhookResult = {
   body: Record<string, unknown>;
@@ -179,6 +181,12 @@ export async function processIncomingWhatsapp(
       incoming.fromPhone,
       incoming.fromName,
     );
+    // O que a pesquisa de satisfação envia não é `Message`: sem este
+    // reconhecimento o eco viraria "atendente respondeu pelo celular" e
+    // pausaria o agente.
+    if (await isSurveyOutbound(tenantId, conversation.id, incoming.messageKeyId, incoming.text)) {
+      return ok({ ok: true, silent: "pesquisa de satisfação" });
+    }
     if (!incoming.hasAudio) {
       const recentEcho = await prisma.message.findFirst({
         where: {
@@ -248,6 +256,23 @@ export async function processIncomingWhatsapp(
     : null;
   const userMessage =
     received?.transcript ?? (incoming.hasAudio ? UNTRANSCRIBED_AUDIO : incoming.text);
+  // Resposta à pesquisa de satisfação (nota ou comentário): fica FORA do turno
+  // — sem LLM, sem cota, sem `Message` e sem mexer em `lastInboundAt`. Quem
+  // escreve outra coisa não é capturado e segue o atendimento normal.
+  const survey = await handleSurveyReply({
+    tenantId,
+    conversationId: conversation.id,
+    phone: incoming.fromPhone,
+    externalId: incoming.instanceExternalId,
+    provider,
+    text: userMessage,
+    replyId: incoming.replyId,
+    messageKeyId: incoming.messageKeyId,
+    hasAudio: incoming.hasAudio,
+    audioUrl: received?.audioUrl,
+  });
+  if (survey.handled) return ok({ ok: true, silent: "pesquisa de satisfação" });
+
   // Número só de recebimento (ex.: Meta usada só para Disparos): a mensagem
   // entra em Conversas para a equipe e o agente não é chamado nem cobrado.
   if (!agentRepliesOn(instance)) {

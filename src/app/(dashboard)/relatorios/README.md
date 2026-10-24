@@ -14,6 +14,34 @@ sugeridas para o tráfego. Os números vêm de `loadLeadQuality`
 [`lead-insights/README.md`](../../../modules/lead-insights/README.md). O mesmo
 resumo entra no relatório mensal (bloco + 2ª página do PDF).
 
+### Satisfação (`?visao=satisfacao`, rótulo "Satisfação")
+
+Visão da pesquisa de satisfação pós-conversa (`SatisfactionView`): a
+configuração (ligar, espera, faixa de horas, textos e "enviar teste") fica no
+topo, depois nota média, distribuição, pontos de melhoria e a lista de
+respostas (com filtro por nota e agente, link para a conversa, correção do
+motivo e "marcar como revisada"). Regras, fluxo e exclusões em
+[`satisfaction/README.md`](../../../modules/satisfaction/README.md). Mesmo seletor
+de período das outras visões; `nota` e `agente` filtram só a lista. Notas 1 e 2
+sem revisão também aparecem como alerta no `/inicio`.
+
+**No relatório mensal** a satisfação é `MonthlyReportData.satisfaction?`
+(`monthly-satisfaction.ts`, montada na mesma passada de `evaluateMonthlyMetrics`):
+`sent`, `answered`, `responseRatePercent`, `average` (1 casa), `distribution`
+(soma = `answered`), `improvementTopics` (top 3 por contagem, só chaves de
+`SURVEY_TOPICS`) e `unclassified` (comentários ainda sem motivo, à parte).
+Coorte: **nota pelo mês da nota** (`ratedAt`), envio pelo mês do envio, testes
+fora, escopo de agentes da revisão. É **opcional**: sem envio nem resposta no mês,
+ou em snapshot anterior à pesquisa, o campo não existe e o bloco some. O
+validador bloqueia o fechamento quando a distribuição não soma as respostas, a
+média não bate com ela ou o top 3 tem chave fora do conjunto fechado. Aparece no
+documento (painel e PDF) como sub-bloco de **01 Atendimento** — as seis partes e a
+ordem não mudam — e a média só com 5 ou mais respostas ("amostra pequena" antes
+disso). A IA recebe só números e rótulos (`monthlyAnalysisFacts`). **O texto do
+comentário nunca entra** em `data`, evidência, ferramentas da IA ou PDF
+(`loadMonthlySurveys` o reduz a um booleano no limite da consulta). Testes:
+`tests/pesquisa-satisfacao-relatorio.test.ts`.
+
 ### Relatório mensal v2 (`?visao=mensal`, rótulo "Relatório mensal")
 
 **Contexto de entrada e conversão (01/10/2026).** Atendimento total não é

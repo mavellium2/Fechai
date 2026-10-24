@@ -132,6 +132,8 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
   const reviewed = (r.previousActions ?? []).filter((item) => item.status);
   const actions = r.nextActions ?? [];
   const leads = d.leads;
+  const sat = d.satisfaction;
+  const satReliable = Boolean(sat && !sat.smallSample);
   const { estimatedReturn: er, financialSummary: financial } = monthlyFinancialPresentation(d, r.assumptions);
   const hasLeads = leads.firstDoubts.length > 0 || leads.reasons.length > 0 || shown(leads.outOfArea);
   const role = OWNER_ROLE[r.decisionMakerRole ?? ""];
@@ -198,6 +200,20 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
         ["Ainda sem resposta no fim do mês", valued(s.reception.unanswered)],
       ]} />
         <p className="text-xs text-neutral">Tempo corrido entre a transferência e a primeira resposta humana; sem transferência registrada, usa a última mensagem do contato antes da resposta. Respostas contabilizadas até {s.reception.countedUntil ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: d.meta.timezone }).format(new Date(s.reception.countedUntil)) : `o fim de ${monthName}`} (corte exclusivo). Quem segue sem resposta está fora do numerador e dentro da base das taxas. {s.reception.targetMinutes ? "Meta informada pela clínica." : "Meta da clínica ainda não definida; 1 hora é apenas um indicador de acompanhamento."}</p>
+      </div>}
+      {sat && sat.answered > 0 && <div className="space-y-3 break-inside-avoid">
+        <p className="text-sm font-semibold">Satisfação dos contatos</p>
+        <div className="grid grid-cols-3 gap-3">
+          <Figure value={satReliable && sat.average.value !== null ? sat.average.value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"}
+            label={satReliable ? "nota média, de 1 a 5" : "nota média: amostra pequena"} />
+          <Figure value={formatCount(sat.answered)} label={sat.answered === 1 ? "contato respondeu" : "contatos responderam"} />
+          <Figure value={formatPercent(sat.responseRatePercent)} label={`responderam, de ${formatCount(sat.sent)} que receberam`} />
+        </div>
+        <div className="grid items-start gap-6 sm:grid-cols-2">
+          <Table head={["Nota", "Respostas"]} rows={[5, 4, 3, 2, 1].map((n) => [`${n} ${n === 1 ? "estrela" : "estrelas"}`, formatCount(sat.distribution[n - 1])])} />
+          {sat.improvementTopics.length > 0 && <Table head={["Pontos de melhoria mais citados", "Citações"]} rows={sat.improvementTopics.map((t) => [t.label, formatCount(t.count)])} />}
+        </div>
+        <p className="text-xs text-neutral">Pesquisa enviada depois da conversa a quem conversou de verdade e não passou pela equipe, uma vez a cada 30 dias. Contam as respostas dadas em {monthName}. {satReliable ? "" : "Com menos de 5 respostas a média não é mostrada. "}Os pontos de melhoria agrupam os comentários em motivos fixos; o que cada pessoa escreveu não faz parte deste relatório.</p>
       </div>}
       {split && shown(s.contacts.outside) && <p className="text-xs text-neutral">Os {valued(s.contacts.outside)} contatos com a recepção fechada incluem noites, fins de semana e qualquer horário fora do expediente cadastrado.</p>}
     </Block>

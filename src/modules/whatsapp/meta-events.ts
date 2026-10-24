@@ -35,9 +35,12 @@ function liveMessages(payload: unknown): IncomingMessage[] {
         messageKeyId = text(m.id);
       const hasAudio = m.type === "audio" && Boolean(text(object(m.audio).id));
       const isReaction = m.type === "reaction";
+      // Resposta a lista/botão: o título vira o texto (o resto do fluxo o trata
+      // como mensagem comum) e o id da opção segue à parte.
+      const choice = m.type === "interactive" ? interactiveChoice(m.interactive) : null;
       const content = isReaction
         ? text(object(m.reaction).emoji)
-        : text(object(m.text).body);
+        : choice?.title ?? text(object(m.text).body);
       if (
         !instanceExternalId ||
         !fromPhone ||
@@ -61,10 +64,20 @@ function liveMessages(payload: unknown): IncomingMessage[] {
           isFromMe: false,
           mediaId: text(object(m.audio).id) || undefined,
           occurredAt: timestamp(m.timestamp),
+          ...(choice?.id ? { replyId: choice.id } : {}),
         },
       ];
     });
   });
+}
+
+/** `interactive.list_reply` / `button_reply`: id e título da opção escolhida. */
+function interactiveChoice(raw: unknown): { id: string; title: string } | null {
+  const i = object(raw);
+  const reply = object(i.type === "list_reply" ? i.list_reply : i.type === "button_reply" ? i.button_reply : null);
+  const id = text(reply.id),
+    title = text(reply.title);
+  return id && title ? { id, title } : null;
 }
 
 /** Mensagem nova escrita no celular pela equipe; nunca é fala de um lead. */

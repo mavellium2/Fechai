@@ -2,6 +2,7 @@ import { formatBRL } from "@/lib/format";
 import { leadQualityHeadline } from "@/modules/lead-insights/summary";
 import type { MonthlyReport, SplitCount } from "./monthly";
 import { financialEnabled } from "./monthly-config";
+import type { MonthlySatisfaction } from "./monthly-data";
 import { formatDuration, timeBreakdown, timeHeadline } from "./monthly-time";
 import { ARRIVAL_LABEL, type ArrivalSlot } from "./monthly-operations";
 import { caseFactItems } from "./monthly-case";
@@ -39,6 +40,8 @@ export type ExecutiveSummary = {
   /** Na ordem do modelo: contatos, avaliações agendadas (âncora), comparecimentos, primeira resposta. */
   kpis: ExecutiveKpi[];
   attendance: string[];
+  /** Pesquisa de satisfação (sub-bloco do atendimento): vazio sem respostas no mês. */
+  satisfaction: string[];
   agenda: string[];
   adjustments: string;
   /** Perguntas em que o agente ficou sem resposta, com o mês anterior. */
@@ -103,6 +106,22 @@ export function monthlyIncidents(r: Pick<MonthlyReport, "current" | "assumptions
     out.push(waiting && open ? `${waiting}, e ${open}.` : waiting ? `${waiting}.` : `${count(reception.unanswered, "conversa passada para a recepção seguia", "conversas passadas para a recepção seguiam")} sem resposta no fim do mês.`);
   }
   return out;
+}
+
+/**
+ * As frases da pesquisa de satisfação, só com respostas no mês. A média só
+ * entra com 5 ou mais respostas; antes disso, "amostra pequena". Os motivos
+ * são os do conjunto fechado, nunca o texto de um comentário.
+ */
+export function satisfactionLines(sat: MonthlySatisfaction | undefined): string[] {
+  if (!sat || sat.answered === 0) return [];
+  const rate = sat.responseRatePercent === null ? "" : ` (${n(sat.responseRatePercent)}% dos ${n(sat.sent)} contatos que receberam a pesquisa)`;
+  const head = sat.smallSample || sat.average.value === null
+    ? `${count(sat.answered, "contato respondeu", "contatos responderam")} à pesquisa de satisfação${rate}: amostra pequena para calcular uma média.`
+    : `Nota média ${n(sat.average.value)} de 5, em ${count(sat.answered, "resposta", "respostas")}${rate}.`;
+  const topics = sat.improvementTopics.length
+    ? [`Pontos de melhoria mais citados: ${sat.improvementTopics.map((t) => `${t.label} (${n(t.count)})`).join(", ")}.`] : [];
+  return [head, ...topics];
 }
 
 export function executiveSummary(r: MonthlyReport): ExecutiveSummary {
@@ -208,7 +227,7 @@ export function executiveSummary(r: MonthlyReport): ExecutiveSummary {
 
   const note = (r.limitationsNote ?? "").trim();
   const incidents = monthlyIncidents(r), limitations = (r.limitations ?? []).map((l) => l.text);
-  return { lede, kpis, attendance, agenda, adjustments: r.adjustments, questions, previousActions: r.previousActions ?? [],
+  return { lede, kpis, attendance, satisfaction: satisfactionLines(r.data?.satisfaction), agenda, adjustments: r.adjustments, questions, previousActions: r.previousActions ?? [],
     caseItems: r.caseFacts ? caseFactItems(r.caseFacts) : [], leads, tables,
     unplanned: { note, incidents, limitations, none: !note && !incidents.length && !limitations.length }, financial };
 }
