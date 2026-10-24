@@ -1,8 +1,10 @@
 ﻿import { Building2 } from "lucide-react";
 import { requireSuperadmin } from "@/lib/session";
 import {
+  countHiddenTenants,
   listTenants,
   normalizePageSize,
+  revealsClosedAccounts,
   DEFAULT_TENANT_PAGE_SIZE,
   TENANT_PAGE_SIZES,
 } from "@/modules/admin/service";
@@ -73,6 +75,11 @@ export default async function ContasPage({
   // Lista cheia até o teto escolhido: provavelmente há mais contas depois dele.
   const atLimit = tenants.length === filters.limite;
 
+  // Lista vazia sem filtro pode ser só o padrão escondendo suspensas e encerradas.
+  // Dizer "nenhuma conta ainda" nesse caso seria mentira.
+  const hiddenCount =
+    tenants.length === 0 && !revealsClosedAccounts(filters) ? await countHiddenTenants() : 0;
+
   return (
     <div className="w-full space-y-6">
       <PageHeader
@@ -117,14 +124,18 @@ export default async function ContasPage({
                 ? `Nenhuma conta com “${q}”`
                 : filtering
                   ? "Nenhuma conta com esses filtros"
-                  : "Nenhuma conta ainda"
+                  : hiddenCount > 0
+                    ? "Nenhuma conta ativa para mostrar"
+                    : "Nenhuma conta ainda"
             }
             description={
-              q
-                ? "Confira a grafia ou limpe a busca para ver todas as contas."
-                : filtering
-                  ? "Nenhuma conta combina com o recorte escolhido. Limpe um filtro para ampliar a lista."
-                  : "Crie a primeira conta em “Nova conta” — o tenant, o usuário e a configuração base saem prontos."
+              hiddenCount > 0
+                ? `${q ? "Confira a grafia ou limpe a busca. " : ""}Suspensas e testes encerrados ficam ocultos por padrão — use Filtrar para vê-los.`
+                : q
+                  ? "Confira a grafia ou limpe a busca para ver todas as contas."
+                  : filtering
+                    ? "Nenhuma conta combina com o recorte escolhido. Limpe um filtro para ampliar a lista."
+                    : "Crie a primeira conta em “Nova conta” — o tenant, o usuário e a configuração base saem prontos."
             }
           />
         </div>

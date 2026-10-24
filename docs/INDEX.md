@@ -46,7 +46,6 @@ Ver [CHANGELOG.md](./CHANGELOG.md) para o último milestone concluído.
 - Perguntas sem resposta (P-87): regra "nunca inventar", fila `/perguntas`, aprovação na base, retomada do contato, avisos, máscara LGPD e métricas → [contrato e operação](./P-87-perguntas-sem-resposta.md); [módulo](../src/modules/knowledge-gaps/README.md); decisões em [ADR-004](./decisions/ADR-004-fila-perguntas-sem-resposta.md)
 - Módulo admin → `src/modules/admin/README.md`
 - Laboratório do administrador com banco isolado → [ambiente-de-testes-admin.md](./ambiente-de-testes-admin.md)
-- Módulo feedback → `src/modules/feedback/README.md`
 - Worker de follow-up → `workers/follow-up-worker/README.md`
 - Deploy em produção (Docker, servidor Linux) → [README.docker.md](../README.docker.md)
 

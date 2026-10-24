@@ -50,9 +50,11 @@ texto) vence a genérica — a action sabe mais ("Perfil atualizado.").
   opcionais: `errors` (por campo → "Preencha os campos obrigatórios: nome,
   e-mail.") e `code` (`validation` | `auth` | `forbidden` | `network` |
   `server`, quando a action sabe).
-- **Só sucesso e info somem sozinhos** (4 s / 6 s). Erro, aviso e "carregando"
-  ficam até fechar (X, Esc) ou até nova tentativa — que troca o toast pelo
-  mesmo `id`. O timer pausa com mouse/foco em cima.
+- **Todo retorno finalizado some sozinho em 6 s** (sucesso, info, aviso, erro),
+  com uma barra na base mostrando o tempo que falta. "Carregando" não tem prazo
+  e fica até o resultado. Fechar antes é com X ou Esc; nova tentativa troca o
+  toast pelo mesmo `id` e reinicia a contagem. Mouse ou foco pausam o timer e a
+  barra juntos, retomando do ponto em que pararam.
 - **Nunca expor detalhe técnico**: `sanitizeReason` descarta stack, SQL, códigos
   do Prisma, HTML e textos longos; sobra a frase genérica. Não repasse `error.message`
   cru de exceção — passe por `errorToResult`.

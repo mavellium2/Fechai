@@ -12,7 +12,7 @@ Toast fixo no topo para todo retorno de "salvar" (carregando, sucesso, validaç�
 
 Para usar, saiba:
 - [ ] Form com `useActionState` → `useActionToast`; `fetch`/botão solto → `useSaveFeedback` + `requestSave`.
-- [ ] Só sucesso/info somem sozinhos; erro fica até fechar ou tentar de novo (mesmo `id`).
+- [ ] Todo retorno finalizado (sucesso, erro, aviso, info) some sozinho em 6 s com barra de tempo; mouse/foco pausa. Só "carregando" fica (até o resultado).
 - [ ] Dentro de `<dialog>` modal, mantenha o `FormFeedback` inline (o toast fica `inert`).
 - [ ] Nunca repasse `error.message` cru: use `errorToResult`/`sanitizeReason`.
 - [ ] Guia completo: `src/components/ui/toast/TOASTS.md`. Testes: `tests/toast-feedback.test.ts`.

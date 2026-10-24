@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Working in notificações de salvamento (toast)
 
-Before adding a save/submit screen, read `src/components/ui/toast/TOASTS.md`. Todo retorno de salvar (carregando, sucesso, validação, rede/servidor, sessão expirada, permissão) vai ao topo pelo `ToastProvider` do `PanelShell`: formulário com `useActionState` usa `useActionToast(state, pending, { entity, action, gender })`, envio por `fetch` usa `useSaveFeedback` + `requestSave`. Só sucesso some sozinho; erro fica até fechar ou tentar de novo. Detalhe técnico nunca vai à tela (`sanitizeReason`). Formulário dentro de `<dialog>` modal **mantém o `FormFeedback` inline**, porque o diálogo deixa o toast inalcançável.
+Before adding a save/submit screen, read `src/components/ui/toast/TOASTS.md`. Todo retorno de salvar (carregando, sucesso, validação, rede/servidor, sessão expirada, permissão) vai ao topo pelo `ToastProvider` do `PanelShell`: formulário com `useActionState` usa `useActionToast(state, pending, { entity, action, gender })`, envio por `fetch` usa `useSaveFeedback` + `requestSave`. Todo retorno já finalizado (sucesso, erro, validação, aviso) some sozinho em 6 s, com barra de tempo na base; passar o mouse ou focar pausa a contagem. Só "carregando" fica até o resultado. Detalhe técnico nunca vai à tela (`sanitizeReason`). Formulário dentro de `<dialog>` modal **mantém o `FormFeedback` inline**, porque o diálogo deixa o toast inalcançável.
 
 ## Working in inteligência de conversas (qualidade dos leads, /relatorios?visao=leads)
 

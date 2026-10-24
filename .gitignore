@@ -49,3 +49,6 @@ contas.txt
 
 # PDFs gerados para conferência visual
 /output/pdf/
+
+
+.playwright-mcp

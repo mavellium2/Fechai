@@ -2,6 +2,14 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Sistema de feedback retirado — 2026-10-24
+
+Removidos o módulo `feedback/`, a página `/admin/feedbacks` (e o item de menu),
+o formulário "Enviar feedback" em `/configuracoes` e a ação `markFeedback`.
+Tabela `Feedback` e exportação LGPD mantidas: apagar as mensagens já gravadas
+é decisão separada e irreversível. A entrada `admin.feedback_status` continua no
+registro de auditoria para o histórico antigo ser lido.
+
 ## Simulação da agenda no chat de teste — 2026-10-24
 
 No chat de teste, marcar, remarcar e cancelar consulta só validam e descrevem o que

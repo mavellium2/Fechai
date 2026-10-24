@@ -5,16 +5,17 @@ import { ToastViewport } from "./toast-viewport";
 import type { Toast, ToastInput, ToastKind } from "./types";
 
 /**
- * Duração padrão por tipo. Só o que não exige decisão some sozinho: sucesso e
- * informação. Erro e aviso ficam até a pessoa fechar (ou tentar de novo, que
- * troca o toast pelo mesmo id); "carregando" fica até o resultado chegar.
+ * Duração padrão por tipo. Todo retorno que já terminou some sozinho em 6 s, com
+ * uma barra na base mostrando o tempo que falta. "Carregando" não tem prazo: fica
+ * até o resultado chegar. Erro some também — quem precisa ler com calma passa o
+ * mouse ou põe o foco no aviso, e a contagem pausa.
  */
 export const DEFAULT_DURATION: Record<ToastKind, number | null> = {
   loading: null,
-  success: 4000,
+  success: 6000,
   info: 6000,
-  warning: null,
-  error: null,
+  warning: 6000,
+  error: 6000,
 };
 
 /** No máximo isto na tela; o mais antigo sai. Evita uma pilha que cobre a página. */

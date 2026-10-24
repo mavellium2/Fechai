@@ -18,7 +18,6 @@ import {
   deleteTenant,
 } from "@/modules/admin/service";
 import { strongPassword } from "@/lib/password-schema";
-import { setFeedbackStatus, type FeedbackStatus } from "@/modules/feedback/service";
 import {
   createProvider,
   getActiveModel,
@@ -461,27 +460,6 @@ export async function setTenantEvolutionWhatsappEnabled(
       ? "WhatsApp por QR liberado para esta conta."
       : "WhatsApp por QR desligado. A sessão foi mantida e volta ao reativar.",
   };
-}
-
-export async function markFeedback(feedbackId: string, status: FeedbackStatus) {
-  await requireSuperadmin();
-
-  const before = await prisma.feedback.findUnique({
-    where: { id: feedbackId },
-    select: { status: true, tenantId: true, tenant: { select: { name: true } } },
-  });
-
-  await setFeedbackStatus(feedbackId, status);
-
-  await recordChange({
-    event: "admin.feedback_status",
-    target: { type: "Feedback", id: feedbackId, label: before?.tenant.name ?? null },
-    before: { status: before?.status },
-    after: { status },
-    tenantId: before?.tenantId ?? null,
-  });
-
-  revalidatePath("/admin/feedbacks");
 }
 
 export type CreateAccountResult = {

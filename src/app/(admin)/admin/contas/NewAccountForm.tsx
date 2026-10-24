@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useId, useState } from "react";
+import { startTransition, useActionState, useId, useState } from "react";
 import { useActionToast } from "@/components/ui/toast";
 import { Plus, ShieldAlert, UserRound } from "lucide-react";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { PLANS } from "@/modules/billing/plans";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -136,7 +137,16 @@ function AccountFields({
   const planLabelId = useId();
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form
+      // `action` do React 19 zera os campos ao fim de QUALQUER resultado, erro
+      // incluído, e o `key` só cobre o sucesso. Enviar por `onSubmit` mantém o
+      // que a pessoa digitou quando a criação é recusada.
+      onSubmit={(event) => {
+        event.preventDefault();
+        startTransition(() => formAction(new FormData(event.currentTarget)));
+      }}
+      className="space-y-5"
+    >
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Nome da conta" htmlFor="na-tenant">
           <Input
@@ -221,7 +231,7 @@ function AccountFields({
           name="password"
           type="text"
           autoComplete="new-password"
-          placeholder="mínimo de 6 caracteres"
+          placeholder={`mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
         />
       </Field>
 

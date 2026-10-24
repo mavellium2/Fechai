@@ -114,7 +114,7 @@ describe("announce: o toast de cada etapa", () => {
     const withRetry = sink();
     announceResult(withRetry.api, "t", { entity: "cliente" }, { ok: false, error: "Falhou de novo." }, retry);
     expect(withRetry.shown[0].kind).toBe("error");
-    expect(withRetry.shown[0].duration).toBeUndefined(); // erro herda "fica até fechar"
+    expect(withRetry.shown[0].duration).toBeUndefined(); // erro herda o padrão do tipo (6 s)
     withRetry.shown[0].action?.onClick?.();
     expect(retry).toHaveBeenCalledOnce();
 
