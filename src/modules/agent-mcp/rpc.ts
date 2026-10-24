@@ -1,6 +1,7 @@
 import { rateLimit } from "@/lib/rate-limit";
 import { authenticateMcp, missingScope, type McpAuth, type McpAuthResult } from "./auth";
-import { findMcpTool, McpToolError, MCP_TOOLS } from "./tools";
+import { McpRateLimitedError, McpToolError } from "./errors";
+import { findMcpTool, MCP_TOOLS, READ_ONLY_ANNOTATIONS } from "./tools";
 
 /**
  * JSON-RPC 2.0 mínimo para o transporte "Streamable HTTP" do MCP, no modo sem
@@ -161,7 +162,7 @@ export async function handleMcpPost(request: Request): Promise<Response> {
           capabilities: { tools: { listChanged: false } },
           serverInfo: MCP_SERVER_INFO,
           instructions:
-            "Acesso à configuração dos agentes de UMA conta, definida pelo token. Nenhuma ferramenta aceita o id da conta como argumento.",
+            "Acesso aos agentes de UMA conta, definida pelo token: leitura da configuração e, com a permissão de simulação, conversas de teste que não enviam nada. Nenhuma ferramenta aceita o id da conta como argumento.",
         });
       }
       case "ping":
@@ -172,7 +173,7 @@ export async function handleMcpPost(request: Request): Promise<Response> {
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema,
-            annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+            annotations: tool.annotations ?? READ_ONLY_ANNOTATIONS,
           })),
         });
       case "tools/call":
@@ -208,6 +209,9 @@ async function callTool(id: RpcId, params: unknown, auth: McpAuth): Promise<Resp
   } catch (error) {
     if (error instanceof McpToolError) {
       return rpcResult(id, { content: [{ type: "text", text: error.message }], isError: true });
+    }
+    if (error instanceof McpRateLimitedError) {
+      return rpcError(id, RPC.rateLimited, error.message, 429, { "Retry-After": String(error.retryAfterSeconds) });
     }
     throw error;
   }
