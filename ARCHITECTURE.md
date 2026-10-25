@@ -34,7 +34,7 @@ Todas degradam com graça quando a env não está configurada (respostas canned 
 
 ## Saúde e operação
 
-- `/configuracoes` (dashboard) mostra a saúde da config do tenant (checklist "Sua configuração") + formulário de feedback. A checagem de integrações externas (env vars) não é mais exibida ao tenant — `integrationChecks()` (`src/lib/health.ts`) segue disponível para um eventual painel admin.
+- `/configuracoes` (dashboard) mostra a saúde da config do tenant (checklist "Sua configuração"). A checagem de integrações externas (env vars) não é mais exibida ao tenant — `integrationChecks()` (`src/lib/health.ts`) segue disponível para um eventual painel admin.
 - `GET /api/health` verifica o banco (200/503) para monitoramento de deploy.
 - Tenant `suspended` é bloqueado no layout do dashboard.
 

@@ -8,35 +8,12 @@ import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { strongPassword } from "@/lib/password-schema";
-import { createFeedback } from "@/modules/feedback/service";
 import { ensureAffiliate } from "@/modules/affiliates/service";
 import { getAccountRoles } from "@/modules/affiliates/roles";
 import { recordAudit, recordChange } from "@/modules/audit/log";
 import { getServiceArea, saveServiceArea } from "@/modules/lead-insights/service-area-store";
 
-const schema = z.object({
-  message: z.string().trim().min(3, "Escreva um pouco mais"),
-  rating: z.coerce.number().int().min(1).max(5).optional(),
-});
-
 type Result = { ok: boolean; error?: string; info?: string };
-
-export async function submitFeedback(_prev: Result | null, formData: FormData): Promise<Result> {
-  const tooLarge = payloadTooLarge(formData);
-  if (tooLarge) return { ok: false, error: tooLarge };
-
-  const { tenantId } = await requireTenant();
-  const raw = {
-    message: formData.get("message"),
-    rating: formData.get("rating") || undefined,
-  };
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
-  }
-  await createFeedback(tenantId, parsed.data.message, parsed.data.rating ?? null);
-  return { ok: true, info: "Obrigado pelo feedback!" };
-}
 
 const profileSchema = z.object({
   name: z.string().trim().min(1, "Informe seu nome"),

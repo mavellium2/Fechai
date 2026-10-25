@@ -195,6 +195,16 @@ html {
   }
 }
 
+/* Barra de tempo dos toasts (toast-viewport.tsx): esvazia da direita para a esquerda. */
+@keyframes toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
 /* Reveals de scroll da landing (LandingMotion.tsx). Só escondem quando o JS ativa. */
 [data-animate="on"] .reveal {
   opacity: 0;

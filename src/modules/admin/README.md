@@ -2,7 +2,7 @@
 
 ## O que faz
 
-Gestão da plataforma pelo SUPERADMIN: **criar contas**, listar/inspecionar tenants, suspender/reativar e trocar plano manualmente (suporte). Feedbacks ficam no módulo `feedback/`; a trilha de auditoria (`/admin/logs`, incluindo desfazer alterações e exclusões) fica em `modules/audit/`.
+Gestão da plataforma pelo SUPERADMIN: **criar contas**, listar/inspecionar tenants, suspender/reativar e trocar plano manualmente (suporte). A trilha de auditoria (`/admin/logs`, incluindo desfazer alterações e exclusões) fica em `modules/audit/`.
 
 ## Excluir conta: quem pode ser excluído
 
@@ -11,7 +11,7 @@ Gestão da plataforma pelo SUPERADMIN: **criar contas**, listar/inspecionar tena
 ## Arquivos
 
 - `service.ts`:
-  - `listTenants(search?)` — tenants + status WhatsApp + papéis dos usuários + contagens.
+  - `listTenants(filters)` — tenants + status WhatsApp + papéis dos usuários + contagens. Sem filtro de situação ou de teste, **esconde suspensas e testes encerrados** (`hiddenByDefault`); escolher `status` ou `trial` mostra a lista como o filtro pede. Teste encerrado = plano de teste sem data futura (sem data conta). `countHiddenTenants()` diz quantas o padrão esconde.
   - `getTenantDetail(tenantId)` — usuários, contagens, etc.
   - `setTenantStatus(tenantId, "active"|"suspended")`.
   - `adminSetPlan(tenantId, planKey)`.

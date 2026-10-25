@@ -34,7 +34,7 @@ describe("Liberação administrativa da API oficial da Meta", () => {
   it("ao desabilitar desconecta só a linha Meta, sem tocar na Evolution nem apagar segredos", () => {
     const actions = read("src/app/(admin)/actions.ts");
     const start = actions.indexOf("export async function setTenantMetaWhatsappEnabled");
-    const end = actions.indexOf("export async function markFeedback", start);
+    const end = actions.indexOf("\nexport ", start + 1);
     const body = actions.slice(start, end);
 
     expect(body).toContain('provider: "meta"');
