@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpScope } from "./tokens";
 import { McpToolError } from "./errors";
 import { getAgentConfigForMcp, listAgentsForMcp } from "./read";
+import { createProposal, getProposalStatus, MAX_PROPOSAL_REASON_CHARS, proposeChangeInputSchema } from "./proposals";
 import {
   getSimulation,
   MAX_SIMULATION_MESSAGE_CHARS,
@@ -20,7 +21,12 @@ import {
  * a conta.
  */
 
-export type McpToolContext = { tenantId: string; tokenId: string };
+/**
+ * `scopes` são as permissões do token (a ferramenta já passou pela checagem do
+ * escopo dela). Servem às ferramentas que misturam famílias: simular uma
+ * proposta exige `simulate` E `propose`. Ausente = nenhuma.
+ */
+export type McpToolContext = { tenantId: string; tokenId: string; scopes?: readonly McpScope[] };
 
 export { McpToolError, McpRateLimitedError } from "./errors";
 
@@ -43,6 +49,12 @@ export type McpTool = {
   name: string;
   description: string;
   scope: McpScope;
+  /**
+   * Escopos que o token também precisa ter. `propose_change` exige `read`: a saída
+   * (diff por campo e por linha do prompt) mostra o valor atual do prompt, que é
+   * conteúdo de `read`; sem isto, `propose` leria o prompt inteiro de lado.
+   */
+  alsoScopes?: readonly McpScope[];
   /** Omitido = leitura pura (`READ_ONLY_ANNOTATIONS`). */
   annotations?: McpToolAnnotations;
   /** JSON Schema anunciado em `tools/list`. */
@@ -57,9 +69,13 @@ const runSimulationInput = z
   .object({
     agentId: z.string().trim().min(1).max(64),
     messages: z.array(z.string().trim().min(1).max(MAX_SIMULATION_MESSAGE_CHARS)).min(1).max(MAX_SIMULATION_TURNS),
-    // O enum completo já está na API; "proposal" e "both" chegam na parte C.
     variant: z.enum(SIMULATION_VARIANTS).default("current"),
+    // Obrigatório quando a variante pede a proposta (`proposal`/`both`).
+    proposalId: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/).optional(),
   })
+  .strict();
+const getProposalInput = z
+  .object({ proposalId: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) })
   .strict();
 const getSimulationInput = z
   .object({ simulationId: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/) })
@@ -101,7 +117,8 @@ export const MCP_TOOLS: McpTool[] = [
       `${MAX_SIMULATION_TURNS}, até ${MAX_SIMULATION_MESSAGE_CHARS} caracteres cada). Devolve a resposta do agente e os nomes das ferramentas usadas em cada turno. ` +
       "É teste: nada é enviado por WhatsApp, a agenda real e os calendários conectados não são alterados, não conta na cota de mensagens nem nos relatórios. " +
       "O agente responde mesmo desligado. A conversa fica gravada como teste (aba Testes de /conversas). " +
-      "Por ora só a variante `current` (o agente como está); `proposal` e `both` chegam com a aprovação de propostas. Limite de 30 turnos a cada 10 minutos por token. " +
+      "`variant`: `current` (o agente como está, padrão), `proposal` (o agente com uma proposta pendente aplicada em memória, nada é gravado; exige `proposalId` e as permissões simulate + propose) ou `both` (as duas, cada saída rotulada pela variante; custa o dobro dos turnos). " +
+      "Limite de 30 turnos a cada 10 minutos por token. " +
       "ATENÇÃO: cada mensagem é uma chamada de LLM em sequência, então a chamada pode levar vários minutos e o `simulationId` só volta no fim. Com 10 mensagens, espere a resposta (não desista no timeout); prefira poucas mensagens por chamada (3 a 5).",
     scope: "simulate",
     // Grava uma conversa de teste e custa uma chamada de LLM por turno: não é leitura pura.
@@ -121,7 +138,11 @@ export const MCP_TOOLS: McpTool[] = [
           type: "string",
           enum: [...SIMULATION_VARIANTS],
           default: "current",
-          description: "`current` roda o agente como está. `proposal` e `both` ainda não estão disponíveis.",
+          description: "`current` roda o agente como está; `proposal` roda com a proposta pendente; `both` roda as duas.",
+        },
+        proposalId: {
+          type: "string",
+          description: "Id devolvido por propose_change. Obrigatório com variant `proposal` ou `both`.",
         },
       },
       required: ["agentId", "messages"],
@@ -129,7 +150,10 @@ export const MCP_TOOLS: McpTool[] = [
     },
     input: runSimulationInput,
     run: (ctx, args) =>
-      runSimulation(ctx, args as { agentId: string; messages: string[]; variant: (typeof SIMULATION_VARIANTS)[number] }),
+      runSimulation(
+        ctx,
+        args as { agentId: string; messages: string[]; variant: (typeof SIMULATION_VARIANTS)[number]; proposalId?: string },
+      ),
   },
   {
     name: "get_simulation",
@@ -144,9 +168,73 @@ export const MCP_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     input: getSimulationInput,
-    run: (ctx, args) => getSimulation(ctx.tenantId, args.simulationId as string),
+    run: (ctx, args) =>
+      getSimulation(ctx.tenantId, args.simulationId as string, { includeProposal: ctx.scopes?.includes("propose") === true }),
+  },
+  {
+    name: "propose_change",
+    description:
+      "Propõe uma mudança na persona de um agente (campos de persona e as regras em `avoid`). Exige as permissões propose + read (a resposta mostra o valor atual do prompt). NADA é aplicado: a proposta fica pendente até um superadmin aprovar no painel (link em `approveUrl`), vence em 7 dias e fica desatualizada se o agente mudar antes disso. " +
+      "Devolve o diff por campo e o diff por linha do prompt composto (antes/depois). Use get_proposal para acompanhar e run_simulation com variant `proposal` para testar antes da aprovação. " +
+      "Só os campos presentes em `changes.persona` mudam; os demais ficam como estão.",
+    scope: "propose",
+    alsoScopes: ["read"],
+    // Grava só a fila de propostas; o agente não muda.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string", description: "Id do agente, como devolvido por list_agents." },
+        changes: {
+          type: "object",
+          properties: {
+            persona: {
+              type: "object",
+              description: "Campos de persona a mudar (todos opcionais; texto).",
+              properties: {
+                agentName: { type: "string" },
+                businessName: { type: "string" },
+                sector: { type: "string" },
+                tone: { type: "string" },
+                writingStyle: { type: "string" },
+                offer: { type: "string" },
+                avoid: { type: "string", description: "Regras, uma por linha." },
+                objective: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+        reason: { type: "string", maxLength: MAX_PROPOSAL_REASON_CHARS, description: "Por que a mudança (o superadmin lê ao decidir)." },
+      },
+      required: ["agentId", "changes", "reason"],
+      additionalProperties: false,
+    },
+    input: proposeChangeInputSchema,
+    run: (ctx, args) => createProposal(ctx, args as z.infer<typeof proposeChangeInputSchema>),
+  },
+  {
+    name: "get_proposal",
+    description:
+      "Situação de uma proposta feita por propose_change: pending, applied, rejected, expired ou stale, com quando foi decidida, se foi um superadmin e o motivo da recusa. Só propostas desta conta.",
+    scope: "propose",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string", description: "Id devolvido por propose_change." } },
+      required: ["proposalId"],
+      additionalProperties: false,
+    },
+    input: getProposalInput,
+    run: (ctx, args) => getProposalStatus(ctx.tenantId, args.proposalId as string),
   },
 ];
+
+/** Todos os escopos que a ferramenta exige (o principal e os adicionais). */
+export function toolScopes(tool: Pick<McpTool, "scope" | "alsoScopes">): McpScope[] {
+  return [tool.scope, ...(tool.alsoScopes ?? [])];
+}
 
 export function findMcpTool(name: string): McpTool | undefined {
   return MCP_TOOLS.find((tool) => tool.name === name);

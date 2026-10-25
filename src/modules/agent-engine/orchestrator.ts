@@ -105,8 +105,8 @@ export async function runAgentTurn(input: {
    * ignorado e vale o prompt salvo. Vale só para a parte da persona: horário de
    * hoje, agenda, variáveis, base de conhecimento e a proteção contra injeção
    * continuam sendo montados pelo orquestrador. Nenhum canal com contato real
-   * (WhatsApp, widget) passa isto, e hoje nenhum chamador o liga: existe para a
-   * variante "proposta" da simulação pelo MCP.
+   * (WhatsApp, widget) passa isto: o único chamador é a variante "proposta" da
+   * simulação pelo MCP (`agent-mcp/simulate.ts`).
    */
   systemPromptOverride?: string;
 }): Promise<AgentTurn> {

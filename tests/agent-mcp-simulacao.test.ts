@@ -73,6 +73,9 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rate, rateLimitReserve: mocks.reserve }));
+// A auditoria puxa a sessão (next-auth), que não é o assunto aqui.
+vi.mock("@/modules/audit/log", () => ({ recordAudit: vi.fn(async () => {}), recordChange: vi.fn(async () => {}) }));
+vi.mock("@/lib/app-url", () => ({ appBaseUrl: vi.fn(async () => "https://fechai.test") }));
 
 // O turno: o real por padrão (camada 2), trocado por um controlável na camada 1.
 vi.mock("@/modules/agent-engine/orchestrator", async (importOriginal) => {
@@ -244,21 +247,17 @@ beforeEach(async () => {
 });
 
 describe("escopo simulate", () => {
-  it("passa a ser emitível, junto de read; propose continua de fora", () => {
-    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read", "simulate"]);
+  it("é emitível, junto de read (e de propose, liberado na parte C)", () => {
+    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read", "simulate", "propose"]);
     expect(validateIssueInput({ label: "x", scopes: ["simulate"] })).toMatchObject({ ok: true, scopes: ["simulate"] });
     expect(validateIssueInput({ label: "x", scopes: ["read", "simulate"] })).toMatchObject({ ok: true });
-    for (const scopes of [["propose"], ["read", "propose"], ["simulate", "propose"]]) {
-      const valid = validateIssueInput({ label: "x", scopes });
-      expect(valid.ok).toBe(false);
-      if (!valid.ok) expect(valid.error).toMatch(/ainda não pode ser emitida/);
-    }
+    expect(validateIssueInput({ label: "x", scopes: ["simulate", "propose"] })).toMatchObject({ ok: true });
   });
 
-  it("a tela de admin habilita o checkbox de simulação e mantém propose desabilitado", () => {
+  it("a tela de admin habilita os checkboxes de simulação e de proposta", () => {
     const source = readFileSync(path.join(ROOT, "src/app/(admin)/admin/agentes/mcp/McpTokenIssuer.tsx"), "utf8");
     expect(source).toMatch(/value: "simulate"[^}]*available: true/);
-    expect(source).toMatch(/value: "propose"[^}]*available: false/);
+    expect(source).toMatch(/value: "propose"[^}]*available: true/);
     expect(source).toMatch(/value: "read"[^}]*available: true/);
   });
 
@@ -397,11 +396,11 @@ describe("run_simulation: o que o turno recebe", () => {
 });
 
 describe("run_simulation: variantes e limites de entrada", () => {
-  it.each(["proposal", "both"])("variant %s é aceita no esquema e recusada com a mensagem de disponibilidade", async (variant) => {
+  it.each(["proposal", "both"])("variant %s sem proposalId é recusada (a parte C detalha as demais regras)", async (variant) => {
     const body = await json(await call(toolCall("run_simulation", { agentId: AGENT_A, messages: ["Oi"], variant })));
     expect(body.error).toBeUndefined();
     expect(body.result.isError).toBe(true);
-    expect(body.result.content[0].text).toBe("Variante disponível após a aprovação de propostas.");
+    expect(body.result.content[0].text).toMatch(/proposalId/);
     // Recusada antes de qualquer custo.
     expect(mocks.runTurn).not.toHaveBeenCalled();
     expect(mocks.leadCreate).not.toHaveBeenCalled();

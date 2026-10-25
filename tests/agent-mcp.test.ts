@@ -42,6 +42,9 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rate }));
+// A auditoria puxa a sessão (next-auth), que não é o assunto aqui.
+vi.mock("@/modules/audit/log", () => ({ recordAudit: vi.fn(async () => {}), recordChange: vi.fn(async () => {}) }));
+vi.mock("@/lib/app-url", () => ({ appBaseUrl: vi.fn(async () => "https://fechai.test") }));
 
 import { POST, GET } from "@/app/api/mcp/route";
 import {
@@ -180,10 +183,20 @@ describe("Autenticação da rota MCP", () => {
   });
 
   it("tools/list só mostra o que o escopo permite", async () => {
-    // `propose` ainda não tem ferramenta (parte C): lista vazia.
+    // `propose` sozinho (parte C): só get_proposal; propose_change exige `read` também.
     mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["propose"] }));
     const body = await json(await call(rpc("tools/list")));
-    expect(body.result.tools).toEqual([]);
+    expect(body.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(["get_proposal"]);
+
+    // `propose` + `read`: as duas de proposta, mais a leitura.
+    mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["read", "propose"] }));
+    const both = await json(await call(rpc("tools/list")));
+    expect(both.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual([
+      "get_agent_config",
+      "get_proposal",
+      "list_agents",
+      "propose_change",
+    ]);
 
     // `simulate` (parte B) vê só as de simulação, nunca as de leitura.
     mocks.tokenFindUnique.mockResolvedValue(tokenRow({ scopes: ["simulate"] }));
@@ -503,22 +516,17 @@ describe("Tokens: emissão, listagem e revogação", () => {
     expect(mocks.tokenCreate).not.toHaveBeenCalled();
   });
 
-  it("`read` e `simulate` são emitíveis; propose existe no schema mas é recusado na emissão", async () => {
-    // A parte B liberou `simulate` (tem ferramenta: run_simulation/get_simulation).
-    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read", "simulate"]);
-    // A lista de escopos conhecidos (parte C) continua com os três.
+  it("os três escopos são emitíveis; escopo que não existe é recusado", async () => {
+    // A parte B liberou `simulate`; a parte C liberou `propose` (propose_change/get_proposal).
+    expect([...EMITTABLE_MCP_SCOPES]).toEqual(["read", "simulate", "propose"]);
     expect([...MCP_SCOPES]).toEqual(["read", "simulate", "propose"]);
 
-    for (const scopes of [["propose"], ["read", "propose"], ["simulate", "propose"], ["read", "simulate", "propose"]]) {
-      const valid = validateIssueInput({ label: "x", scopes });
-      expect(valid.ok).toBe(false);
-      if (!valid.ok) expect(valid.error).toMatch(/ainda não pode ser emitida/);
-      const result = await issueMcpToken({ tenantId: "t", label: "x", scopes });
-      expect(result.ok).toBe(false);
-    }
+    expect(validateIssueInput({ label: "x", scopes: ["read", "simulate", "propose"] })).toMatchObject({ ok: true });
     // Escopo que nem existe segue com a mensagem própria.
     const unknown = validateIssueInput({ label: "x", scopes: ["admin"] });
     expect(unknown.ok === false && unknown.error).toBe("Permissão desconhecida.");
+    const refused = await issueMcpToken({ tenantId: "t", label: "x", scopes: ["admin"] });
+    expect(refused.ok).toBe(false);
     expect(mocks.tokenCreate).not.toHaveBeenCalled();
 
     expect(validateIssueInput({ label: "x", scopes: ["read"] })).toMatchObject({ ok: true, scopes: ["read"] });

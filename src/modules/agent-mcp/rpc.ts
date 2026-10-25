@@ -1,7 +1,7 @@
 import { rateLimit } from "@/lib/rate-limit";
-import { authenticateMcp, missingScope, type McpAuth, type McpAuthResult } from "./auth";
+import { authenticateMcp, missingScopes, type McpAuth, type McpAuthResult } from "./auth";
 import { McpRateLimitedError, McpToolError } from "./errors";
-import { findMcpTool, MCP_TOOLS, READ_ONLY_ANNOTATIONS } from "./tools";
+import { findMcpTool, MCP_TOOLS, READ_ONLY_ANNOTATIONS, toolScopes } from "./tools";
 
 /**
  * JSON-RPC 2.0 mínimo para o transporte "Streamable HTTP" do MCP, no modo sem
@@ -162,14 +162,14 @@ export async function handleMcpPost(request: Request): Promise<Response> {
           capabilities: { tools: { listChanged: false } },
           serverInfo: MCP_SERVER_INFO,
           instructions:
-            "Acesso aos agentes de UMA conta, definida pelo token: leitura da configuração e, com a permissão de simulação, conversas de teste que não enviam nada. Nenhuma ferramenta aceita o id da conta como argumento.",
+            "Acesso aos agentes de UMA conta, definida pelo token: leitura da configuração, conversas de teste que não enviam nada (simulação) e propostas de mudança que só valem depois da aprovação de um superadmin. Nenhuma ferramenta altera o agente nem aceita o id da conta como argumento.",
         });
       }
       case "ping":
         return rpcResult(id, {});
       case "tools/list":
         return rpcResult(id, {
-          tools: MCP_TOOLS.filter((tool) => !missingScope(auth, tool.scope)).map((tool) => ({
+          tools: MCP_TOOLS.filter((tool) => !missingScopes(auth, toolScopes(tool))).map((tool) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema,
@@ -195,7 +195,7 @@ async function callTool(id: RpcId, params: unknown, auth: McpAuth): Promise<Resp
   const tool = findMcpTool(params.name);
   if (!tool) return rpcError(id, RPC.invalidParams, `Ferramenta desconhecida: ${params.name}`, 200);
 
-  const denied = missingScope(auth, tool.scope);
+  const denied = missingScopes(auth, toolScopes(tool));
   if (denied) return rpcError(id, RPC.forbidden, denied.message, 403);
 
   const parsed = tool.input.safeParse(params.arguments ?? {});
@@ -204,7 +204,7 @@ async function callTool(id: RpcId, params: unknown, auth: McpAuth): Promise<Resp
   }
 
   try {
-    const output = await tool.run({ tenantId: auth.tenantId, tokenId: auth.tokenId }, parsed.data);
+    const output = await tool.run({ tenantId: auth.tenantId, tokenId: auth.tokenId, scopes: auth.scopes }, parsed.data);
     return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(output) }], isError: false });
   } catch (error) {
     if (error instanceof McpToolError) {

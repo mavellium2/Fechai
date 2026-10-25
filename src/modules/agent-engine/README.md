@@ -213,8 +213,44 @@ o webhook/worker.
 persona (o prompt salvo do agente) **naquele turno**, sem gravar nada no agente.
 Vazio ou só espaços é ignorado e vale o prompt salvo; ausente, nada muda. Horário,
 agenda, variáveis, base de conhecimento e a proteção contra injeção continuam
-sendo montados pelo orquestrador. Nenhum canal com contato real passa isso, e hoje
-nenhum chamador o liga: existe para a variante "proposta" da simulação (parte C).
+sendo montados pelo orquestrador. Nenhum canal com contato real passa isso: o único
+chamador é a variante `proposal` (e `both`) de `run_simulation`, que passa o prompt
+da proposta pendente (parte C).
+
+#### Persona e regras: `applyPersonaAnswers` e as propostas do MCP
+
+`savePersona` e `saveRules` (`app/(dashboard)/agentes/actions.ts`) só validam o
+formulário e chamam `applyPersonaAnswers(tenantId, agentId, answers, actor)`
+(`agent-engine/persona-apply.ts`), que compõe o prompt (`composeSystemPrompt`),
+grava e audita. Os schemas (`personaSchema`, `rulesSchema`) moram no mesmo
+arquivo. Comportamento do painel, que o núcleo preserva:
+
+- Só `avoid` nas respostas = "salvar regras": grava `systemPrompt` e `personaDraft`,
+  não mexe em nome nem objetivo, evento `agent.rules_updated`.
+- Qualquer outro campo = "salvar persona": o nome na lista (`agentName || nome atual`),
+  o objetivo, o prompt e o rascunho acompanham; o `avoid` já salvo é mantido;
+  evento `agent.persona_updated`.
+- Campo ausente mantém o que o rascunho já tinha. `actor: null` deixa a auditoria
+  resolver quem agiu pela sessão (painel, com personificação).
+- `options.tx` (cliente de uma `$transaction` interativa do chamador) faz a leitura
+  e a gravação do agente entrarem na transação dele; nesse caso a auditoria **não**
+  sai na função: o resultado traz `audit()` para o chamador chamar depois do commit.
+  Sem `tx` (painel) nada muda: audita ao fim, como antes.
+
+O segundo chamador é a **aprovação de proposta do MCP**
+(`agent-mcp/proposal-decision.ts`, só depois de `requireSuperadmin`). Nenhuma
+ferramenta MCP chama `applyPersonaAnswers` nem faz `update` em `Agent`: o MCP só
+cria uma `AgentChangeProposal` `pending`; um superadmin vê o diff e aprova ou
+recusa em `/admin/agentes/propostas/[id]`. Ao aprovar, a proposta é reivindicada
+com `updateMany where { id, tenantId, status: "pending" }`, e o `baseHash` (nome,
+prompt, objetivo e as oito respostas) é conferido: **`stale`** = o agente mudou
+desde a proposta (nada é gravado; peça outra); **`expired`** = passou de 7 dias.
+Com `expectedBaseHash`, a gravação leva `updatedAt` na condição para uma edição no
+meio do caminho não ser sobrescrita. Detalhes e erros em `agent-mcp/README.md`,
+seção "Propostas de mudança". Só a aprovação usa `options.tx` (claim e gravação na
+mesma `$transaction`); o painel não abre transação. Riscos de teste (mocks do `tx`,
+concorrência provada só pelo Postgres) estão em `agent-mcp/README.md`, "Riscos
+conhecidos".
 
 ### Resposta manual e humano assumindo a conversa (`sendManualReply`, `agentPaused`)
 
