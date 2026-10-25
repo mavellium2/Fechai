@@ -2,6 +2,40 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Propostas de alteração do agente pelo MCP, parte C — 2026-10-24
+
+Escopo `propose` (emitível em `/admin/agentes/mcp`): `propose_change` registra uma
+proposta de mudança na persona do agente (campos e regras em `avoid`), com diff por
+campo e por linha do prompt, e devolve o link de aprovação; `get_proposal` mostra a
+situação. Nada é aplicado pelo MCP: a proposta fica `pending` até o superadmin
+decidir em `/admin/agentes/propostas/[id]`, que mostra o diff e o prompt linha a
+linha. **Aprovar** grava o agente e fecha a proposta na mesma transação (com
+`via: mcp` na auditoria); **recusar** exige motivo e não muda o agente. Situações:
+pendente, aplicada, recusada, vencida (7 dias) e desatualizada (o agente mudou desde
+a proposta). Simular a proposta com `run_simulation` (`variant` `proposal`) exige
+`simulate` e `propose`. A gravação de persona e regras do painel passou para
+`applyPersonaAnswers` (`agent-engine/persona-apply.ts`), o mesmo núcleo da aprovação,
+sem mudar o comportamento. Sem lista de propostas no admin e sem aviso ao superadmin:
+a entrada é o link devolvido pela ferramenta e o evento `agent.change_proposed` em
+`/admin/logs`. Schema novo (`AgentChangeProposal`): `db push` + `generate` nos dois
+processos (web e worker). Testes: `tests/agent-mcp-propostas.test.ts`, com banco em
+memória; concorrência, `count` e rollback reais ainda não têm teste de integração.
+Card cmvml66o1000k01nx6krbddhi. Módulo:
+[agent-mcp](../src/modules/agent-mcp/README.md).
+
+## Simulação de conversa pelo MCP, parte B — 2026-10-24
+
+Escopo `simulate` passa a ser emitível em `/admin/agentes/mcp` (sem variável nova).
+`run_simulation` roda o mesmo motor do chat de teste (`runAgentTurn`, com cota,
+agente desligado e agenda em simulação) numa conversa nova `isTest`, com telefone
+sintético `mcp:`; `get_simulation` relê o transcript mascarado. Nada sai pelo
+WhatsApp, não entra na cota nem nos relatórios. Limite de 30 turnos a cada 10
+minutos por token (sem Redis, libera). Só a variante `current`; `proposal` e
+`both` ficam para a parte C. A chamada pode levar vários minutos. Sem schema novo
+nesta parte. Testes: `tests/agent-mcp-simulacao.test.ts` e
+`tests/rate-limit-reserve.test.ts`. Card cmvml66jc000i01nxzn09h94r. Módulo:
+[agent-mcp](../src/modules/agent-mcp/README.md).
+
 ## Acesso MCP do agente, parte A (leitura da configuração) — 2026-10-24
 
 Servidor MCP em `POST /api/mcp` para uma ferramenta externa ler a configuração dos

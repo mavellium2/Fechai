@@ -18,6 +18,11 @@ export type RateLimitResult = {
 
 const ALLOWED: RateLimitResult = { allowed: true, retryAfterSeconds: 0 };
 
+function counterKey(scope: string, subject: string): string {
+  const digest = createHash("sha256").update(subject).digest("base64url").slice(0, 24);
+  return `rl:${scope}:${digest}`;
+}
+
 /**
  * `scope` separa os contadores (ex.: "reset:ip" e "reset:email") e `subject` é
  * quem está sendo contado. O subject é hasheado: e-mail em claro numa chave do
@@ -29,8 +34,7 @@ export async function rateLimit(
   limit: number,
   windowSeconds: number,
 ): Promise<RateLimitResult> {
-  const digest = createHash("sha256").update(subject).digest("base64url").slice(0, 24);
-  const key = `rl:${scope}:${digest}`;
+  const key = counterKey(scope, subject);
 
   try {
     const count = await redis.incr(key);
@@ -42,6 +46,38 @@ export async function rateLimit(
   } catch (error) {
     // Mesma escolha do freio de login: cache fora do ar não pode virar
     // indisponibilidade do produto.
+    console.error(`[rate-limit] Redis indisponível em "${scope}" — liberando:`, error);
+    return ALLOWED;
+  }
+}
+
+/**
+ * Reserva `amount` unidades de uma vez (quem gasta de N em N, como as
+ * simulações do MCP, que custam uma chamada de LLM por mensagem). Usa o MESMO
+ * contador de `rateLimit`, mas, se o pedido não cabe, devolve as `amount`
+ * unidades antes de responder: o saldo parcial que sobrou continua disponível
+ * para um pedido menor, em vez de ser queimado por um pedido que foi recusado.
+ * Tudo ou nada: nunca reserva só uma parte do pedido. Com Redis fora do ar,
+ * libera (mesma escolha de `rateLimit`).
+ */
+export async function rateLimitReserve(
+  scope: string,
+  subject: string,
+  limit: number,
+  windowSeconds: number,
+  amount: number,
+): Promise<RateLimitResult> {
+  const key = counterKey(scope, subject);
+
+  try {
+    const count = await redis.incrby(key, amount);
+    if (count === amount) await redis.expire(key, windowSeconds);
+    if (count <= limit) return ALLOWED;
+
+    await redis.decrby(key, amount);
+    const ttl = await redis.ttl(key);
+    return { allowed: false, retryAfterSeconds: ttl > 0 ? ttl : windowSeconds };
+  } catch (error) {
     console.error(`[rate-limit] Redis indisponível em "${scope}" — liberando:`, error);
     return ALLOWED;
   }

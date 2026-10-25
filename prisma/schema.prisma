@@ -156,6 +156,7 @@ model Tenant {
   referral         Referral?
   auditLogs        AuditLog[]
   mcpTokens        McpToken[]
+  agentChangeProposals AgentChangeProposal[]
   broadcasts       BroadcastCampaign[]
   broadcastReceipts BroadcastReceipt[]
   monthlyRoiReports MonthlyRoiReport[]
@@ -758,6 +759,7 @@ model Agent {
   actions       TenantAction[]
   conversations Conversation[]
   appointments  Appointment[]
+  changeProposals AgentChangeProposal[]
 
   @@index([tenantId])
 }
@@ -1947,4 +1949,37 @@ model McpToken {
   lastUsedAt   DateTime?
 
   @@index([tenantId])
+}
+
+/// Proposta de mudança no agente feita pelo MCP (escopo `propose`). NADA é
+/// aplicado por quem propõe: a linha nasce `pending` e só um superadmin, em
+/// /admin/agentes/propostas/[id], a aplica (`applied`) ou recusa (`rejected`).
+/// `stale` = o agente mudou depois da proposta (`baseHash` não bate mais);
+/// `expired` = passou de `expiresAt` sem decisão. `before`/`after` guardam só os
+/// campos de persona que mudam, mais o prompt composto. Nunca guarda o token.
+model AgentChangeProposal {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentId       String
+  agent         Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// Token que propôs (id, não o segredo). Sem relação: a proposta sobrevive à revogação.
+  tokenId       String
+  /// pending | applied | rejected | expired | stale
+  status        String    @default("pending")
+  reason        String    @default("") @db.Text
+  before        Json
+  after         Json
+  /// Hash dos campos de persona e regras do agente quando a proposta foi feita.
+  baseHash      String
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  decidedById   String?
+  decidedByEmail String?
+  decidedAt     DateTime?
+  appliedAt     DateTime?
+  rejectReason  String?   @db.Text
+
+  @@index([tenantId, status])
+  @@index([agentId])
 }

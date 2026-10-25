@@ -99,6 +99,16 @@ export async function runAgentTurn(input: {
    * pelo chat de teste; ver `ToolContext.dryRun`.
    */
   dryRunScheduling?: boolean;
+  /**
+   * SÓ DE TESTE (simulação). Troca o prompt do agente por este texto neste turno,
+   * sem gravar nada no agente. Usado quando vier preenchido; vazio ou só espaços é
+   * ignorado e vale o prompt salvo. Vale só para a parte da persona: horário de
+   * hoje, agenda, variáveis, base de conhecimento e a proteção contra injeção
+   * continuam sendo montados pelo orquestrador. Nenhum canal com contato real
+   * (WhatsApp, widget) passa isto: o único chamador é a variante "proposta" da
+   * simulação pelo MCP (`agent-mcp/simulate.ts`).
+   */
+  systemPromptOverride?: string;
 }): Promise<AgentTurn> {
   const { tenantId, conversationId, leadId, userMessage } = input;
 
@@ -219,8 +229,9 @@ export async function runAgentTurn(input: {
       })
     : {};
 
+  const personaPrompt = input.systemPromptOverride?.trim() || agent?.systemPrompt || DEFAULT_SYSTEM;
   const systemPrompt = [
-    agent?.systemPrompt || DEFAULT_SYSTEM,
+    personaPrompt,
     input.incomingWasAudio && agent?.speakReplies && agent.voiceId && agent.voicePrompt.trim()
       ? `Ao formular a resposta que será falada, siga estas instruções de estilo de fala do dono da conta. Preserve fatos, horários, valores e o resultado das ferramentas:\n${agent.voicePrompt.trim()}`
       : "",

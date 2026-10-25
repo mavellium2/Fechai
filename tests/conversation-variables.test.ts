@@ -15,6 +15,7 @@ import {
   rememberConversationVariables,
   validateVariableDefinitions,
   variablesSystemContext,
+  withContactDefaults,
 } from "@/modules/agent-engine/variables";
 import { getToolSchemas, runToolHandler } from "@/modules/agent-engine/tools";
 
@@ -132,5 +133,33 @@ describe("valores por conversa", () => {
     expect(db.lead.updateMany).toHaveBeenCalledWith({
       where: { tenantId: "tenant-1", conversation: { id: "conv-1" } }, data: { name: "Maria" },
     });
+  });
+});
+
+describe("{{numero}} e telefone sintético", () => {
+  const saved = { nome: "Alcides", numero: "lixo" };
+
+  it("telefone real vira {{numero}}", () => {
+    expect(withContactDefaults({ nome: "Alcides" }, { name: null, phone: "5514999999999" }))
+      .toEqual({ nome: "Alcides", numero: "5514999999999" });
+  });
+
+  it("simulação do MCP (mcp:) não grava numero e apaga o que já estava lá", () => {
+    const phone = "mcp:agent-1:0b6f6c1e-3a4d-4a52-9c9e-2f2c3a1b7d10";
+    expect(withContactDefaults({ nome: "Alcides" }, { name: null, phone })).toEqual({ nome: "Alcides" });
+    expect(withContactDefaults(saved, { name: null, phone })).toEqual({ nome: "Alcides" });
+  });
+
+  it("chat de teste (sandbox) segue igual: sem numero", () => {
+    expect(withContactDefaults(saved, { name: null, phone: "sandbox" })).toEqual({ nome: "Alcides" });
+    expect(withContactDefaults(saved, { name: null, phone: "sandbox:agent-1" })).toEqual({ nome: "Alcides" });
+  });
+
+  it("loadConversationVariables devolve ao prompt sem o numero sintético já gravado", async () => {
+    db.conversation.findFirst.mockResolvedValue({
+      variables: { nome: "Alcides", numero: "mcp:agent-1:abc" },
+      lead: { name: null, phone: "mcp:agent-1:abc" },
+    });
+    expect(await loadConversationVariables("tenant-1", "conv-1")).toEqual({ nome: "Alcides" });
   });
 });

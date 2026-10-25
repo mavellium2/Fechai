@@ -126,8 +126,8 @@ export function LeadPanel({ conversation }: { conversation: LeadPanelData }) {
             <span className="sr-only">(abre em nova aba)</span>
           </ButtonLink>
         ) : (
-          // O lead do sandbox tem telefone literal "sandbox": não há número para
-          // abrir. Dizer isso é melhor do que oferecer um link quebrado.
+          // O lead de teste (sandbox ou simulação do MCP) tem telefone sintético:
+          // não há número para abrir. Dizer isso é melhor do que oferecer um link quebrado.
           <p className="text-xs leading-relaxed text-white/50">
             Esta é a conversa de teste do sandbox — não há número de WhatsApp para responder.
           </p>
