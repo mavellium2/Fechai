@@ -13,10 +13,10 @@ import { issueMcpTokenAction, type IssueMcpTokenActionResult } from "./actions";
 
 type TenantOption = { id: string; name: string };
 
-/** Só `read` funciona nesta etapa; as outras já existem no schema. */
+/** `read` e `simulate` funcionam; `propose` (parte C) já existe no schema. Espelha `EMITTABLE_MCP_SCOPES`. */
 const SCOPE_OPTIONS = [
   { value: "read", label: "Ler a configuração do agente", available: true },
-  { value: "simulate", label: "Simular conversas (em breve)", available: false },
+  { value: "simulate", label: "Simular conversas (sem enviar nada)", available: true },
   { value: "propose", label: "Propor mudanças (em breve)", available: false },
 ] as const;
 

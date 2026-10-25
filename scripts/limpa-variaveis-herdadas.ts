@@ -27,7 +27,7 @@
  * Idempotente: rodar de novo não muda nada.
  */
 import { prisma } from "../src/lib/prisma";
-import { isSandboxPhone } from "../src/lib/format";
+import { isSyntheticPhone } from "../src/lib/format";
 import { parseConversationVariables } from "../src/modules/agent-engine/variables";
 
 async function main() {
@@ -47,9 +47,9 @@ async function main() {
     const values = parseConversationVariables(conversation.variables);
     const next = { ...values };
 
-    if (values.numero && isSandboxPhone(values.numero)) delete next.numero;
+    if (values.numero && isSyntheticPhone(values.numero)) delete next.numero;
 
-    const ehTeste = conversation.isTest || isSandboxPhone(conversation.lead.phone);
+    const ehTeste = conversation.isTest || isSyntheticPhone(conversation.lead.phone);
     if (ehTeste && values.nome && values.nome === conversation.lead.name?.trim()) delete next.nome;
 
     if (Object.keys(next).length === Object.keys(values).length) continue;

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isSandboxPhone } from "@/lib/format";
+import { isSyntheticPhone } from "@/lib/format";
 import { allVariableDefinitions, DEFAULT_VARIABLES, MAX_CUSTOM_VARIABLES, type ConversationVariables, type VariableDefinition } from "./variable-definitions";
 
 export { allVariableDefinitions, DEFAULT_VARIABLES, MAX_CUSTOM_VARIABLES } from "./variable-definitions";
@@ -53,7 +53,7 @@ export function parseConversationVariables(raw: unknown): ConversationVariables 
  * faria a tela afirmar que o contato informou um nome que ele nunca disse.
  * Quem grava {{nome}} é `remember_variables`, quando a pessoa realmente diz.
  *
- * O chat de teste não tem telefone (`sandbox:<agentId>` é sintético), então
+ * O chat de teste não tem telefone (`sandbox:<agentId>` e `mcp:<agentId>:<id>` são sintéticos), então
  * nem {{numero}} nasce preenchido lá: o teste começa com tudo em branco, que é
  * o que o dono precisa ver para avaliar o agente.
  *
@@ -69,7 +69,7 @@ export function withContactDefaults(values: ConversationVariables, lead: { name:
   // descartada em vez de mantida porque conversas de teste criadas antes desta
   // regra têm "sandbox" gravado em `Conversation.variables`, e um default novo
   // não apaga o que o antigo escreveu.
-  if (!phone || isSandboxPhone(phone)) {
+  if (!phone || isSyntheticPhone(phone)) {
     const rest = { ...values };
     delete rest.numero;
     return rest;

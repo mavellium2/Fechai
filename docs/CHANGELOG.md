@@ -2,6 +2,19 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Simulação de conversa pelo MCP, parte B — 2026-10-24
+
+Escopo `simulate` passa a ser emitível em `/admin/agentes/mcp` (sem variável nova).
+`run_simulation` roda o mesmo motor do chat de teste (`runAgentTurn`, com cota,
+agente desligado e agenda em simulação) numa conversa nova `isTest`, com telefone
+sintético `mcp:`; `get_simulation` relê o transcript mascarado. Nada sai pelo
+WhatsApp, não entra na cota nem nos relatórios. Limite de 30 turnos a cada 10
+minutos por token (sem Redis, libera). Só a variante `current`; `proposal` e
+`both` ficam para a parte C. A chamada pode levar vários minutos. Sem schema novo
+nesta parte. Testes: `tests/agent-mcp-simulacao.test.ts` e
+`tests/rate-limit-reserve.test.ts`. Card cmvml66jc000i01nxzn09h94r. Módulo:
+[agent-mcp](../src/modules/agent-mcp/README.md).
+
 ## Acesso MCP do agente, parte A (leitura da configuração) — 2026-10-24
 
 Servidor MCP em `POST /api/mcp` para uma ferramenta externa ler a configuração dos

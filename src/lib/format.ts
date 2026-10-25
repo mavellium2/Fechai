@@ -115,18 +115,19 @@ export function samePanelDay(a: Date, b: Date) {
 }
 
 /**
- * O chat de teste cria um lead com telefone sintético — "sandbox" nas contas
- * antigas, "sandbox:<agentId>" desde que o teste passou a ser por agente (ver
- * `api/sandbox/route.ts`). Nenhum dos dois é um número: não dá para ligar nem
- * abrir no WhatsApp, e a interface precisa saber antes de oferecer a ação.
+ * Telefone sintético: não é número de ninguém. O chat de teste cria um lead com
+ * "sandbox" (contas antigas) ou "sandbox:<agentId>" (teste por agente, ver
+ * `api/sandbox/route.ts`), e a simulação do MCP usa "mcp:<agentId>:<id>" (ver
+ * `agent-mcp/simulate.ts`). Nenhum dá para ligar nem abrir no WhatsApp, e a
+ * interface e o prompt precisam saber antes de oferecer a ação ou de expor a string.
  */
-export function isSandboxPhone(phone: string) {
-  return phone === "sandbox" || phone.startsWith("sandbox:");
+export function isSyntheticPhone(phone: string) {
+  return phone === "sandbox" || phone.startsWith("sandbox:") || phone.startsWith("mcp:");
 }
 
 /** Telefone formatado para leitura: "(11) 98765-4321" quando reconhecível. */
 export function phoneLabel(phone: string) {
-  if (isSandboxPhone(phone)) return "teste no sandbox";
+  if (isSyntheticPhone(phone)) return "teste no sandbox";
   const digits = phone.replace(/\D/g, "");
   const local = digits.startsWith("55") ? digits.slice(2) : digits;
   if (local.length === 11) return `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
@@ -136,7 +137,7 @@ export function phoneLabel(phone: string) {
 
 /** Link de conversa direta no WhatsApp, ou `null` quando não há número real. */
 export function waLink(phone: string) {
-  if (isSandboxPhone(phone)) return null;
+  if (isSyntheticPhone(phone)) return null;
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 10) return null;
   return `https://wa.me/${digits}`;
