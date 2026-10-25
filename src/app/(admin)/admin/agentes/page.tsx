@@ -1,4 +1,5 @@
-﻿import { Bot } from "lucide-react";
+﻿import { Bot, KeyRound } from "lucide-react";
+import { ButtonLink } from "@/components/ui/button";
 import { requireSuperadmin } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { planOf } from "@/modules/billing/plans";
@@ -45,6 +46,12 @@ export default async function AdminAgentsPage() {
         eyebrow="admin"
         title="Replicar agentes"
         description="Copie um agente completo entre empresas sem levar conversas, contatos ou agenda. A cópia nasce desligada."
+        actions={
+          <ButtonLink href="/admin/agentes/mcp" variant="outline" size="sm">
+            <KeyRound size={14} aria-hidden />
+            Acesso MCP
+          </ButtonLink>
+        }
       />
 
       {sources.length === 0 ? (

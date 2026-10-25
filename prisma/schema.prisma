@@ -155,6 +155,7 @@ model Tenant {
   attendanceCosts  TenantAttendanceCost[]
   referral         Referral?
   auditLogs        AuditLog[]
+  mcpTokens        McpToken[]
   broadcasts       BroadcastCampaign[]
   broadcastReceipts BroadcastReceipt[]
   monthlyRoiReports MonthlyRoiReport[]
@@ -1922,4 +1923,28 @@ model ReminderReceipt {
   createdAt DateTime @default(now())
   @@unique([tenantId, provider, messageId, status])
   @@index([createdAt])
+}
+
+/// Token de acesso à rota MCP do agente (`/api/mcp`), emitido só pelo
+/// superadmin. O token em claro (`fch_mcp_...`) aparece uma única vez, na
+/// emissão: aqui fica só o hash (sha256) e os 8 primeiros caracteres para
+/// reconhecê-lo na lista. O tenant da chamada sai SEMPRE deste registro.
+model McpToken {
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  label        String
+  tokenHash    String    @unique
+  tokenPrefix  String
+  /// read | simulate | propose
+  scopes       String[]
+  createdById    String?
+  createdByEmail String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  revokedById  String?
+  lastUsedAt   DateTime?
+
+  @@index([tenantId])
 }

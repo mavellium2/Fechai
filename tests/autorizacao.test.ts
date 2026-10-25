@@ -188,6 +188,9 @@ describe("Rotas de API: autenticação", () => {
     "src/app/api/widget/[tenantId]/message/route.ts": ["isRateLimited", "isIpRateLimited"],
     "src/app/api/register/route.ts": ["rateLimit"],
     "src/app/api/afiliados/clique/route.ts": ["trackClick"],
+    // MCP do agente: token Bearer (hash no banco, revogável, com escopo) checado em
+    // `handleMcpPost` antes de ler o corpo; comportamento em agent-mcp.test.ts.
+    "src/app/api/mcp/route.ts": ["handleMcpPost"],
     "src/app/api/health/route.ts": [],
     "src/app/api/auth/[...nextauth]/route.ts": [],
     // As rotas do Google OAuth NÃO entram aqui: usam requireTenant() como
