@@ -10,7 +10,6 @@ import { getAccountRoles, isAffiliateOnly } from "@/modules/affiliates/roles";
 import { ProfileForm } from "./ProfileForm";
 import { RolesForm } from "./RolesForm";
 import { PasswordForm } from "./PasswordForm";
-import { FeedbackForm } from "./FeedbackForm";
 import { ServiceAreaForm } from "./ServiceAreaForm";
 import { getServiceArea } from "@/modules/lead-insights/service-area-store";
 
@@ -186,7 +185,7 @@ export default async function ConfiguracoesPage() {
       <PageHeader
         eyebrow="configurações"
         title="Configurações"
-        description="Sua conta, status da configuração e envio de feedback."
+        description="Sua conta e status da configuração."
         className="mb-2"
       />
 
@@ -246,11 +245,6 @@ export default async function ConfiguracoesPage() {
             </ul>
           </Card>
           )}
-
-          <Card>
-            <CardTitle>Enviar feedback</CardTitle>
-            <FeedbackForm />
-          </Card>
         </div>
       </div>
     </div>

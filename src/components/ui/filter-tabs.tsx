@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export type FilterOption = { key: string; label: string; count?: number };
 
 /**
- * Filtros em pílula que navegam por querystring (conversas e feedbacks).
+ * Filtros em pílula que navegam por querystring (conversas).
  *
  * São links de navegação de verdade, então usam `<nav>` + `aria-current="page"`
  * — e não `role="tab"`, que prometeria ao leitor de tela um painel controlado

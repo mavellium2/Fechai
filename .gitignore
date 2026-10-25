@@ -52,3 +52,5 @@ contas.txt
 
 # cliente MCP local (o .mcp.json.example é versionado)
 .mcp.json
+
+.playwright-mcp

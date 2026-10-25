@@ -652,6 +652,9 @@ model User {
   @@index([tenantId])
 }
 
+/// Feedback de cliente. O sistema foi retirado da interface e do código; a
+/// tabela fica até a decisão de apagar as mensagens já gravadas (apagar é
+/// irreversível). A exportação LGPD da conta ainda inclui essas linhas.
 model Feedback {
   id        String   @id @default(cuid())
   tenantId  String

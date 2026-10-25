@@ -11,7 +11,6 @@ const NAV: NavItem[] = [
   { href: "/admin/agentes", label: "Agentes", icon: "Bot" },
   { href: "/admin/logs", label: "Logs", icon: "ScrollText" },
   { href: "/admin/ia", label: "IA", icon: "Cpu" },
-  { href: "/admin/feedbacks", label: "Feedbacks", icon: "Star" },
 ];
 
 /** Painel restrito: nunca indexar. */

@@ -30,10 +30,14 @@ vi.mock("@/modules/whatsapp/meta-config", () => ({
 
 import { deleteTenant, listTenants } from "@/modules/admin/service";
 
+// Tira a cláusula padrão que esconde suspensas e testes encerrados: este arquivo
+// testa só o filtro de WhatsApp (essa regra tem o seu próprio caso abaixo).
 const whereDe = async (whatsapp: string[]) => {
   db.tenant.findMany.mockResolvedValue([]);
   await listTenants({ whatsapp });
-  return db.tenant.findMany.mock.calls.at(-1)![0].where;
+  const where = { ...db.tenant.findMany.mock.calls.at(-1)![0].where };
+  delete where.NOT;
+  return where;
 };
 
 beforeEach(() => {
@@ -77,7 +81,17 @@ describe("Filtro de WhatsApp na lista de contas", () => {
   it("sem filtro de WhatsApp, a consulta não menciona conexões", async () => {
     db.tenant.findMany.mockResolvedValue([]);
     await listTenants({});
-    expect(db.tenant.findMany.mock.calls[0][0].where).toEqual({});
+    expect(db.tenant.findMany.mock.calls[0][0].where).not.toHaveProperty("whatsappInstances");
+  });
+
+  it("por padrão esconde suspensas e testes encerrados; escolher um filtro de situação mostra", async () => {
+    db.tenant.findMany.mockResolvedValue([]);
+    await listTenants({});
+    expect(db.tenant.findMany.mock.calls[0][0].where).toHaveProperty("NOT");
+
+    db.tenant.findMany.mockClear();
+    await listTenants({ status: ["suspended"] });
+    expect(db.tenant.findMany.mock.calls[0][0].where).not.toHaveProperty("NOT");
   });
 
   it("a lista traz o estado de cada conexão para o painel resumir", async () => {

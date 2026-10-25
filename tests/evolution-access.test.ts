@@ -29,7 +29,7 @@ describe("Liberação administrativa do WhatsApp por QR (Evolution)", () => {
   it("a action do admin só muda a flag: sem logout, sem mexer nas linhas nem na Meta", () => {
     const actions = read("src/app/(admin)/actions.ts");
     const start = actions.indexOf("export async function setTenantEvolutionWhatsappEnabled");
-    const end = actions.indexOf("export async function markFeedback", start);
+    const end = actions.indexOf("\nexport ", start + 1);
     const body = actions.slice(start, end);
 
     expect(body).toContain("requireSuperadmin()");

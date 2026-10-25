@@ -15,6 +15,13 @@ limites (401, 403, 413, 429) estão na tabela do README. Schema novo `McpToken`:
 `tests/agent-mcp.test.ts`, `tests/autorizacao.test.ts` e `tests/toast-feedback.test.ts`
 passam (118 casos). Card cmvml66er000g01nxtqmbgbhg. Módulo:
 [agent-mcp](../src/modules/agent-mcp/README.md).
+## Sistema de feedback retirado — 2026-10-24
+
+Removidos o módulo `feedback/`, a página `/admin/feedbacks` (e o item de menu),
+o formulário "Enviar feedback" em `/configuracoes` e a ação `markFeedback`.
+Tabela `Feedback` e exportação LGPD mantidas: apagar as mensagens já gravadas
+é decisão separada e irreversível. A entrada `admin.feedback_status` continua no
+registro de auditoria para o histórico antigo ser lido.
 
 ## Simulação da agenda no chat de teste — 2026-10-24
 

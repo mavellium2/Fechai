@@ -72,7 +72,7 @@ export function useActionToast(
     handled.current = state;
     loadingShown.current = false;
     // Formulários que zeram o retorno ao editar (`setState(null)`) não podem
-    // apagar o toast que já está na tela: erro fica até fechar, sucesso some sozinho.
+    // apagar o toast que já está na tela: qualquer resultado some sozinho em 6 s.
     if (!finishedNow && readResult(state).status === "idle") return;
     announceResult(toast, id, ctx, state, retry);
   }, [pending, state, toast, id]);

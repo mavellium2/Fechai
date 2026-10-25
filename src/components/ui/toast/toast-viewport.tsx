@@ -17,29 +17,48 @@ import type { Toast, ToastKind } from "./types";
 
 const TONES: Record<
   ToastKind,
-  { icon: typeof Check; chip: string; border: string; role: "status" | "alert"; live: "polite" | "assertive" }
+  {
+    icon: typeof Check;
+    chip: string;
+    border: string;
+    bar: string;
+    role: "status" | "alert";
+    live: "polite" | "assertive";
+  }
 > = {
   // Ícone escuro sobre verde/âmbar e claro sobre íris/vermelho: contraste ≥ 3:1 nos quatro.
-  loading: { icon: Check, chip: "bg-iris text-white", border: "border-iris/60", role: "status", live: "polite" },
-  success: { icon: Check, chip: "bg-success text-ink", border: "border-success/60", role: "status", live: "polite" },
-  info: { icon: Info, chip: "bg-iris text-white", border: "border-iris/60", role: "status", live: "polite" },
-  warning: { icon: TriangleAlert, chip: "bg-warn text-ink", border: "border-warn/70", role: "alert", live: "assertive" },
-  error: { icon: CircleAlert, chip: "bg-danger text-white", border: "border-danger/70", role: "alert", live: "assertive" },
+  loading: { icon: Check, chip: "bg-iris text-white", border: "border-iris/60", bar: "bg-iris", role: "status", live: "polite" },
+  success: { icon: Check, chip: "bg-success text-ink", border: "border-success/60", bar: "bg-success", role: "status", live: "polite" },
+  info: { icon: Info, chip: "bg-iris text-white", border: "border-iris/60", bar: "bg-iris", role: "status", live: "polite" },
+  warning: { icon: TriangleAlert, chip: "bg-warn text-ink", border: "border-warn/70", bar: "bg-warn", role: "alert", live: "assertive" },
+  error: { icon: CircleAlert, chip: "bg-danger text-white", border: "border-danger/70", bar: "bg-danger", role: "alert", live: "assertive" },
 };
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
   const reduced = useReducedMotion();
   const [paused, setPaused] = useState(false);
-  const { icon: Icon, chip, border, role, live } = TONES[toast.kind];
+  const { icon: Icon, chip, border, bar, role, live } = TONES[toast.kind];
+  // Quanto ainda falta. Pausar guarda o restante em vez de recomeçar do zero:
+  // quem tira o mouse de cima do aviso ganha só o tempo que faltava.
+  const remaining = useRef(toast.duration ?? 0);
 
-  // Timer de sumir sozinho. Vive no item: sai junto com ele (sem timer órfão),
-  // reinicia quando o toast é atualizado no lugar e para enquanto o mouse ou o
-  // foco estão sobre ele — quem está lendo (ou clicando "Tentar novamente")
-  // não perde a mensagem no meio.
+  // Atualizar no lugar (mesmo id) recomeça a contagem inteira.
+  useEffect(() => {
+    remaining.current = toast.duration ?? 0;
+  }, [toast.revision, toast.duration]);
+
+  // Timer de sumir sozinho. Vive no item: sai junto com ele (sem timer órfão) e
+  // para enquanto o mouse ou o foco estão sobre ele — quem está lendo (ou
+  // clicando "Tentar novamente") não perde a mensagem no meio. A barra da base
+  // pausa pelo mesmo `paused`, então as duas contagens andam juntas.
   useEffect(() => {
     if (toast.duration == null || paused) return;
-    const timer = setTimeout(() => onDismiss(toast.id), toast.duration);
-    return () => clearTimeout(timer);
+    const started = Date.now();
+    const timer = setTimeout(() => onDismiss(toast.id), remaining.current);
+    return () => {
+      clearTimeout(timer);
+      remaining.current -= Date.now() - started;
+    };
   }, [toast.duration, toast.revision, toast.id, paused, onDismiss]);
 
   function onKeyDown(event: KeyboardEvent) {
@@ -62,7 +81,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       onBlur={() => setPaused(false)}
       onKeyDown={onKeyDown}
       className={cn(
-        "pointer-events-auto w-full list-none rounded-surface border bg-white text-ink shadow-lg",
+        "pointer-events-auto relative w-full list-none overflow-hidden rounded-surface border bg-white text-ink shadow-lg",
         "panel:bg-[color-mix(in_srgb,var(--color-ink),white_9%)] panel:text-white",
         border,
       )}
@@ -109,6 +128,25 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           </button>
         )}
       </div>
+
+      {/*
+        Tempo que falta, na base do cartão. A animação é CSS (linear, da largura
+        cheia a zero) e pausa com o mesmo `paused` do timer. A `key` tem prefixo
+        porque é irmã da região viva (que usa a revisão como chave): chave repetida
+        entre irmãos faz o React duplicar ou omitir filhos. Atualizar no lugar
+        reinicia a barra junto com a contagem.
+      */}
+      {toast.duration != null && (
+        <span
+          key={`bar-${toast.revision}`}
+          aria-hidden
+          className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-[3px] origin-left opacity-80", bar)}
+          style={{
+            animation: `toast-countdown ${toast.duration}ms linear forwards`,
+            animationPlayState: paused ? "paused" : "running",
+          }}
+        />
+      )}
     </motion.li>
   );
 }

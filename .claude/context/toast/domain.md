@@ -11,7 +11,7 @@
 - **FailureKind:** `validation | auth | forbidden | network | server`.
 
 ## Invariantes
-- Duração padrão (`DEFAULT_DURATION`): success 4000, info 6000; `loading`/`warning`/`error` = `null` (ficam).
+- Duração padrão (`DEFAULT_DURATION`): success/info/warning/error 6000 (somem com barra de tempo; mouse/foco pausa); `loading` = `null` (fica até o resultado).
 - Máx. 3 toasts na tela (`MAX_VISIBLE`); o mais antigo sai.
 - `entity` em minúsculas, sem artigo; concordância vem de `gender`/`plural`.
 - Falha = `ok === false` **ou** `error` **ou** `code` **ou** `errors` não vazio. Sucesso = `ok`/`info` truthy sem falha.

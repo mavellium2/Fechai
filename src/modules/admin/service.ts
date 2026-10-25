@@ -11,6 +11,7 @@ import {
   type WhatsappProviderInstance,
 } from "@/modules/whatsapp/meta-config";
 import { deleteVoice } from "@/modules/voice/fish";
+import { PLANS } from "@/modules/billing/plans";
 
 // Funções cross-tenant do painel admin. Autorização (SUPERADMIN) é garantida
 // na rota (admin)/ via requireSuperadmin — nunca chamar fora dela.
@@ -75,6 +76,37 @@ function whatsappStateFilter(state: string): Prisma.TenantWhereInput {
   }
 }
 
+const TRIAL_PLAN_KEYS = PLANS.filter((p) => p.trialDays != null).map((p) => p.key);
+
+/**
+ * Teste encerrado: plano de teste sem data futura. Sem data conta como encerrado
+ * — é a mesma regra do badge da lista e do `usage.ts` (sem `trialEndsAt` a IA cala).
+ */
+function trialEndedWhere(now: Date): Prisma.TenantWhereInput {
+  return {
+    planKey: { in: TRIAL_PLAN_KEYS },
+    OR: [{ trialEndsAt: null }, { trialEndsAt: { lte: now } }],
+  };
+}
+
+/** Suspensas e testes encerrados: ficam fora da lista até um filtro pedir. */
+function hiddenByDefault(now: Date): Prisma.TenantWhereInput {
+  return { OR: [{ status: "suspended" }, trialEndedWhere(now)] };
+}
+
+/**
+ * Quem escolheu um filtro de situação ou de teste vê a lista como ele pede, com
+ * as suspensas e encerradas incluídas. Sem isso, o padrão as esconde.
+ */
+export function revealsClosedAccounts(filters: Pick<TenantFilters, "status" | "trial">): boolean {
+  return Boolean(filters.status?.length || filters.trial?.length);
+}
+
+/** Quantas contas o padrão está escondendo — para a lista vazia dizer por quê. */
+export async function countHiddenTenants(): Promise<number> {
+  return prisma.tenant.count({ where: hiddenByDefault(new Date()) });
+}
+
 /**
  * Contas da plataforma, com os filtros do painel.
  *
@@ -89,6 +121,7 @@ export async function listTenants(filters: TenantFilters = {}) {
   const where: Prisma.TenantWhereInput = {};
   if (search) where.name = { contains: search, mode: "insensitive" };
   if (status?.length) where.status = { in: status };
+  if (!revealsClosedAccounts(filters)) where.NOT = hiddenByDefault(now);
   if (plan?.length) where.planKey = { in: plan };
 
   if (whatsapp?.length) {
@@ -98,18 +131,17 @@ export async function listTenants(filters: TenantFilters = {}) {
     else where.OR = clauses;
   }
 
-  // "em teste" é ter data futura; "expirado" é ter data no passado. Conta sem
-  // data nunca esteve em teste — são três estados, não dois, e como eles se
-  // sobrepõem no mesmo campo, várias escolhas viram um OR.
+  // "em teste" é ter data futura; "expirado" é teste encerrado (ver
+  // `trialEndedWhere`). Conta sem data nunca esteve em teste — são três estados,
+  // não dois, e como eles se sobrepõem no mesmo campo, várias escolhas viram um OR.
   if (trial?.length) {
     const clauses: Prisma.TenantWhereInput[] = [];
     if (trial.includes("ativo")) clauses.push({ trialEndsAt: { gt: now } });
-    if (trial.includes("expirado")) clauses.push({ trialEndsAt: { lt: now } });
+    if (trial.includes("expirado")) clauses.push(trialEndedWhere(now));
     if (trial.includes("sem")) clauses.push({ trialEndsAt: null });
-    // `AND` para não colidir com o `OR` do WhatsApp, que é outro campo: dois
-    // `OR` no mesmo objeto, um sobrescreveria o outro.
-    if (clauses.length === 1) Object.assign(where, clauses[0]);
-    else if (clauses.length > 1) where.AND = [{ OR: clauses }];
+    // Sempre `AND`, mesmo com uma cláusula só: `trialEndedWhere` traz `planKey` e
+    // `OR`, e espalhar no objeto sobrescreveria o filtro de plano e o `OR` do WhatsApp.
+    if (clauses.length) where.AND = [{ OR: clauses }];
   }
 
   const orderBy: Prisma.TenantOrderByWithRelationInput =
@@ -158,7 +190,6 @@ export async function getTenantDetail(tenantId: string) {
           leads: { where: { isTest: false } },
           conversations: { where: { isTest: false } },
           knowledgeDocs: true,
-          feedbacks: true,
         },
       },
     },
