@@ -35,7 +35,7 @@ export function FilterTabs({
             href={href(o.key)}
             aria-current={on ? "page" : undefined}
             className={cn(
-              "rounded-full px-3 py-1 font-mono text-micro uppercase tracking-wide transition-colors",
+              "rounded-full px-3 py-1.5 font-sans text-sm font-medium leading-5 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris focus-visible:ring-offset-2",
               "focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink",
               on

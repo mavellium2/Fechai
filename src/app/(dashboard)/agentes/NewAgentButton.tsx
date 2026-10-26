@@ -17,7 +17,7 @@ import { createAgentAction } from "./actions";
  * agente, para onde a action redireciona. Pedir persona inteira aqui era o
  * jeito antigo (todos os campos de uma vez, sem contexto).
  */
-export function NewAgentButton({ usage }: { usage: AgentUsage }) {
+export function NewAgentButton({ usage, variant = "button" }: { usage: AgentUsage; variant?: "button" | "shortcut" }) {
   const ref = useRef<HTMLDialogElement>(null);
   const confirmNavigation = useUnsavedNavigation();
   const close = () => confirmNavigation(() => ref.current?.close(), ref.current);
@@ -30,6 +30,7 @@ export function NewAgentButton({ usage }: { usage: AgentUsage }) {
         type="button"
         variant="outline"
         size="sm"
+        className={variant === "shortcut" ? "agent-shortcut" : undefined}
         disabled
         title={`Seu plano permite ${usage.limit} agente(s)`}
       >
@@ -41,7 +42,7 @@ export function NewAgentButton({ usage }: { usage: AgentUsage }) {
 
   return (
     <>
-      <Button type="button" size="sm" onClick={() => ref.current?.showModal()}>
+      <Button type="button" size="sm" variant={variant === "shortcut" ? "ghost" : "default"} className={variant === "shortcut" ? "agent-shortcut" : undefined} onClick={() => ref.current?.showModal()}>
         <Plus size={14} aria-hidden />
         Novo agente
       </Button>

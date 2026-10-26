@@ -2,6 +2,38 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Contexto de manutenção do painel — 2026-10-26
+
+Documentação pela skill `module-docs`: seis arquivos em
+[.claude/context/painel](../.claude/context/painel/_index.md), com contratos,
+actions reutilizadas, consultas, padrões e histórico. Índices atualizados e
+README de Agentes ampliado com o switch final à direita, preferências por
+contexto, tipografia e limites da validação. Etapa só de documentação.
+
+## Tema e legibilidade do painel — 2026-10-26
+
+Menu do tenant com transição de largura e rótulos, entrada/saída da gaveta mobile
+e preferência por movimento reduzido. Modo escuro disponível no menu, inclusive
+recolhido e mobile, com preferência local persistida. Switch à direita substitui
+"Ligado/Desligado", com sol no modo claro e lua no escuro; no menu recolhido o
+ícone fica no thumb. Aviso de personificação com contraste nos dois temas;
+títulos, filtros e indicadores com escala mais contida.
+Corrigido `cn`: `tailwind-merge` agora reconhece `text-micro` como tamanho, evitando
+que a cor remova o token e amplie a fonte em links e botões, inclusive do admin.
+O admin usa a mesma casca, com preferência de tema e menu separada do tenant,
+identificação compacta e rotas administrativas preservadas. Regressão em
+`tests/ui-class-merge.test.ts`. Sem mudança de dados ou regras.
+
+## Navegação do tenant e Agentes v5 — 2026-10-26
+
+Casca clara exclusiva do tenant, menu principal recolhível e gaveta mobile;
+Agentes passa a ter menu secundário, grade/lista de configurações, busca e painel
+de detalhes. Editores e chat de teste reutilizam os componentes e actions atuais,
+com proteção de rascunho e feedback por toast. Estados vazio/carregando/erro e
+navegação por teclado nas abas. Demais páginas recebem a nova casca e preservam
+sua organização. Sem alteração em API, regras de negócio, banco ou worker.
+Mapa: [Agentes](../src/app/(dashboard)/agentes/README.md).
+
 ## Propostas de alteração do agente pelo MCP, parte C — 2026-10-24
 
 Escopo `propose` (emitível em `/admin/agentes/mcp`): `propose_change` registra uma

@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { LoadingDots } from "./loading-dots";
+import type { ReactNode } from "react";
 
 /**
  * Interruptor liga/desliga.
@@ -18,6 +19,7 @@ export function Switch({
   label,
   describedBy,
   className,
+  thumbContent,
 }: {
   checked: boolean;
   onCheckedChange: (next: boolean) => void;
@@ -28,6 +30,8 @@ export function Switch({
   label: string;
   describedBy?: string;
   className?: string;
+  /** Optional decorative content, such as the current theme icon. */
+  thumbContent?: ReactNode;
 }) {
   return (
     <button
@@ -59,10 +63,12 @@ export function Switch({
             // encosta o thumb na direita sem valor mágico. `translate-x-5`
             // não era gerado pelo Tailwind v4 e o thumb ficava parado/fora do
             // trilho quando ativado.
-            "absolute start-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform",
+            "absolute start-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white transition-transform",
             checked && "translate-x-full",
           )}
-        />
+        >
+          {thumbContent}
+        </span>
       )}
     </button>
   );

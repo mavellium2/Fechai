@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { planOf } from "@/modules/billing/plans";
@@ -17,7 +15,7 @@ import { catalogVoiceByReferenceId } from "@/modules/voice/catalog";
 import type { PersonaAnswers } from "@/modules/agent-engine/persona";
 import { parseVariableDefinitions } from "@/modules/agent-engine/variables";
 import { AgentWizard } from "./AgentWizard";
-import { AgentHeader } from "./AgentHeader";
+import { AgentsFrame } from "../AgentsFrame";
 
 export default async function AgentePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -64,29 +62,10 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
 
   const rules = (agent.personaDraft as Partial<PersonaAnswers> | null)?.avoid ?? "";
 
-  const done = {
-    // Persona é o que bloqueia; regras é complementar (o agente funciona sem
-    // nenhuma) — só informativo aqui, nunca trava o avanço no stepper.
-    personalidade: agent.systemPrompt.length > 0,
-    regras: rules.trim().length > 0,
-    variaveis: parseVariableDefinitions(agent.variableDefinitions).length > 0,
-    cerebro: documents.length > 0,
-    habilidades: actions.length > 0,
-    comportamento: true, // já vem configurado por padrão
-    testar: false,
-  };
-
   return (
-    <div className="w-full space-y-6">
-      <Link
-        href="/agentes"
-        className="inline-flex items-center gap-1.5 rounded-sm font-mono text-micro uppercase tracking-[0.15em] text-white/55 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
-      >
-        <ArrowLeft size={13} aria-hidden />
-        Todos os agentes
-      </Link>
-
-      <AgentHeader
+    <AgentsFrame>
+      <AgentWizard
+        key={agent.id}
         agent={{
           id: agent.id,
           name: agent.name,
@@ -95,10 +74,6 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
         }}
         canDelete={agentCount > 1}
         canDuplicate={agentCount < planOf(tenant?.planKey).maxAgents}
-      />
-
-      <AgentWizard
-        agentId={agent.id}
         persona={(agent.personaDraft as Partial<PersonaAnswers> | null) ?? {}}
         rules={rules}
         variableDefinitions={parseVariableDefinitions(agent.variableDefinitions)}
@@ -110,7 +85,6 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
         metaReminders={metaReminders}
         followUpConfig={followUpConfig}
         handoffConfig={handoffConfig}
-        enabled={agent.enabled}
         listenAudio={agent.listenAudio}
         speakReplies={agent.speakReplies}
         stopOnEmoji={agent.stopOnEmoji}
@@ -128,8 +102,7 @@ export default async function AgentePage({ params }: { params: Promise<{ id: str
         speechBlocklist={agent.speechBlocklist}
         voiceStyle={agent.voiceStyle}
         voicePrompt={agent.voicePrompt}
-        done={done}
       />
-    </div>
+    </AgentsFrame>
   );
 }

@@ -48,6 +48,17 @@ export function StepTabs({ tabs }: { tabs: StepTab[] }) {
                 aria-controls={panelId}
                 tabIndex={on ? 0 : -1}
                 onClick={() => { if (!on) confirmNavigation(() => setActive(i)); }}
+                onKeyDown={(event) => {
+                  const next = event.key === "ArrowRight" ? (i + 1) % tabs.length
+                    : event.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length
+                    : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
+                  if (next === null) return;
+                  event.preventDefault();
+                  confirmNavigation(() => {
+                    setActive(next);
+                    document.getElementById(`${groupId}-tab-${tabs[next].key}`)?.focus();
+                  });
+                }}
                 className={cn(
                   "-mb-px rounded-t-control border-b-2 px-3 py-2 font-mono text-micro uppercase tracking-[0.15em] transition-colors",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris",

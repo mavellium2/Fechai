@@ -2,22 +2,17 @@
 
 import { useEffect, useRef } from "react";
 import posthog from "posthog-js";
-import { Button } from "@/components/ui/button";
 import { type NavItem } from "./ShellNav";
 import { type UsageNavData } from "./UsageNav";
-import { Sidebar } from "./Sidebar";
-import { MobileNav } from "./MobileNav";
 import { UnsavedChangesProvider } from "@/components/ui/unsaved-changes";
 import { ToastProvider } from "@/components/ui/toast";
+import { TenantShell } from "./TenantShell";
+import { TenantThemeProvider } from "./TenantTheme";
 
 /**
- * Casca comum do dashboard e do admin: barra lateral no desktop, gaveta no
- * celular, cabeçalho com identificação e saída.
- *
- * Os dois layouts eram cópias quase idênticas (~50 linhas cada) que já tinham
- * divergido em detalhes. `data-surface="dark"` é marcado aqui, uma vez: é o que
- * faz os primitivos de `ui/` assumirem a versão escura sem nenhum override por
- * tela.
+ * Casca comum do tenant e do admin: navegação animada e superfícies controladas
+ * pelo provider. Cada contexto tem sua preferência local de tema e menu.
+ * Identidade do PostHog, proteção de rascunhos e toasts permanecem compartilhados.
  */
 export function PanelShell({
   navItems,
@@ -30,8 +25,8 @@ export function PanelShell({
   userRole,
   signOutAction,
   usage,
-  accent = "iris",
   banner,
+  variant = "admin",
   children,
 }: {
   navItems: NavItem[];
@@ -50,6 +45,7 @@ export function PanelShell({
   accent?: "iris" | "signal";
   /** Aviso global fixo acima do cabeçalho (ex.: personificação em andamento). */
   banner?: React.ReactNode;
+  variant?: "admin" | "tenant";
   children: React.ReactNode;
 }) {
   const identifiedUserId = useRef<string | null>(null);
@@ -81,79 +77,16 @@ export function PanelShell({
   }
 
   return (
-    // `h-screen` + `overflow-hidden` (em vez do `min-h-screen` antigo): a
-    // sidebar é irmã do `main` no mesmo flex, então com `min-h-screen` ela
-    // esticava para acompanhar a altura da PÁGINA inteira — em telas com
-    // conteúdo comprido, o rodapé da sidebar (agora com o botão de
-    // minimizar) ficava empurrado abaixo da dobra. Fixando a casca na altura
-    // da viewport e deixando só o `main` rolar, a sidebar (e seu rodapé)
-    // ficam sempre visíveis.
-    <UnsavedChangesProvider><div data-surface="dark" className="flex h-screen overflow-hidden bg-ink"><ToastProvider>
-      <a
-        href="#conteudo"
-        className="sr-only rounded-control bg-white px-4 py-2 text-sm font-medium text-ink focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50"
-      >
-        Pular para o conteúdo
-      </a>
-
-      <Sidebar
-        navItems={navItems}
-        brandHref={brandHref}
-        brandSubtitle={brandSubtitle}
-        footerLabel={footerLabel}
-        usage={usage}
-      />
-
-      {/* `min-h-0` nos dois: sem isso, a altura mínima "auto" de um item flex
-          (o próprio conteúdo) vence o `flex-1`, e este bloco cresce pra caber
-          tudo em vez de ficar preso na altura da tela — daí o `main` nunca
-          precisa rolar e as áreas internas com scroll próprio (ex.: o chat de
-          /conversas) nunca ganham uma altura travada pra rolar dentro dela. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {banner}
-        <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 md:px-6">
-          <div className="flex min-w-0 items-center gap-2">
-            <MobileNav items={navItems} title="fechai" subtitle={brandSubtitle} usage={usage} />
-            <span className="truncate font-mono text-micro uppercase tracking-[0.15em] text-white/55">
-              {userLabel}
-            </span>
-          </div>
-          <form action={signOutAction} onSubmit={handleSignOut} data-leave-page>
-            <Button variant="outline" size="sm" type="submit">
-              Sair
-            </Button>
-          </form>
-        </header>
-
-        <main
-          id="conteudo"
-          className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4 md:p-8"
-        >
-          <div
-            aria-hidden
-            className={`pointer-events-none absolute -right-40 -top-40 h-[360px] w-[360px] rounded-full blur-[120px] ${
-              accent === "signal" ? "bg-signal/10" : "bg-iris/10"
-            }`}
-          />
-          {/*
-            `flex-1`, não `min-h-full`: `min-height` é só um piso, não dá altura
-            definida — e sem altura definida, o filho de baixo (`flex-1` do
-            `min-h-0` da página) não tem "espaço disponível" real pra calcular,
-            e cai no tamanho do conteúdo (por isso o `main` ficava rolando o
-            pacote inteiro em vez de só a área interna, ex.: /conversas). Com
-            `main` agora `flex flex-col` e este filho em `flex-1`, ele recebe a
-            altura exata que sobra do cabeçalho — telas normais (conteúdo mais
-            curto) só ganham espaço vazio embaixo, sem quebrar nada.
-
-            `min-h-0` também é obrigatório aqui: item flex sem isso tem
-            min-height "auto" (baseado no conteúdo), então mesmo com `flex-1`
-            ele ainda estoura pro tamanho do conteúdo e quebra o cascade —
-            era exatamente esse o motivo do `main` voltar a rolar as três
-            colunas de /conversas juntas em vez de só a coluna da conversa.
-          */}
-          <div className="relative flex min-h-0 flex-1 flex-col">{children}</div>
-        </main>
-      </div>
-    </ToastProvider></div></UnsavedChangesProvider>
+    <UnsavedChangesProvider>
+      <TenantThemeProvider scope={variant}>
+        <ToastProvider>
+          <TenantShell context={variant} navItems={navItems} brandHref={brandHref} brandSubtitle={brandSubtitle}
+            footerLabel={footerLabel} userLabel={userLabel} usage={usage}
+            signOutAction={signOutAction} onSignOut={handleSignOut} banner={banner}>
+            {children}
+          </TenantShell>
+        </ToastProvider>
+      </TenantThemeProvider>
+    </UnsavedChangesProvider>
   );
 }

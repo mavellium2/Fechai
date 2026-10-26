@@ -8,25 +8,28 @@ import { Field, fieldProps } from "@/components/ui/field";
 import { UnsavedForm, useUnsavedNavigation } from "@/components/ui/unsaved-changes";
 import type { AgentUsage } from "@/modules/agent-engine/agents";
 import { importAgentAction } from "./actions";
+import { useActionToast } from "@/components/ui/toast";
 
-export function ImportAgentButton({ usage }: { usage: AgentUsage }) {
+export function ImportAgentButton({ usage, variant = "button" }: { usage: AgentUsage; variant?: "button" | "shortcut" }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const confirmNavigation = useUnsavedNavigation();
   const [state, action, pending] = useActionState(importAgentAction, null);
+  useActionToast(state, pending, { entity: "agente", action: "create" });
   const close = () => confirmNavigation(() => dialogRef.current?.close(), dialogRef.current);
 
   return (
     <>
       <Button
         type="button"
-        variant="outline"
+        variant={variant === "shortcut" ? "ghost" : "outline"}
+        className={variant === "shortcut" ? "agent-shortcut" : undefined}
         size="sm"
         disabled={!usage.canCreate}
         title={usage.canCreate ? undefined : `Seu plano permite ${usage.limit} agente(s)`}
         onClick={() => dialogRef.current?.showModal()}
       >
         <Upload size={14} aria-hidden />
-        Importar
+        {variant === "shortcut" ? "Importar agente" : "Importar"}
       </Button>
 
       <dialog

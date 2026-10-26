@@ -9,11 +9,12 @@ import { stopImpersonation } from "@/app/(admin)/actions";
  */
 export function ImpersonationBanner({ email }: { email: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-signal/30 bg-signal/15 px-4 py-2 md:px-6">
-      <p className="flex min-w-0 items-center gap-2 text-xs font-medium text-white/85">
-        <Eye size={14} aria-hidden className="shrink-0 text-signal" />
-        <span className="truncate">
-          Você está vendo o painel como <span className="font-semibold text-white">{email}</span>
+    <div className="impersonation-banner flex shrink-0 flex-wrap items-center justify-between gap-3 border border-signal/30 bg-signal/10 px-4 py-3 md:px-5">
+      <p className="flex min-w-0 items-center gap-2 text-xs leading-relaxed text-ink panel:text-white/85">
+        <Eye size={16} aria-hidden className="shrink-0 text-signal" />
+        <span className="min-w-0">
+          <span className="impersonation-label">Acesso de administrador</span>
+          <span className="impersonation-account">Visualizando como <span className="font-semibold break-all text-ink panel:text-white">{email}</span></span>
         </span>
       </p>
       <form action={stopImpersonation}>

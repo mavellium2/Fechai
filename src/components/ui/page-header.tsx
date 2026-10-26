@@ -26,11 +26,11 @@ export function PageHeader({
     <div className={cn("flex flex-wrap items-end justify-between gap-4", className)}>
       <div className="min-w-0">
         <p className="font-mono text-micro uppercase tracking-[0.3em] text-signal">{eyebrow}</p>
-        <h1 className="font-display mt-3 text-3xl font-bold tracking-tight text-ink panel:text-white">
+        <h1 className="font-display mt-2 text-2xl font-semibold leading-tight tracking-tight text-ink panel:text-white">
           {title}
         </h1>
         {description && (
-          <p className="mt-2 max-w-prose text-neutral panel:text-white/60">{description}</p>
+          <p className="mt-2 max-w-prose text-sm leading-relaxed text-neutral panel:text-white/60">{description}</p>
         )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

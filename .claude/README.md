@@ -4,6 +4,8 @@
 
 Leia o `_index.md` antes do código-fonte.
 
+- [painel](context/painel/_index.md) — navegação tenant/admin, temas e switch, tipografia e interface de Agentes v5
+
 - [bitrix](context/bitrix/_index.md) — integração por conta: contatos, leads/negócios, reuniões e fila (`src/modules/bitrix/`)
 
 - [toast](context/toast/_index.md) — notificações de salvamento (`src/components/ui/toast/`)

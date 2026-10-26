@@ -1,0 +1,129 @@
+/* Shared workspace surfaces; tenant and admin keep independent preferences. */
+.tenant-theme {
+  --tenant-line: #e2e5ef;
+  --tenant-muted: #687386;
+  --tenant-soft: #f6f6f9;
+  --tenant-selected: #eeebff;
+  --tenant-canvas: #f2f3f7;
+  --tenant-surface: #fff;
+  --tenant-text: var(--color-ink);
+  --tenant-accent: var(--color-iris);
+  --tenant-icon: #7d8799;
+  --tenant-icon-bg: #f2efff;
+  --tenant-row-selected: #e5e0fc;
+  --tenant-off-bg: #eff0f4;
+  --tenant-off-text: #8b93a4;
+  --tenant-off-dot: #b7bcc7;
+  --tenant-button: var(--color-ink);
+  --tenant-button-text: #fff;
+  color: var(--tenant-text);
+  background: var(--tenant-canvas);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-synthesis: none;
+  color-scheme: light;
+}
+.tenant-theme[data-surface="dark"] {
+  --tenant-line: #303646;
+  --tenant-muted: #a0a9bc;
+  --tenant-soft: #202533;
+  --tenant-selected: #302857;
+  --tenant-canvas: #10131b;
+  --tenant-surface: #191d28;
+  --tenant-text: #f1f3fa;
+  --tenant-accent: #ab9eff;
+  --tenant-icon: #a0a9bc;
+  --tenant-icon-bg: #292440;
+  --tenant-row-selected: #342b60;
+  --tenant-off-bg: #252b39;
+  --tenant-off-text: #98a2b5;
+  --tenant-off-dot: #737e91;
+  --tenant-button: #e8e3ff;
+  --tenant-button-text: #221940;
+  color-scheme: dark;
+}
+.tenant-theme :where(button, a, input, textarea, summary):focus-visible { outline: 2px solid var(--tenant-accent); outline-offset: 3px; }
+.tenant-frame { display: flex; gap: 12px; height: 100dvh; padding: 12px; overflow: hidden; }
+.tenant-rail { width: 64px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--tenant-line); border-radius: 16px; background: var(--tenant-surface); transition: width 260ms cubic-bezier(.2,.8,.2,1); }
+.tenant-rail-expanded { width: 232px; }
+.tenant-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; overflow: hidden; padding: 12px 10px 10px; }
+.tenant-wordmark { flex-shrink: 0; white-space: nowrap; }
+.tenant-rail :is(.tenant-rail-label, .tenant-nav-label) { min-width: 0; white-space: nowrap; opacity: 0; visibility: hidden; transform: translateX(-5px); transition: opacity 120ms ease, transform 200ms ease, visibility 0s 150ms; }
+.tenant-rail-expanded :is(.tenant-rail-label, .tenant-nav-label) { opacity: 1; visibility: visible; transform: none; transition: opacity 160ms ease 60ms, transform 240ms ease, visibility 0s; }
+.tenant-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 36px; border-radius: 10px; color: var(--tenant-muted); cursor: pointer; }
+.tenant-icon-button:hover { background: var(--tenant-soft); }
+.tenant-theme .tenant-nav-link { justify-content: flex-start; gap: 12px; height: 40px; overflow: hidden; padding: 8px 10px; border-radius: 12px; font-family: var(--font-sans); font-size: 14px; font-weight: 500; text-transform: none; letter-spacing: normal; color: var(--tenant-text); }
+.tenant-nav-link svg { color: var(--tenant-icon); }
+.tenant-theme .tenant-nav-link:hover { background: var(--tenant-soft); }
+.tenant-theme .tenant-nav-active, .tenant-theme .tenant-nav-active:hover { color: var(--tenant-accent); background: var(--tenant-selected); }
+.tenant-nav-active svg { color: var(--tenant-accent); }
+.tenant-theme-slot { flex-shrink: 0; padding: 4px 8px; }
+.tenant-theme .tenant-theme-toggle { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; height: 40px; padding: 8px 66px 8px 10px; border-radius: 12px; color: var(--tenant-muted); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.tenant-theme-current-icon { display: flex; flex-shrink: 0; color: var(--tenant-accent); transition: opacity 120ms ease; }
+.tenant-theme-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tenant-theme-toggle .tenant-theme-switch { position: absolute; top: 8px; right: 10px; transition: background-color 150ms ease, right 200ms ease; }
+.tenant-theme-switch svg { display: none; color: var(--color-iris); }
+.tenant-rail:not(.tenant-rail-expanded) .tenant-theme-toggle { padding: 0; }
+.tenant-rail:not(.tenant-rail-expanded) .tenant-theme-current-icon { opacity: 0; visibility: hidden; }
+.tenant-rail:not(.tenant-rail-expanded) .tenant-theme-switch { right: 0; }
+.tenant-rail:not(.tenant-rail-expanded) .tenant-theme-switch svg { display: block; }
+.tenant-mobile-theme { flex-shrink: 0; padding: 12px; border-top: 1px solid var(--tenant-line); }
+.tenant-account { position: relative; flex-shrink: 0; padding: 12px 8px; }
+.tenant-account summary { list-style: none; display: flex; align-items: center; justify-content: flex-start; gap: 10px; overflow: hidden; padding: 0 6px; cursor: pointer; border-radius: 10px; }
+.tenant-account summary::-webkit-details-marker { display: none; }
+.tenant-account-copy { display: block; }
+.tenant-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; font-size: 11px; font-weight: 600; color: var(--tenant-accent); background: var(--tenant-selected); }
+.tenant-account-menu { position: absolute; z-index: 40; left: 8px; bottom: 58px; width: 256px; padding: 6px; border: 1px solid var(--tenant-line); border-radius: 12px; background: var(--tenant-surface); box-shadow: 0 8px 30px #14171f14; }
+.tenant-account-menu a, .tenant-account-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.tenant-account-menu a:hover, .tenant-account-menu button:hover { background: var(--tenant-soft); }
+.tenant-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
+.tenant-admin-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 12px; margin-bottom: 10px; padding: 10px 16px; border: 1px solid var(--tenant-line); border-radius: 12px; background: var(--tenant-surface); }
+.tenant-admin-identity { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 10px; }
+.tenant-admin-badge { padding: 3px 8px; border-radius: 6px; background: var(--tenant-selected); color: var(--tenant-accent); font-size: 11px; font-weight: 600; }
+.tenant-admin-user { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--tenant-muted); }
+.tenant-main { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; overflow: auto; border: 1px solid var(--tenant-line); border-radius: 16px; background: var(--tenant-surface); }
+.tenant-content { padding: 28px; }
+.tenant-main-agents { overflow: hidden; }
+.tenant-mobile-header { display: none; }
+.tenant-skip { position: absolute; left: 12px; top: -100px; z-index: 100; padding: 10px 16px; background: var(--tenant-surface); border-radius: 8px; }
+.tenant-skip:focus { top: 12px; }
+.tenant-theme .impersonation-banner { margin-bottom: 8px; border-radius: 12px; }
+.impersonation-label { display: block; font-weight: 600; font-size: 12px; }
+.impersonation-account { display: block; font-size: 12px; }
+.tenant-theme .impersonation-banner p { color: var(--tenant-text); }
+
+/* Transitional colors in existing screens are adapted only on light surfaces.
+   Dark surfaces continue to use the existing panel: variants. */
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="text-white"], [class~="text-white/90"], [class~="text-white/85"], [class~="text-white/80"]) { color: var(--tenant-text); }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="text-white/75"], [class~="text-white/70"], [class~="text-white/65"], [class~="text-white/60"]) { color: #596275; }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="text-white/55"], [class~="text-white/50"], [class~="text-white/45"], [class~="text-white/40"], [class~="text-white/35"], [class~="text-white/30"]) { color: var(--tenant-muted); }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="border-white/10"], [class~="border-white/15"], [class~="border-white/20"], [class~="border-white/25"]) { border-color: var(--tenant-line); }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="bg-white/5"], [class~="bg-white/[0.03]"], [class~="bg-white/10"], [class~="bg-black/20"]) { background-color: var(--tenant-soft); }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="bg-ink"], [class~="bg-ink/95"]) { background-color: var(--tenant-surface); }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) :is([class~="bg-iris"], [class~="bg-signal"], [class~="bg-danger"], [class~="bg-danger/90"]) { color: white; }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) [class~="hover:text-white"]:hover { color: var(--tenant-text); }
+.tenant-theme[data-surface="light"] :is(.tenant-content, .agent-editor, .tenant-mobile-nav, .agents-sidebar) [class~="hover:bg-white/5"]:hover { background-color: var(--tenant-soft); }
+.tenant-theme[data-surface="dark"] :is(.tenant-rail, .tenant-mobile-header, .agents-layout, .agent-editor) [class~="text-neutral"] { color: var(--tenant-muted); }
+.tenant-theme .tenant-mobile-nav { color: var(--tenant-text); background: var(--tenant-surface); border-color: var(--tenant-line); }
+.tenant-mobile-nav { transform: translateX(-100%); opacity: 0; transition: transform 240ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease, display 240ms allow-discrete, overlay 240ms allow-discrete; }
+.tenant-mobile-nav[open] { transform: none; opacity: 1; }
+.tenant-mobile-nav::backdrop { opacity: 0; transition: opacity 240ms ease, display 240ms allow-discrete, overlay 240ms allow-discrete; }
+.tenant-mobile-nav[open]::backdrop { opacity: 1; }
+@starting-style {
+  .tenant-mobile-nav[open] { transform: translateX(-100%); opacity: 0; }
+  .tenant-mobile-nav[open]::backdrop { opacity: 0; }
+}
+
+@media (max-width: 767px) {
+  .tenant-frame { padding: 8px; gap: 0; }
+  .tenant-rail { display: none; }
+  .tenant-stage { gap: 8px; }
+  .tenant-mobile-header { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding-inline: 4px; }
+  .tenant-content { padding: 20px 16px; }
+  .tenant-main { border-radius: 12px; }
+  .tenant-theme .impersonation-banner { margin-bottom: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tenant-rail, .tenant-rail :is(.tenant-rail-label, .tenant-nav-label), .tenant-mobile-nav, .tenant-mobile-nav::backdrop { transition: none; }
+}

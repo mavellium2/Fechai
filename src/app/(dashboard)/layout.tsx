@@ -15,12 +15,11 @@ import type { NavItem } from "@/components/shell/ShellNav";
 /** Telas do produto (agente de WhatsApp) — só para quem marcou "usar no meu negócio". */
 const NAV_PRODUTO: NavItem[] = [
   { href: "/inicio", label: "Início", icon: "Home" },
-  { href: "/agentes", label: "Agentes", icon: "Bot" },
-  { href: "/integracoes", label: "Integrações", icon: "Plug" },
-  { href: "/contatos", label: "Contatos", icon: "Users" },
   { href: "/conversas", label: "Conversas", icon: "MessagesSquare" },
-  { href: "/perguntas", label: "Perguntas", icon: "CircleHelp" },
   { href: "/agenda", label: "Agenda", icon: "CalendarDays" },
+  { href: "/perguntas", label: "Perguntas", icon: "CircleHelp" },
+  { href: "/contatos", label: "Contatos", icon: "Users" },
+  { href: "/agentes", label: "Agentes", icon: "Bot" },
 ];
 
 /** Só para quem está no programa de afiliados. */
@@ -45,7 +44,9 @@ function navFor(roles: { usesProduct: boolean; isAffiliate: boolean }, metaEnabl
   if (roles.usesProduct) items.push(...NAV_PRODUTO);
   if (roles.usesProduct && metaEnabled) items.push({ href: "/disparos", label: "Disparos", icon: "Send" });
   if (roles.isAffiliate) items.push(NAV_AFILIADO);
-  items.push(NAV_RELATORIOS, NAV_CONFIG);
+  items.push(NAV_RELATORIOS);
+  if (roles.usesProduct) items.push({ href: "/integracoes", label: "Integrações", icon: "Plug" });
+  items.push(NAV_CONFIG);
   return items;
 }
 
@@ -119,6 +120,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <PanelShell
+      variant="tenant"
       navItems={navItems}
       // A marca leva para a primeira tela que a conta de fato tem: /inicio é
       // do produto e não existe para quem só afilia.

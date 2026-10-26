@@ -42,15 +42,15 @@ export function Stat({
         compact ? "p-4" : "p-6",
       )}
     >
-      <p className="flex items-center gap-1.5 font-mono text-micro uppercase tracking-[0.2em] text-neutral panel:text-white/55">
+      <p className="flex items-center gap-1.5 font-sans text-sm font-medium leading-snug text-neutral panel:text-white/65">
         {label}
         {about && <InfoHint label={label}>{about}</InfoHint>}
       </p>
       {/* tabular-nums: os números não "pulam" de largura quando o valor muda */}
       <p
         className={cn(
-          "font-display mt-2 font-bold tabular-nums text-ink panel:text-white",
-          compact ? "text-3xl" : "text-4xl",
+          "font-display mt-2 font-semibold leading-tight tabular-nums text-ink panel:text-white",
+          compact ? "text-2xl" : "text-3xl",
         )}
       >
         {value}

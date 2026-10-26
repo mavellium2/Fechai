@@ -17,6 +17,7 @@ Ver [CHANGELOG.md](./CHANGELOG.md) para o último milestone concluído.
 - Arquitetura geral → [ARCHITECTURE.md](../ARCHITECTURE.md)
 - Convenções de código → [CONVENTIONS.md](../CONVENTIONS.md)
 - Primitivos de UI, superfícies e regras de interação → [CONVENTIONS.md](../CONVENTIONS.md) (seções "Superfícies" e "Regras de interação")
+- Navegação tenant/admin, temas, switch e Agentes v5 → [contexto compacto do painel](../.claude/context/painel/_index.md); [mapa e validação de Agentes](../src/app/(dashboard)/agentes/README.md)
 - Revisão de UI do painel (diagnóstico, decisões e pendências) → [revisao-ui-painel-2026-07.md](./revisao-ui-painel-2026-07.md)
 - SEO e GEO (metadata, sitemap, JSON-LD, llms.txt + passos fora do código) → [SEO.md](./SEO.md)
 - Decisões técnicas (ADRs) → [decisions/](./decisions/)
