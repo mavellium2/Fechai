@@ -53,14 +53,17 @@ export function SandboxDialog({ label = "Testar agente" }: { label?: string }) {
         onClose={handleClose}
         // `m-auto`: o reset do Tailwind zera as margens automáticas que
         // centralizariam o dialog nativo.
-        className="m-auto w-[calc(100%-2rem)] max-w-xl rounded-surface border border-white/15 bg-ink p-6 text-white backdrop:bg-ink/70"
+        // As cores vêm dos tokens do painel, os mesmos que o `Sandbox` usa por dentro:
+        // com fundo `bg-ink` fixo, no tema claro o texto digitado (`--tenant-text`,
+        // escuro) ficava escuro sobre escuro e a mensagem sumia.
+        className="m-auto w-[calc(100%-2rem)] max-w-xl rounded-surface border border-(--tenant-line) bg-(--tenant-surface) p-6 text-(--tenant-text) backdrop:bg-ink/70"
       >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="sandbox-title" className="font-display text-lg font-semibold">
               Testar seu agente
             </h2>
-            <p className="mt-1 text-sm text-white/55">
+            <p className="mt-1 text-sm text-(--tenant-muted)">
               Converse como um cliente conversaria, sem precisar do WhatsApp. O teste não vira
               contato nem entra nos seus números.
             </p>
@@ -69,7 +72,7 @@ export function SandboxDialog({ label = "Testar agente" }: { label?: string }) {
             type="button"
             onClick={() => ref.current?.close()}
             aria-label="Fechar teste"
-            className="shrink-0 rounded-control p-1 text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
+            className="shrink-0 rounded-control p-1 text-(--tenant-muted) transition-colors hover:bg-(--tenant-soft) hover:text-(--tenant-text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
           >
             <X size={18} aria-hidden />
           </button>
