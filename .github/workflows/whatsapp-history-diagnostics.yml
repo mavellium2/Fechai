@@ -1,0 +1,87 @@
+name: Diagnostico do historico WhatsApp
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant_name:
+        description: Nome exato da conta a conferir
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Conferir somente formatos e vinculos disponiveis na origem
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          HISTORY_DIAGNOSTIC_TENANT: ${{ inputs.tenant_name }}
+        with:
+          host: ${{ secrets.HOST_IP }}
+          username: ${{ secrets.HOST_USERNAME }}
+          key: ${{ secrets.HOST_SSH_KEY }}
+          port: 22
+          command_timeout: 6m
+          envs: HISTORY_DIAGNOSTIC_TENANT
+          script: |
+            set -eu
+            docker exec -i -e HISTORY_DIAGNOSTIC_TENANT="$HISTORY_DIAGNOSTIC_TENANT" fechai-worker-1 node <<'NODE'
+            require('tsx/cjs');
+            const { prisma } = require('./src/lib/prisma.ts');
+            const { readEvolutionHistoryPage, readHistoryMessage } = require('./src/modules/whatsapp/evolution-history.ts');
+            const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+            const pn = v => typeof v === 'string' && /^\d{8,15}@(s\.whatsapp\.net|c\.us)$/.test(v);
+            const lid = v => typeof v === 'string' && /^\d+@lid$/.test(v);
+            const pairs = new Map();
+            const add = (a,b) => { if (!lid(a) || !pn(b)) return; const values = pairs.get(a) || new Set(); values.add(b); pairs.set(a,values); };
+            const shapes = new Map();
+            const pending = [];
+            const seen = new Set();
+            function keys(value) { return Object.keys(obj(value)).filter(k => /^[A-Za-z0-9_]{1,70}$/.test(k)).sort().join(','); }
+            async function main() {
+              const tenants = await prisma.tenant.findMany({ where: { name: process.env.HISTORY_DIAGNOSTIC_TENANT, status: 'active', evolutionWhatsappEnabled: true }, select: { id: true }, take: 2 });
+              if (tenants.length !== 1) throw new Error('ambiguous tenant');
+              const tenantId = tenants[0].id;
+              const run = await prisma.whatsappHistoryRecovery.findFirst({ where: { tenantId, status: 'completed' }, orderBy: { createdAt: 'desc' } });
+              const instance = await prisma.whatsappInstance.findFirst({ where: { tenantId, provider: 'evolution', externalId: run?.externalId }, select: { externalId: true } });
+              if (!run || !instance?.externalId) throw new Error('missing run');
+              let page = 1, pages = 1, total = null;
+              do {
+                const data = await readEvolutionHistoryPage(instance.externalId, run.since, run.until, page);
+                if (total !== null && data.total !== total) throw new Error('source changed');
+                total = data.total; pages = data.pages;
+                for (const raw of data.records) {
+                  const row = obj(raw), key = obj(row.key);
+                  if (typeof row.id !== 'string') throw new Error('invalid source id');
+                  if (seen.has(row.id)) continue;
+                  seen.add(row.id);
+                  if (lid(key.remoteJid)) { add(key.remoteJid,key.remoteJidAlt); if (key.fromMe === false) add(key.remoteJid,key.senderPn); }
+                  if (pn(key.remoteJid)) add(key.remoteJidAlt,key.remoteJid);
+                  const result = readHistoryMessage(row,instance.externalId,run.since,run.until);
+                  if ('skipped' in result && ['unresolvedPhone','unsupported'].includes(result.skipped)) {
+                    pending.push(row);
+                    let content = obj(row.message);
+                    for (let depth=0; content.ephemeralMessage && depth<5; depth++) content=obj(obj(content.ephemeralMessage).message);
+                    const shape = JSON.stringify({reason:result.skipped,type: /^[A-Za-z0-9_]{1,70}$/.test(row.messageType || '') ? row.messageType : 'unknown',root:keys(row),key:keys(key),message:keys(content),nested:Object.fromEntries(Object.entries(content).filter(([k])=>/^[A-Za-z0-9_]{1,70}$/.test(k)).map(([k,v])=>[k,keys(v)]))});
+                    shapes.set(shape,(shapes.get(shape)||0)+1);
+                  }
+                }
+                page++;
+              } while (page<=pages);
+              if (seen.size!==total) throw new Error('incomplete source');
+              let resolvedFromOtherMessages=0;
+              for (const row of pending) {
+                const key=obj(row.key), options=pairs.get(key.remoteJid);
+                if (lid(key.remoteJid) && options?.size===1) {
+                  const result=readHistoryMessage({...row,key:{...key,remoteJidAlt:[...options][0]}},instance.externalId,run.since,run.until);
+                  if ('message' in result) resolvedFromOtherMessages++;
+                }
+              }
+              console.log(JSON.stringify({scanned:seen.size,pending:pending.length,resolvedFromOtherMessages,shapes:[...shapes].map(([shape,count])=>({count,...JSON.parse(shape)}))}));
+            }
+            main().catch(()=>{console.error('Diagnostico interrompido sem expor dados privados.');process.exitCode=1;}).finally(()=>prisma.$disconnect());
+            NODE
