@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
  * Recebe `status`/`q` por prop em vez de ler `useSearchParams()`: o valor já foi
  * lido no servidor, e assim o componente não exige um limite de Suspense.
  */
-export function ConversationSearch({ status, q }: { status: string; q: string }) {
+export function ConversationSearch({ status, q, agentId = "" }: { status: string; q: string; agentId?: string }) {
   const router = useRouter();
   const ref = useRef<HTMLInputElement>(null);
   const id = useId();
@@ -22,6 +22,7 @@ export function ConversationSearch({ status, q }: { status: string; q: string })
   function go(term: string) {
     const params = new URLSearchParams({ status });
     if (term) params.set("q", term);
+    if (agentId) params.set("agent", agentId);
     router.push(`/conversas?${params}`);
   }
 

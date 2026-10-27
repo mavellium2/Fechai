@@ -1,21 +1,11 @@
 # Painel — padrões
-Fontes reais, sem criar domínio fictício em src/modules/painel.
-
-Em `(dashboard)/agentes/page.tsx`:
 ```tsx
 const [agents, usage] = await getAgentsNavigation(tenantId);
 ```
-
-Em `TenantTheme.tsx`:
-```tsx
-<Switch checked={dark} onCheckedChange={context.toggle} label="Modo escuro" className="tenant-theme-switch"
-  thumbContent={<Icon size={14} strokeWidth={2} aria-hidden />} />
-```
-
-- Editores originais dentro de diálogo nativo; fechar passa por useUnsavedNavigation. Sandbox recebe o id selecionado.
-- Grade/lista e busca são locais; valores vêm da configuração salva.
-- Tokens `--tenant-*` cobrem ambos os temas; ponte de cores legadas só no claro.
-- Menu: largura 260ms, rótulos com fade; mobile anima display/overlay. Respeitar prefers-reduced-motion.
-- Main é relative para conter elementos absolutos das tabelas no mobile.
-- cn registra text-micro em font-size do tailwind-merge: a cor não pode apagar o tamanho.
-- Teste da regressão: `tests/ui-class-merge.test.ts`; comandos e limites da conferência no README de Agentes.
+- Editor central, navegação por configurações e resumo salvo; teste ocupa o resumo. EditorLayout transforma StepTabs em seções sem desmontar campos.
+- SaveBar: dirty/pending; FormSaveBar compartilha snapshotForm com UnsavedForm, incluindo campos ocultos. Falha não avança baseline.
+- Conhecimento: editar local → Aplicar ao teste → comparar mesma pergunta/histórico → Publicar. Alterar outra vez invalida o teste no cliente; revisão protege concorrência no servidor.
+- Guard ao trocar configuração/sair; ToastProvider para retorno; dialog modal mantém FormFeedback inline.
+- Tokens --tenant-* nos dois temas. Grade semanal tem scroll próprio/teclado; mobile não pode ampliar a página.
+- cn registra text-micro como tamanho no tailwind-merge.
+- Testes novos: sandbox-draft, sandbox-engine-inspection, knowledge-draft-publish. README de Agentes detalha validação e limites.

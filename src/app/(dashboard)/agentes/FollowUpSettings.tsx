@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { saveFollowUpConfigAction } from "./actions";
 import { UnsavedForm } from "@/components/ui/unsaved-changes";
+import { SaveBar } from "./SaveBar";
 
 /**
  * As esteiras da ação "Follow-up automático" e a janela de envio.
@@ -80,7 +81,14 @@ function fromDraft(seq: SequenceDraft): FollowUpSequence {
 }
 
 export function FollowUpSettings({ agentId, config }: { agentId: string; config: FollowUpConfig }) {
-  const [state, formAction, pending] = useActionState(saveFollowUpConfigAction, null);
+  const [saved, setSaved] = useState(() => JSON.stringify({ noReply: fromDraft(toDraft(config.noReply)), declined: fromDraft(toDraft(config.declined)), window: config.window }));
+  const [activeSequence, setActiveSequence] = useState<FollowUpSequenceKey>("noReply");
+  const [state, formAction, pending] = useActionState(async (prev: Awaited<ReturnType<typeof saveFollowUpConfigAction>> | null, data: FormData) => {
+    const snapshot = String(data.get("config"));
+    const result = await saveFollowUpConfigAction(prev, data);
+    if (result.ok) setSaved(snapshot);
+    return result;
+  }, null);
   useActionToast(state, pending, { entity: "follow-up" });
   const baseId = useId();
 
@@ -133,10 +141,6 @@ export function FollowUpSettings({ agentId, config }: { agentId: string; config:
       <input type="hidden" name="agentId" value={agentId} />
       <input type="hidden" name="config" value={JSON.stringify(value)} />
 
-      <p className="text-sm text-neutral panel:text-white/60">
-        O agente retoma a conversa sozinho, em etapas. A esteira para quando o contato responde ou
-        marca horário — e quem já tem consulta marcada recebe só os lembretes da consulta.
-      </p>
 
       <fieldset className="min-w-0">
         <legend className="text-sm font-medium text-ink panel:text-white/85">Horário de envio</legend>
@@ -165,12 +169,13 @@ export function FollowUpSettings({ agentId, config }: { agentId: string; config:
         </p>
       </fieldset>
 
+      <div className="agent-sequence-tabs" aria-label="Sequência de follow-up">{SEQUENCES.map(({key}) => <button type="button" key={key} aria-pressed={activeSequence === key} onClick={() => setActiveSequence(key)}>{key === "noReply" ? "Sem resposta" : "Vai pensar"} · {sequences[key].steps.length}</button>)}</div>
       {SEQUENCES.map(({ key, title, hint }) => {
         const seq = sequences[key];
         const totals = cumulativeDelays(fromDraft(seq).steps);
         const hintId = `${baseId}-${key}-hint`;
         return (
-          <fieldset key={key} className="min-w-0 space-y-3 border-t border-white/10 pt-5">
+          <fieldset key={key} hidden={activeSequence !== key} className="min-w-0 space-y-3 border-t border-white/10 pt-5">
             <legend className="sr-only">{title}</legend>
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -200,7 +205,7 @@ export function FollowUpSettings({ agentId, config }: { agentId: string; config:
                   const id = `${baseId}-${key}-${index}`;
                   const minutes = stepMinutes(step);
                   return (
-                    <li key={index} className="space-y-3 rounded-control border border-white/10 p-3">
+                    <li key={index} className="followup-step"><details open={index === 0 || undefined}><summary>{index === 0 ? "Primeira mensagem" : `${index + 1}ª mensagem`} · após {formatDelay(totals[index])}</summary><div className="space-y-3">
                       <div className="flex flex-wrap items-end gap-2">
                         <div className="w-24">
                           <label htmlFor={id} className="text-sm font-medium text-ink panel:text-white/85">
@@ -275,7 +280,7 @@ export function FollowUpSettings({ agentId, config }: { agentId: string; config:
                           describedBy={`${id}-ia`}
                         />
                       </div>
-                    </li>
+                    </div></details></li>
                   );
                 })}
               </ol>
@@ -302,9 +307,7 @@ export function FollowUpSettings({ agentId, config }: { agentId: string; config:
       </p>
 
 
-      <Button type="submit" variant="outline" loading={pending} loadingLabel="Salvando follow-up">
-        Salvar follow-up
-      </Button>
+      <SaveBar dirty={JSON.stringify(value) !== saved} pending={pending} />
     </UnsavedForm>
   );
 }

@@ -1,9 +1,7 @@
 # Painel — leituras
-Fonte: `src/modules/agent-engine/agents.ts`.
-
-- `listAgents(tenantId)`: archived=false, principal primeiro e createdAt asc; inclui contagens e ações ligadas. Registro completo fica no servidor.
-- `getAgentOwned(tenantId,id)`: findFirst com tenantId/id, ou null.
-- `getAgentUsage(tenantId)`: plano + contagem não arquivada → AgentUsage.
-- `getAgentsNavigation(tenantId)` em AgentsFrame: React.cache de listAgents/getAgentUsage na mesma renderização.
-- `AgentsFrame`: requireTenant e projeção para sidebar: id, nome, ligado, principal, pronto e conhecimento; sem prompt.
-- Ler com a página, não no layout persistente, para atualizar a lista após criar/importar/renomear.
+- listAgents(tenantId): não arquivados, principal primeiro, contagens/ações; dados completos ficam no servidor.
+- getAgentOwned: id + tenant; getAgentUsage: plano e contagem.
+- getAgentsNavigation: React.cache na renderização da página; não mover a lista para layout persistente.
+- AgentsFrame agora é contêiner/guard; Directory projeta nome, status e descrição.
+- Conversas: tenant + isTest + situação/agente/busca, take 30–300; selecionada sempre id/tenant. Próxima consulta scheduled/futura por lead/tenant.
+- searchSimilarChunks: tenant/agente, título e id da origem; exclui documento substituído pelo rascunho, que recebe vetores temporários no teste. Inspeção vem da mesma recuperação usada no prompt.

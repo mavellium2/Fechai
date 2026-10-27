@@ -2,6 +2,22 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Agentes v7, habilidades e Conversas v1 — 2026-10-27
+
+Entrada de Agentes em cards; navegação de configurações em blocos/lista, editor
+central e resumo lateral. Personalidade, regras, dados, conhecimento, agenda,
+follow-up, transferência, triagem e voz preservam os contratos existentes.
+Conversas ganha lista/histórico/contato contínuos, filtros e busca no histórico.
+O teste lateral mostra fontes reais do contexto e ferramentas executadas; permite
+editar conhecimento em rascunho, repetir a mesma pergunta com o histórico anterior
+e comparar antes de publicar. O rascunho não modifica o atendimento. Publicação
+prepara vetores antes de uma transação condicional, com revisão SHA-256 para
+recusar alteração concorrente. Overrides/inspeção só em conversa de teste do
+tenant; sem WhatsApp nem gravação na agenda. Sem migração ou worker novo.
+Documentação: READMEs de Agentes/Conversas e `.claude/context/painel/`.
+Validação: 2.318 testes em 140 arquivos; comparação com IA e layouts desktop/mobile
+conferidos no navegador. O rascunho usado no QA foi descartado sem publicação.
+
 ## Recuperação de 30 dias do WhatsApp e mensagens temporárias — 2026-10-26
 
 Admin personificando uma conta ativa pode reconciliar todas as conversas da

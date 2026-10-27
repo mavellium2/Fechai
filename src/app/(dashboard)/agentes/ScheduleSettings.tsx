@@ -1,6 +1,7 @@
 "use client";
 
 import { ClinicorpQrTermsDialog } from "./ClinicorpQrTermsDialog";
+import { FormSaveBar } from "./SaveBar";
 import { errorToResult, isFrameworkSignal } from "@/components/ui/toast/save-service";
 import { startTransition, useActionState, useRef, useState } from "react";
 import { useSaveFeedback } from "@/components/ui/toast/use-save-feedback";
@@ -221,40 +222,7 @@ export function ScheduleSettings({
     }} className="space-y-5 border-t border-white/10 pt-5">
       <input type="hidden" name="agentId" value={agentId} />
       <fieldset disabled={pending} className="min-w-0 space-y-5">
-      <div className="space-y-4">
-        {([
-          ["allowCancellation", "Permitir cancelamento", "O agente confirma qual consulta será cancelada e espera a confirmação do cliente antes de desmarcar."],
-          ["allowRescheduling", "Permitir reagendamento", "O agente troca o horário após o cliente confirmar. Se o novo horário estiver indisponível, mantém o original."],
-          ["recognizeExisting", "Reconhecer consulta já marcada", "Ao receber uma confirmação ou retorno, reconhece a consulta sem reiniciar o agendamento ou oferecer novos horários."],
-        ] as const).map(([key, label, description]) => (
-          <div key={key} className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-white/85">{label}</p>
-              <p id={`schedule-${key}`} className="mt-1 text-sm text-white/60">{description}</p>
-            </div>
-            <Switch checked={options[key]} onCheckedChange={(checked) => saveOption(key, checked)}
-              label={label} describedBy={`schedule-${key}`} />
-            <input type="hidden" name={key} value={String(options[key])} />
-          </div>
-        ))}
-      </div>
-
-      <WeeklyAvailabilityGrid value={weeklyAvailability} onChange={setWeeklyAvailability} disabled={pending} />
-      <input type="hidden" name="startTime" value={config.startTime} />
-      <input type="hidden" name="endTime" value={config.endTime} />
-      <input type="hidden" name="breaks" value="[]" />
-
-      {/* Logo depois da grade porque é a exceção dela: a grade diz que quarta
-          é dia de atendimento, isto diz que ESTA quarta não é. */}
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-medium text-white/85">Dias sem atendimento</legend>
-        <p className="text-sm text-white/60">
-          Feriados, recesso ou qualquer data em que o agente não deve marcar — mesmo caindo num
-          dia liberado na grade acima.
-        </p>
-        <BlockedDatesList value={blockedDates} onChange={setBlockedDates} disabled={pending} />
-      </fieldset>
-
+      <h3>Duração e local</h3>
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
           label="Duração padrão"
@@ -312,13 +280,26 @@ export function ScheduleSettings({
         </Field>
       </div>
 
-      {/*
-        Variações ficam logo abaixo da duração padrão, e não numa aba própria:
-        a pergunta "e quando o atendimento é mais curto?" nasce olhando o campo
-        do padrão. Com a lista vazia (o caso comum) só o botão aparece, então
-        quem atende tudo no mesmo bloco não paga por uma opção que não usa.
-      */}
-      <fieldset className="min-w-0 space-y-3">
+      <details className="agent-extra"><summary>Permissões de cancelamento e reagendamento</summary>      <div className="space-y-4">
+        {([
+          ["allowCancellation", "Permitir cancelamento", "O agente confirma qual consulta será cancelada e espera a confirmação do cliente antes de desmarcar."],
+          ["allowRescheduling", "Permitir reagendamento", "O agente troca o horário após o cliente confirmar. Se o novo horário estiver indisponível, mantém o original."],
+          ["recognizeExisting", "Reconhecer consulta já marcada", "Ao receber uma confirmação ou retorno, reconhece a consulta sem reiniciar o agendamento ou oferecer novos horários."],
+        ] as const).map(([key, label, description]) => (
+          <div key={key} className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-white/85">{label}</p>
+              <p id={`schedule-${key}`} className="mt-1 text-sm text-white/60">{description}</p>
+            </div>
+            <Switch checked={options[key]} onCheckedChange={(checked) => saveOption(key, checked)}
+              label={label} describedBy={`schedule-${key}`} />
+            <input type="hidden" name={key} value={String(options[key])} />
+          </div>
+        ))}
+      </div>
+
+</details>
+      <details className="agent-extra"><summary>+ Duração por tipo de atendimento</summary>      <fieldset className="min-w-0 space-y-3">
         <legend className="flex items-center gap-1.5 text-sm font-medium text-white/85">
           Durações por tipo de atendimento
           <InfoHint label="durações por tipo de atendimento">
@@ -372,7 +353,30 @@ export function ScheduleSettings({
             </Button>
           )}
         </div>
-      </fieldset>
+      </fieldset></details>
+      <WeeklyAvailabilityGrid value={weeklyAvailability} onChange={setWeeklyAvailability} disabled={pending} />
+      <input type="hidden" name="startTime" value={config.startTime} />
+      <input type="hidden" name="endTime" value={config.endTime} />
+      <input type="hidden" name="breaks" value="[]" />
+
+      {/* Logo depois da grade porque é a exceção dela: a grade diz que quarta
+          é dia de atendimento, isto diz que ESTA quarta não é. */}
+      <details className="agent-extra"><summary>Exceções · dias sem atendimento</summary>      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium text-white/85">Dias sem atendimento</legend>
+        <p className="text-sm text-white/60">
+          Feriados, recesso ou qualquer data em que o agente não deve marcar — mesmo caindo num
+          dia liberado na grade acima.
+        </p>
+        <BlockedDatesList value={blockedDates} onChange={setBlockedDates} disabled={pending} />
+      </fieldset></details>
+
+      {/*
+        Variações ficam logo abaixo da duração padrão, e não numa aba própria:
+        a pergunta "e quando o atendimento é mais curto?" nasce olhando o campo
+        do padrão. Com a lista vazia (o caso comum) só o botão aparece, então
+        quem atende tudo no mesmo bloco não paga por uma opção que não usa.
+      */}
+
 
       <fieldset className="min-w-0 space-y-4 border-t border-white/10 pt-5">
         <legend className="sr-only">Lembrete de consulta</legend>
@@ -438,9 +442,7 @@ export function ScheduleSettings({
       <input type="hidden" name="metaReminderTemplate" value={metaTemplate ? JSON.stringify(metaTemplate) : ""} />
 
 
-      <Button type="submit" variant="outline" loading={pending} loadingLabel="Salvando agendamento">
-        Salvar configurações de agendamento
-      </Button>
+      <FormSaveBar result={state} pending={pending} />
     </UnsavedForm>
     {qrTermsOpen && <ClinicorpQrTermsDialog pending={pending} result={state} onClose={() => setQrTermsOpen(false)}
       onAccept={(terms) => {

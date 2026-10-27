@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { InfoHint } from "@/components/ui/info-hint";
 import { useUnsavedNavigation } from "@/components/ui/unsaved-changes";
+import { useInlineEditor } from "./EditorLayout";
 
 export type StepTab = {
   key: string;
@@ -27,6 +28,9 @@ export function StepTabs({ tabs }: { tabs: StepTab[] }) {
   const [active, setActive] = useState(0);
   const groupId = useId();
   const confirmNavigation = useUnsavedNavigation();
+  const inline = useInlineEditor();
+
+  if (inline) return <div className="agent-form-sections">{tabs.map(t => <section key={t.key} className="agent-form-section"><h3>{t.label}</h3>{t.content}</section>)}</div>;
 
   return (
     <div>

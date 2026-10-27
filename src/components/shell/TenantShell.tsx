@@ -46,7 +46,7 @@ export function TenantShell({ navItems, brandHref, brandSubtitle, footerLabel, u
 }) {
   const expanded = useSyncExternalStore(subscribe, () => expandedPreference(context), () => context === "admin");
   const pathname = usePathname();
-  const agents = pathname === "/agentes" || pathname.startsWith("/agentes/");
+  const agents = pathname === "/agentes" || pathname.startsWith("/agentes/") || pathname === "/conversas";
   const accountHref = context === "admin" ? brandHref : "/configuracoes";
   const initials = brandSubtitle.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "F";
 

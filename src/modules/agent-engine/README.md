@@ -105,6 +105,20 @@ leva as definições, nunca os valores das conversas.
 
 ### Conversa de teste (sandbox)
 
+**Editor v7 (27/10/2026).** `/api/sandbox` aceita `sessionId` UUID para não
+herdar contexto invisível ao reabrir a tela. `inspect` devolve os trechos da
+mesma recuperação usada no prompt, a persona disponível e nomes de ferramentas,
+nunca raciocínio interno. `sandboxDraft` substitui um documento apenas no
+contexto daquele turno, com embeddings temporários; `historyOverride` repete
+a pergunta com o histórico anterior numa conversa de comparação separada.
+O motor exige `isTest`, tenant/lead corretos e `dryRunScheduling` para esses três
+recursos. Falha de embeddings do rascunho interrompe o teste em vez de responder
+com o texto antigo. Nenhum deles grava configuração do agente ou conhecimento.
+A publicação é explícita no editor: a action verifica revisão SHA-256 e
+`knowledge-base/repository.publishDocumentDraft` troca documento e vetores
+atomicamente com a versão esperada. Detalhes no
+[`README de Agentes`](../../app/(dashboard)/agentes/README.md).
+
 `getOrCreateConversation` com `isTest: true` cria lead/conversa marcados — ficam
 fora de Contatos e Relatórios, mas **aparecem em `/conversas`** (aba "Testes"),
 com histórico permanente. O botão "Recomeçar" do sandbox chama

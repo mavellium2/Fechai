@@ -1,134 +1,32 @@
 "use client";
-
 import { useActionState, useState } from "react";
 import { useActionToast } from "@/components/ui/toast";
-import { Eye, EyeOff } from "lucide-react";
-import {
-  composeSystemPrompt,
-  PERSONA_FIELDS,
-  PERSONA_GROUPS,
-  type PersonaAnswers,
-} from "@/modules/agent-engine/persona";
-import { Field, fieldProps } from "@/components/ui/field";
+import { composeSystemPrompt, type PersonaAnswers } from "@/modules/agent-engine/persona";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import { StepTabs, type StepTab } from "./StepTabs";
-import { savePersona } from "./actions";
+import { SelectMenu } from "@/components/ui/select-menu";
 import { UnsavedForm } from "@/components/ui/unsaved-changes";
-
-const EMPTY: PersonaAnswers = {
-  agentName: "",
-  businessName: "",
-  sector: "",
-  tone: "",
-  writingStyle: "",
-  offer: "",
-  avoid: "",
-  objective: "",
-};
-
-/**
- * Persona do agente.
- *
- * Antes eram vários campos empilhados, sem explicação e sem nenhuma pista do que
- * o preenchimento produzia — quem chegava não sabia se estava configurando
- * aparência, texto de saudação ou comportamento. Agora os campos vêm em três
- * blocos com título ("quem ele é", "como fala", "onde a conversa chega"), cada
- * um com uma dica do que responder, e uma prévia do briefing que o agente
- * recebe: o mesmo texto que vai para o modelo, montado no cliente pela mesma
- * função do servidor (`composeSystemPrompt`).
- */
-export function PersonaForm({
-  agentId,
-  initial,
-}: {
-  agentId: string;
-  initial: Partial<PersonaAnswers>;
-}) {
-  const [state, formAction, pending] = useActionState(savePersona, null);
-  useActionToast(state, pending, { entity: "persona", gender: "f" });
+import { SaveBar } from "./SaveBar";
+import { savePersona } from "./actions";
+const EMPTY: PersonaAnswers = { agentName: "", businessName: "", sector: "", tone: "", writingStyle: "", offer: "", avoid: "", objective: "" };
+export function PersonaForm({ agentId, initial }: { agentId: string; initial: Partial<PersonaAnswers> }) {
   const [answers, setAnswers] = useState<PersonaAnswers>({ ...EMPTY, ...initial });
-  const [showPreview, setShowPreview] = useState(false);
-
-  const preview = composeSystemPrompt(answers);
-
-  // Um grupo por sub-aba, todas sempre montadas (ver StepTabs) — os três
-  // grupos continuam sendo UM `<form>` só, com UM botão salvar.
-  const tabs: StepTab[] = PERSONA_GROUPS.map((group) => ({
-    key: group.key,
-    label: group.legend.replace(/^\d+\.\s*/, ""),
-    hint: group.hint,
-    content: (
-      <fieldset className="min-w-0 space-y-5">
-        {/* A sub-aba ativa logo acima já mostra o nome do grupo — repetir aqui
-            como título numerado, com um parágrafo embaixo, era a segunda vez
-            que a mesma frase aparecia. Fica só a legenda acessível (o
-            `<fieldset>` precisa de uma) e a explicação na bolinha. */}
-        <legend className="sr-only">{group.legend}</legend>
-
-        {PERSONA_FIELDS.filter((f) => f.group === group.key).map((f) => {
-          // `name` já é único e estável — serve de id sem precisar de useId().
-          const id = `persona-${f.name}`;
-          // O schema do servidor só exige o nome do negócio; o resto é opcional.
-          const required = f.name === "businessName";
-          const Control = f.type === "textarea" ? Textarea : Input;
-
-          return (
-            // O hint da persona explica o que é o campo, não como preenchê-lo
-            // (disso cuida o placeholder) — por isso vai na bolinha, não em
-            // linha: um parágrafo por campo afogaria o formulário.
-            <Field key={f.name} label={f.label} htmlFor={id} about={f.hint} optional={!required}>
-              <Control
-                {...fieldProps(id)}
-                name={f.name}
-                placeholder={f.placeholder}
-                value={answers[f.name]}
-                onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-                  setAnswers((prev) => ({ ...prev, [f.name]: e.target.value }))
-                }
-                required={required}
-              />
-            </Field>
-          );
-        })}
-      </fieldset>
-    ),
-  }));
-
-  return (
-    <UnsavedForm action={formAction} result={state} label="Personalidade" className="space-y-8">
-      <input type="hidden" name="agentId" value={agentId} />
-
-      {/* O aviso "isto vira instrução permanente; fato que muda vai na Base de
-          conhecimento" migrou para a bolinha do título do passo (AgentWizard):
-          era a terceira vez que a mesma ideia aparecia antes do primeiro campo. */}
-      <StepTabs tabs={tabs} />
-
-      {/* Prévia fechada por padrão: é para conferir, não para editar — quem
-          quiser ajustar volta nos campos, que é onde o texto é gerado. */}
-      <div className="rounded-surface border border-white/10 bg-black/20 p-4">
-        <button
-          type="button"
-          onClick={() => setShowPreview((v) => !v)}
-          aria-expanded={showPreview}
-          className="flex items-center gap-2 rounded-control font-mono text-micro uppercase tracking-[0.15em] text-white/70 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
-        >
-          {showPreview ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
-          {showPreview ? "Ocultar" : "Ver"} o briefing que o agente recebe
-        </button>
-
-        {showPreview && (
-          <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-white/70">
-            {preview}
-          </pre>
-        )}
-      </div>
-
-
-      <Button type="submit" loading={pending} loadingLabel="Salvando persona">
-        Salvar persona
-      </Button>
-    </UnsavedForm>
-  );
+  const [saved, setSaved] = useState(JSON.stringify({ ...EMPTY, ...initial }));
+  const [custom, setCustom] = useState({ tone: false, writingStyle: false });
+  const [state, action, pending] = useActionState(async (prev: Awaited<ReturnType<typeof savePersona>> | null, data: FormData) => {
+    const snapshot = JSON.stringify(answers);
+    const result = await savePersona(prev, data);
+    if (result.ok) setSaved(snapshot);
+    return result;
+  }, null);
+  useActionToast(state, pending, { entity: "personalidade", gender: "f" });
+  const field = (key: keyof PersonaAnswers, label: string, multiline = false) => <label className="agent-form-field" key={key}><span>{label}</span>{multiline ? <Textarea name={key} value={answers[key]} onChange={e => setAnswers(a => ({ ...a, [key]: e.target.value }))} rows={4} /> : <Input name={key} value={answers[key]} required={key === "businessName"} onChange={e => setAnswers(a => ({ ...a, [key]: e.target.value }))} />}</label>;
+  const select = (key: "tone" | "writingStyle", label: string, values: string[]) => <div className="agent-form-field"><span id={`persona-${key}`}>{label}</span><SelectMenu label={label} labelledBy={`persona-${key}`} value={custom[key] ? "__custom__" : answers[key]} onChange={value => { setCustom(c => ({ ...c, [key]: value === "__custom__" })); if (value !== "__custom__") setAnswers(a => ({ ...a, [key]: value })); }} options={[...new Set(["", ...values, answers[key]])].map(v => ({ value: v, label: v || "Escolher" })).concat({ value: "__custom__", label: "Personalizar" })} />{custom[key] && <Input aria-label={`${label} personalizado`} value={answers[key]} onChange={e => setAnswers(a => ({ ...a, [key]: e.target.value }))} />}<input type="hidden" name={key} value={answers[key]} /></div>;
+  return <UnsavedForm action={action} result={state} label="Personalidade" className="agent-persona-form">
+    <input type="hidden" name="agentId" value={agentId} /><input type="hidden" name="avoid" value={answers.avoid} />
+    <section className="agent-form-section"><h3>Quem ela é</h3><div className="agent-fields-grid">{field("agentName", "Nome do agente")}{field("businessName", "Nome do negócio")}</div>{field("sector", "Segmento")}</section>
+    <section className="agent-form-section"><h3>Como ela fala</h3><div className="agent-fields-grid">{select("tone", "Tom de voz", ["Acolhedor", "Direto", "Formal"])}{select("writingStyle", "Estilo de escrita", ["Frases curtas", "Detalhado", "Conversacional"])}</div><div className="agent-example"><small>Assim soa a conversa · prévia ilustrativa</small><p>Oi! Sou {answers.agentName || "seu agente"}{answers.businessName ? `, da ${answers.businessName}` : ""}. Como posso te ajudar?</p></div></section>
+    <section className="agent-form-section"><h3>Objetivo da conversa</h3>{field("objective", `O que ${answers.agentName || "o agente"} deve buscar?`, true)}<details className="agent-extra"><summary>O que ela oferece e instruções completas</summary>{field("offer", "O que o negócio oferece", true)}<pre className="agent-prompt-preview">{composeSystemPrompt(answers)}</pre></details></section>
+    <SaveBar dirty={JSON.stringify(answers) !== saved} pending={pending} />
+  </UnsavedForm>;
 }

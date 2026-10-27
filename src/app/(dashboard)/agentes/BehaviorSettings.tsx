@@ -43,6 +43,7 @@ const OPTIONS: {
 
 /** Os comportamentos de conversa do agente (passo "Comportamento"). */
 export function BehaviorSettings({
+  focused,
   agentId,
   listenAudio,
   speakReplies,
@@ -54,6 +55,7 @@ export function BehaviorSettings({
   voiceStyle = "",
   voicePrompt = "",
 }: {
+  focused?: BehaviorKey;
   agentId: string;
   listenAudio: boolean;
   speakReplies: boolean;
@@ -99,8 +101,13 @@ export function BehaviorSettings({
     });
   }
 
+  if (focused && focused !== "speakReplies") {
+    const listening = focused === "listenAudio";
+    const steps = listening ? [["1. O contato envia um áudio", "A mensagem de voz chega pelo WhatsApp."], ["2. O agente entende o conteúdo", "O áudio é transcrito para dar continuidade ao atendimento."], ["3. A conversa continua", "A resposta considera o conteúdo do áudio e o histórico."]] : [["1. Reaja a uma mensagem", "Um atendente reage pelo WhatsApp conectado."], ["2. O agente pausa naquela conversa", "A conversa é sinalizada para atendimento humano."], ["3. Continue com o contato", "A equipe responde pelo painel ou WhatsApp."]];
+    return <div className="agent-behavior-explanation"><h3>{listening ? "Como funciona" : "Como a equipe assume"}</h3>{steps.map(([title, text]) => <div className="agent-info-row" key={title}><h4>{title}</h4><p>{text}</p></div>)}<section className="agent-form-section"><h3>{listening ? "Entrada e resposta" : "Quando o agente deve voltar?"}</h3><p className="agent-help">{listening ? "Com a escuta desligada, mensagens de áudio não recebem resposta automática. Para responder com voz, configure Responder em áudio." : "No painel de conversas, use Reativar agente quando a equipe terminar. A pausa vale apenas para aquela conversa."}</p><div className="agent-example">{listening ? "A transcrição permite compreender a mensagem; a voz de saída é configurada separadamente." : "A reação que pausa o agente é a da equipe, não a do contato."}</div></section><p className="agent-help">O interruptor acima salva a alteração imediatamente.</p></div>;
+  }
   return (
-    <div className="space-y-3">
+    <div className={focused ? "agent-voice-settings space-y-3" : "space-y-3"}>
       {/* Só o erro fica: a descrição dos três comportamentos repetia o título
           do passo, e cada linha abaixo já se explica sozinha. */}
       {error && <Alert tone="danger">{error}</Alert>}
@@ -109,7 +116,7 @@ export function BehaviorSettings({
           e um toggle que só recusa até você rolar a tela e gravar inverte a
           ordem real das ações. */}
       <section className="rounded-surface border border-white/10 p-4">
-        <h3 className="font-display text-base font-semibold text-white">A voz do agente</h3>
+        <h3 className="font-display text-base font-semibold text-white">{focused ? "De onde vem a voz?" : "A voz do agente"}</h3>
         <div className="mt-3">
           <VoiceRecorder
             agentId={agentId}
@@ -130,11 +137,10 @@ export function BehaviorSettings({
             quem ainda está montando o agente. Configuração que existe e não
             aparece é pior que uma linha a mais na tela. */}
         <VoiceStyleSelect agentId={agentId} initial={voiceStyle} />
-        <VoicePromptForm agentId={agentId} initial={voicePrompt} />
-        <SpeechBlocklistForm agentId={agentId} initial={speechBlocklist} />
+        {focused ? <><details className="agent-extra"><summary>Instruções para falar</summary><VoicePromptForm agentId={agentId} initial={voicePrompt} /></details><details className="agent-extra"><summary>Termos que não deve pronunciar</summary><SpeechBlocklistForm agentId={agentId} initial={speechBlocklist} /></details></> : <><VoicePromptForm agentId={agentId} initial={voicePrompt} /><SpeechBlocklistForm agentId={agentId} initial={speechBlocklist} /></>}
       </section>
 
-      <ul className="space-y-2">
+      <ul className={focused ? "hidden" : "space-y-2"}>
         {OPTIONS.map((opt) => {
           const on = values[opt.key];
           const descId = `comportamento-${opt.key}-desc`;

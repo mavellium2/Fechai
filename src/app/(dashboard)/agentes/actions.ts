@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
@@ -61,6 +62,7 @@ import {
   deleteDocument,
   getDocument,
   updateDocument,
+  publishDocumentDraft,
 } from "@/modules/knowledge-base/repository";
 import { extractTextFromFile } from "@/modules/knowledge-base/extract";
 import { uploadToBunny } from "@/lib/bunny";
@@ -1476,7 +1478,7 @@ export async function removeDocument(agentId: string, documentId: string): Promi
 }
 
 type DocumentContentResult =
-  | { ok: true; title: string; content: string }
+  | { ok: true; title: string; content: string; revision: string }
   | { ok: false; error: string };
 
 // Busca o texto sob demanda (ao abrir o modal de ver/editar) em vez de mandar
@@ -1490,7 +1492,7 @@ export async function getDocumentContent(
 
   const doc = await getDocument(tenantId, agent.id, documentId);
   if (!doc) return { ok: false, error: "Documento não encontrado" };
-  return { ok: true, title: doc.title, content: doc.content };
+  return { ok: true, title: doc.title, content: doc.content, revision: createHash("sha256").update(JSON.stringify([doc.title, doc.content])).digest("hex") };
 }
 
 export async function updateDocumentAction(_prev: Result | null, formData: FormData): Promise<Result> {
@@ -1509,8 +1511,13 @@ export async function updateDocumentAction(_prev: Result | null, formData: FormD
 
   const previous = await getDocument(tenantId, agent.id, documentId);
 
-  const doc = await updateDocument(tenantId, agent.id, documentId, { title, content });
+  const isDraftPublish = formData.has("baseRevision");
+  if (isDraftPublish && (!previous || createHash("sha256").update(JSON.stringify([previous.title, previous.content])).digest("hex") !== String(formData.get("baseRevision")))) return { ok: false, error: "Este documento mudou desde que você abriu. Reabra a versão publicada antes de tentar novamente." };
+  const doc = isDraftPublish
+    ? await publishDocumentDraft(tenantId, agent.id, documentId, { title, content, baseTitle: previous!.title, baseContent: previous!.content })
+    : await updateDocument(tenantId, agent.id, documentId, { title, content });
   if (!doc) return { ok: false, error: "Documento não encontrado" };
+  if ("ok" in doc && !doc.ok) return { ok: false, error: doc.error };
 
   await recordChange({
     event: "knowledge.updated",

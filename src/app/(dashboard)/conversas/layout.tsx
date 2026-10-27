@@ -1,4 +1,6 @@
 import { requireProductAccess } from "@/lib/require-product";
+import "./conversations-workspace.css";
+import "../agentes/agents-v7.css";
 
 /**
  * Porteira do produto: quem entrou só como afiliado não tem essas telas e é

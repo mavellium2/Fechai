@@ -1,14 +1,11 @@
 # Painel — ações
-Nenhuma server action nova. Fonte reutilizada: `src/app/(dashboard)/agentes/actions.ts`.
-`Result={ok:boolean,error?,info?}`; `AgentCopyResult` acrescenta agentId?/warnings?.
-
-- `createAgentAction(prev,FormData)`: nome via Zod e limite; cria, revalida e redireciona.
-- `importAgentAction(prev,FormData)` / `duplicateAgent(id)`: pacote e limite; AgentCopyResult.
-- `renameAgent(id,name)`: nome 1–60; Result.
-- `setPrimaryAgent(id)` / `setAgentEnabled(id,bool)`: Result.
-- `deleteAgent(id)`: exclusão real; exige outro ativo e preserva conversas por substituição.
-- `setActionEnabled(id,key,bool)`: catálogo e limite do plano; Result.
-- `setAgentBehavior(id,field,bool)`: áudio exige voz e disponibilidade; Result.
-- Editores mantêm actions de persona, regras, dados, conhecimento, agenda, follow-up e voz.
-
-Criação/importação exigem tenant; demais operações por id passam por requireAgent/posse. As actions mantêm auditoria e revalidação. Tema/menu só alteram preferências locais.
+Fonte: `(dashboard)/agentes/actions.ts`; Result={ok,error?,info?}.
+- Criar/importar/duplicar: validação e limite do plano; gestão no AgentHeader.
+- Renomear/principal/ligar/excluir: requireAgent/posse, auditoria e revalidação existentes.
+- setActionEnabled: catálogo e limite; setAgentBehavior: voz exige configuração.
+- Editores mantêm actions de persona, regras, dados, agenda, follow-up e voz.
+- getDocumentContent: texto/título/revisão SHA-256 sob demanda.
+- updateDocumentAction com baseRevision: verifica revisão; publishDocumentDraft prepara embeddings e substitui documento/chunks/vetores em transação condicional. Conflito/falha não muda o publicado.
+- POST /api/sandbox: sessão UUID, rascunho opcional, comparação com histórico anterior; valida posse e limites. Teste sem WhatsApp/cota/agenda real. DELETE arquiva só a sessão informada.
+- Conversas mantém actions de envio/pausa/reativação/resumo. Assumir usa pausa existente.
+Tema/menu alteram apenas preferências locais.

@@ -264,12 +264,12 @@ export function SendMessageForm({
 
           <Button
             type="submit"
-            size="icon"
+            size="sm"
             loading={pending}
             loadingLabel={asClient ? "Aguardando o agente" : "Enviando"}
             aria-label={asClient ? "Enviar como cliente" : "Enviar mensagem"}
           >
-            <Send size={16} aria-hidden />
+            <Send size={16} aria-hidden /><span>Enviar</span>
           </Button>
         </form>
       )}

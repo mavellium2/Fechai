@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { getUsageSummary } from "@/modules/billing/usage";
-import { embedQuery } from "@/modules/knowledge-base/embeddings";
+import { embedQuery, embedTexts } from "@/modules/knowledge-base/embeddings";
+import { chunkText } from "@/modules/knowledge-base/chunk";
+import { cosineDistance, type SandboxDraft, type SandboxInspection, type SandboxSource } from "./sandbox-draft";
 import { searchSimilarChunks } from "@/modules/knowledge-base/repository";
 import {
   AiError,
@@ -62,6 +64,7 @@ export type AgentTurn = {
   status: TurnStatus;
   /** id da mensagem da resposta gravada no histórico — o webhook usa para anexar o key.id do WhatsApp e não duplicar o eco fromMe. */
   replyMessageId?: string;
+  inspection?: SandboxInspection;
 };
 
 // Monta o contexto (persona + RAG + histórico), roda o loop de function calling
@@ -109,8 +112,16 @@ export async function runAgentTurn(input: {
    * simulação pelo MCP (`agent-mcp/simulate.ts`).
    */
   systemPromptOverride?: string;
+  sandboxDraft?: SandboxDraft;
+  inspect?: boolean;
+  historyOverride?: { role: "user" | "assistant"; content: string }[];
 }): Promise<AgentTurn> {
   const { tenantId, conversationId, leadId, userMessage } = input;
+  // Overrides/inspection are restricted in the engine too, not just at the HTTP boundary.
+  if (input.sandboxDraft || input.inspect || input.historyOverride) {
+    const test = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId, isTest: true, leadId }, select: { id: true } });
+    if (!test || !input.dryRunScheduling) throw new Error("Sandbox context required");
+  }
 
   if (input.existingUserMessageId) {
     const existing = await prisma.message.findFirst({
@@ -183,7 +194,7 @@ export async function runAgentTurn(input: {
           select: { key: true, config: true },
         })
       : Promise.resolve([]),
-    getRecentMessages(conversationId, 10),
+    input.historyOverride ? Promise.resolve([...input.historyOverride.map(message => ({ ...message, createdAt: new Date() })), { role: "user", content: userMessage, createdAt: new Date() }]) : getRecentMessages(conversationId, 10),
   ]);
 
   // Registra quem atendeu — /conversas mostra isso, e sem o vínculo não há
@@ -194,7 +205,7 @@ export async function runAgentTurn(input: {
       .catch(() => {});
   }
 
-  const retrieved = agent ? await retrieveContext(tenantId, agent.id, userMessage) : null;
+  const retrieved = agent ? await retrieveContext(tenantId, agent.id, userMessage, input.sandboxDraft) : null;
   const context = retrieved?.text ?? "";
 
   // Expediente e data de hoje entram no prompt quando o agendamento está
@@ -357,7 +368,8 @@ export async function runAgentTurn(input: {
   }
   finalReply = sanitizedReply || "Certo!";
   const replyMsg = await appendMessage(conversationId, "assistant", finalReply, "agent");
-  return { reply: finalReply, toolsUsed, status: agent ? "ok" : "no_agent", replyMessageId: replyMsg.id };
+  return { reply: finalReply, toolsUsed, status: agent ? "ok" : "no_agent", replyMessageId: replyMsg.id,
+    ...(input.inspect ? { inspection: { sources: retrieved?.sources ?? [], searched: retrieved?.searched ?? false, instructions: personaPrompt, tools: toolsUsed } } : {}) };
 }
 
 /**
@@ -495,11 +507,18 @@ async function retrieveContext(
   tenantId: string,
   agentId: string,
   query: string,
-): Promise<Retrieved> {
+  draft?: SandboxDraft,
+): Promise<Retrieved & { sources?: SandboxSource[] }> {
   try {
     const embedding = await embedQuery(query);
-    if (!embedding) return { text: "", searched: false, closest: null };
-    const chunks = await searchSimilarChunks(tenantId, agentId, embedding, 4);
+    if (!embedding) { if (draft) throw new Error("Draft embeddings unavailable"); return { text: "", searched: false, closest: null }; }
+    let chunks: { content: string; distance: number; documentId: string; title: string; draft?: boolean }[] = await searchSimilarChunks(tenantId, agentId, embedding, 4, draft?.documentId);
+    if (draft) {
+      const pieces = chunkText(draft.content);
+      const vectors = await embedTexts(pieces);
+      if (!vectors || vectors.length !== pieces.length) throw new Error("Draft embeddings unavailable");
+      chunks = [...chunks, ...pieces.map((content, i) => ({ content, distance: cosineDistance(embedding, vectors[i]), documentId: draft.documentId, title: draft.title, draft: true }))].sort((a, b) => a.distance - b.distance).slice(0, 4);
+    }
     if (chunks.length === 0) return { text: "", searched: true, closest: null };
     // Delimitador explícito: o que vem daqui é material de CONSULTA. Sem a
     // marcação, um documento da base com texto imperativo ("ignore as regras
@@ -513,8 +532,10 @@ async function retrieveContext(
         "\n</base_de_conhecimento>",
       searched: true,
       closest: Math.min(...chunks.map((c) => Number(c.distance))),
+      sources: chunks.map(c => ({ documentId: c.documentId, title: c.title, content: c.content, ...(c.draft ? { draft: true } : {}) })),
     };
   } catch (err) {
+    if (draft) throw err;
     console.error("[orchestrator] RAG falhou", err);
     return { text: "", searched: false, closest: null };
   }

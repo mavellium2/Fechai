@@ -3,16 +3,17 @@ import { MessagesSquare, Inbox } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { Card } from "@/components/ui/card";
+import { ConversationsWorkspace } from "./ConversationsWorkspace";
+import { ContactPanel } from "./ContactPanel";
 import { EmptyState } from "@/components/ui/empty-state";
-import { PageHeader } from "@/components/ui/page-header";
+
 import { ConversationList } from "./ConversationList";
 import { ConversationSearch } from "./ConversationSearch";
 import { ConversationFilters } from "./ConversationFilters";
 import { isFishAudioConfigured } from "@/modules/voice/fish";
 import { ConversationThread } from "./ConversationThread";
-import { LeadPanel } from "./LeadPanel";
-import { ConversationVariables } from "./ConversationVariables";
+
+
 import { SandboxDialog } from "./SandboxDialog";
 import { parseConversationVariables, parseVariableDefinitions, withContactDefaults } from "@/modules/agent-engine/variables";
 
@@ -22,10 +23,10 @@ const PAGE_SIZE = 30;
 export default async function ConversasPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; id?: string; q?: string; take?: string }>;
+  searchParams: Promise<{ status?: string; id?: string; q?: string; agent?: string; take?: string }>;
 }) {
   const { tenantId } = await requireTenant();
-  const { status = "all", id, q = "", take: takeParam } = await searchParams;
+  const { status = "all", id, q = "", agent: agentId = "", take: takeParam } = await searchParams;
 
   const search = q.trim();
   // Teto no `take`: a URL é editável, e um `take=100000` viraria uma consulta
@@ -48,9 +49,10 @@ export default async function ConversasPage({
 
   const where: Prisma.ConversationWhereInput = { tenantId, isTest: isTestTab };
   if (status === "needs_human") where.needsHuman = true;
+  if (agentId) where.agentId = agentId;
   if (Object.keys(leadWhere).length > 0) where.lead = leadWhere;
 
-  const [conversations, matching, totalAll, needsHumanCount, testCount, selected] = await Promise.all([
+  const [conversations, matching, totalAll, needsHumanCount, testCount, selected, agents] = await Promise.all([
     prisma.conversation.findMany({
       where,
       orderBy: { updatedAt: "desc" },
@@ -58,6 +60,7 @@ export default async function ConversasPage({
       take: take + 1,
       include: {
         lead: true,
+        agent: { select: { name: true } },
         messages: { orderBy: { createdAt: "desc" }, take: 1 },
       },
     }),
@@ -85,6 +88,7 @@ export default async function ConversasPage({
           },
         })
       : null,
+    prisma.agent.findMany({ where: { tenantId, archived: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
 
   const hasMore = conversations.length > take;
@@ -93,6 +97,7 @@ export default async function ConversasPage({
   const params = (extra: Record<string, string | undefined>) => {
     const p = new URLSearchParams({ status });
     if (search) p.set("q", search);
+    if (agentId) p.set("agent", agentId);
     if (take !== PAGE_SIZE) p.set("take", String(take));
     for (const [k, v] of Object.entries(extra)) {
       if (v === undefined) p.delete(k);
@@ -150,137 +155,11 @@ export default async function ConversasPage({
       }
     : null;
 
-  return (
-    // `flex-1 min-h-0`: a casca (PanelShell) já fixa a altura da viewport; aqui a
-    // página passa a ocupá-la para que cada painel role sozinho, como em qualquer
-    // caixa de entrada. Antes a página inteira rolava e o cabeçalho da conversa
-    // saía de vista.
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
-      <PageHeader
-        eyebrow="conversas"
-        title="Conversas"
-        description="Veja o que seu agente andou respondendo — e onde ele precisa da sua ajuda."
-        actions={<SandboxDialog />}
-      />
-
-      {/* `grid-rows-[minmax(0,1fr)]`: sem `grid-template-rows`, a única linha
-          implícita é `auto` — em vez de esticar pra ocupar a altura que o
-          `flex-1` reservou, ela pode ficar do tamanho do conteúdo (mesmo
-          "trap" do `min-height:auto`, só que na trilha do grid, não no item).
-          Declarando a linha como `minmax(0, 1fr)` ela vira exatamente a altura
-          disponível, com piso 0 — os Cards (cada um já com `min-h-0`) então
-          recebem uma altura real pra rolar dentro. */}
-      <div className="grid min-h-[30rem] flex-1 grid-rows-[minmax(0,1fr)] gap-4 lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)_17rem]">
-        <Card className={`flex min-h-0 flex-col p-0 ${id ? "hidden lg:flex" : "flex"}`}>
-          <h2 className="sr-only">Lista de conversas</h2>
-
-          <div className="space-y-3 border-b border-white/10 p-4">
-            <ConversationSearch status={status} q={search} />
-            <ConversationFilters
-              status={status}
-              search={search}
-              counts={{ all: totalAll, needsHuman: needsHumanCount, test: testCount }}
-            />
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {page.length === 0 ? (
-              <EmptyState
-                icon={MessagesSquare}
-                title={
-                  emptyAccount
-                    ? "Nenhuma conversa ainda"
-                    : search
-                      ? "Ninguém com esse nome ou número"
-                      : "Nada com este filtro"
-                }
-                description={
-                  emptyAccount
-                    ? "Quando um cliente falar com seu agente, a conversa aparece aqui. Quer ver como funciona antes? Faça um teste."
-                    : "Ajuste a busca ou veja a lista inteira."
-                }
-                action={
-                  emptyAccount ? (
-                    <SandboxDialog label="Fazer um teste" />
-                  ) : (
-                    <Link
-                      href="/conversas?status=all"
-                      className="rounded-control px-3 py-1 font-mono text-micro uppercase tracking-wide text-iris underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
-                    >
-                      Ver todas
-                    </Link>
-                  )
-                }
-                className="py-10"
-              />
-            ) : (
-              <ConversationList
-                items={page.map((c) => ({
-                  id: c.id,
-                  needsHuman: c.needsHuman,
-                  agentPaused: c.agentPaused,
-                  isTest: c.isTest,
-                  updatedAt: c.updatedAt,
-                  lead: c.lead,
-                  preview: c.messages[0]?.content ?? null,
-                }))}
-                selectedId={id}
-                hrefFor={(cid) => params({ id: cid })}
-                moreHref={hasMore ? params({ take: String(take + PAGE_SIZE) }) : null}
-              />
-            )}
-          </div>
-
-          {matching > 0 && (
-            <p className="border-t border-white/10 px-4 py-2 font-mono text-micro uppercase tracking-wide text-white/40">
-              {page.length} de {matching}
-            </p>
-          )}
-        </Card>
-
-        <Card className={`flex min-h-0 flex-col overflow-hidden p-0 ${id ? "flex" : "hidden lg:flex"}`}>
-          {detail ? (
-            <ConversationThread
-              conversation={detail.data}
-              messages={detail.messages}
-              survey={detail.survey}
-              backHref={params({ id: undefined })}
-              voiceReady={voiceReady}
-            />
-          ) : (
-            <div className="flex flex-1 items-center justify-center">
-              <EmptyState
-                icon={Inbox}
-                title={id ? "Conversa não encontrada" : "Escolha uma conversa"}
-                description={
-                  id
-                    ? "Ela pode ter sido removida junto com o lead. Escolha outra na lista."
-                    : "Toque em uma conversa da lista para ler tudo o que foi dito e ver o que fazer a seguir."
-                }
-              />
-            </div>
-          )}
-        </Card>
-
-        <Card className="hidden min-h-0 flex-col overflow-hidden p-0 xl:flex">
-          <h2 className="sr-only">Dados do cliente</h2>
-          {detail ? (
-            <>
-              <div className="shrink-0 border-b border-white/10 p-4">
-                <ConversationVariables definitions={detail.data.variableDefinitions} values={detail.data.variables} />
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                <LeadPanel conversation={detail.data} />
-              </div>
-            </>
-          ) : (
-            <p className="p-4 text-sm leading-relaxed text-white/50">
-              Ao abrir uma conversa, aparecem aqui os dados do cliente, o histórico de atendimento
-              e as ações disponíveis.
-            </p>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
+  const appointment = selected && !selected.isTest ? await prisma.appointment.findFirst({ where: { tenantId, leadId: selected.leadId, status: "scheduled", startsAt: { gte: new Date() } }, orderBy: { startsAt: "asc" }, select: { title: true, startsAt: true } }) : null;
+  return <ConversationsWorkspace selected={Boolean(id)} sidebar={<>
+    <header className="conversation-list-heading"><h1>Conversas</h1><SandboxDialog /></header>
+    <div className="conversation-list-controls"><ConversationSearch status={status} q={search} agentId={agentId} /><ConversationFilters status={status} search={search} agentId={agentId} agents={agents} counts={{ all: totalAll, needsHuman: needsHumanCount, test: testCount }} /></div>
+    <div className="conversation-list-scroll">{page.length ? <ConversationList items={page.map(c => ({ id: c.id, needsHuman: c.needsHuman, agentPaused: c.agentPaused, isTest: c.isTest, updatedAt: c.updatedAt, lead: c.lead, agentName: c.agent?.name, preview: c.messages[0]?.content ?? null }))} selectedId={id} hrefFor={cid => params({ id: cid })} moreHref={hasMore ? params({ take: String(take + PAGE_SIZE) }) : null} /> : <EmptyState icon={MessagesSquare} title={emptyAccount ? "Nenhuma conversa ainda" : "Nenhuma conversa com este filtro"} description={emptyAccount ? "Quando um contato escrever, a conversa aparecerá aqui." : "Ajuste a busca ou veja todas as conversas."} action={<Link href="/conversas?status=all">Ver todas</Link>} />}</div>
+    <footer className="conversation-list-footer">{status === "needs_human" ? `${matching} conversas aguardando a equipe` : `${Math.min(page.length, matching)} de ${matching} conversas`}</footer>
+  </>} thread={detail ? <ConversationThread conversation={detail.data} messages={detail.messages} survey={detail.survey} backHref={params({ id: undefined })} voiceReady={voiceReady} /> : <div className="conversation-empty"><EmptyState icon={Inbox} title={id ? "Conversa não encontrada" : "Escolha uma conversa"} description="Selecione um contato na lista para ler o histórico e continuar o atendimento." /></div>} contact={detail ? <ContactPanel conversation={detail.data} appointment={appointment} /> : <p className="agent-help">Ao abrir uma conversa, os dados do contato aparecem aqui.</p>} />;
 }

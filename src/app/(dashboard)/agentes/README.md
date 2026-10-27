@@ -1,105 +1,80 @@
-# Agentes no painel do tenant
+# Agentes v7 no painel
 
-Interface baseada nas referências v5: navegação principal em ícones, lista de
-agentes no menu secundário, grade de configurações e resumo do item à direita.
-Os temas claro e escuro do tenant (`PanelShell variant="tenant"`) são controlados
-por `TenantThemeProvider`, com preferência local persistida. O seletor fica na
-navegação principal, inclusive recolhida, e na gaveta mobile. O controle é um
-**switch à direita**, no lugar de "Ligado/Desligado": sol à esquerda no tema
-claro, lua no escuro e rótulo do modo atual. Recolhido, o ícone fica no thumb do
-switch para o controle continuar visível. O admin usa a mesma
-casca com preferências próprias (padrão escuro, menu expandido); autenticação
-e marketing mantêm suas superfícies.
+A entrada `/agentes` segue a referência Entrada B: cards, busca local, criar,
+importar, status real e último agente acessado. Dentro de um agente, a navegação
+é por configurações (blocos ou lista), o formulário fica no centro e o resumo
+salvo à direita. O teste substitui esse resumo por um painel de conversa.
+As cores usam `--tenant-*`, com os temas e preferências anteriores preservados.
 
-Contexto compacto para futuras sessões: [painel](../../../../.claude/context/painel/_index.md).
+## Arquivos
 
-## Mapa
+- `AgentDirectory.tsx`, `page.tsx`: diretório e projeção dos dados no servidor.
+  Não afirmar que todo agente ligado atende WhatsApp: isso depende de ser o principal.
+- `AgentsFrame.tsx`: guard e contêiner; `getAgentsNavigation` reutiliza as consultas
+  na renderização da página, sem cache persistente de layout.
+- `[id]/AgentWizard.tsx`: navegação, limite das habilidades, resumo, formulário
+  selecionado e teste lateral. `AgentHeader` mantém gestão, exportação e exclusão.
+- `PersonaForm`, `RulesForm`, `VariablesSettings`, `ScheduleSettings`,
+  `FollowUpSettings`, `HandoffSettings`, `BehaviorSettings`: mesmas actions;
+  campos adicionais continuam disponíveis, alguns em detalhes expansíveis.
+- `WeeklyAvailabilityGrid.tsx`: dias em colunas, horários em linhas; arrastar,
+  teclado, pausas, 15/30/60 minutos e acesso às 24 horas preservados.
+- `SaveBar.tsx`: retorno visual de pendências; `FormSaveBar` usa o mesmo snapshot
+  do `UnsavedForm`, inclusive inputs ocultos dos seletores e switches.
+- `KnowledgeWorkspace.tsx`: lista, abertura sob demanda, rascunho e publicação.
+  `KnowledgeManager` mantém upload múltiplo, texto, falhas e repetição dos pendentes.
+- `agents-v7.css`: layout v7; `agents-workspace.css` mantém componentes comuns.
+- `../conversas/Sandbox.tsx`, `sandbox.css`: chat, inspeção e comparação.
 
-- `AgentsFrame.tsx`: lê a navegação junto da página, com as consultas existentes
-  filtradas pelo tenant. O cache do React reaproveita a leitura na mesma renderização.
-  Não colocar essa leitura no layout persistente: criar/importar/renomear precisa
-  atualizar a lista sem deixar itens antigos na navegação.
-- `AgentsSidebar.tsx`: seleção, busca, criar/importar e uso do plano. Só recebe
-  identificação e estado dos agentes; prompts e configuração completa ficam no servidor.
-- `[id]/AgentHeader.tsx`: gestão existente do agente no menu de opções; salvamentos
-  imperativos usam `useSaveFeedback` e as mesmas server actions.
-- `[id]/AgentWizard.tsx`: grade/lista, busca de configurações, resumos, interruptores
-  e edição em diálogo lateral. O nome foi mantido para preservar a entrada existente.
-- `agents-workspace.css`: layout e componentes específicos dessa área.
-- `loading.tsx`, `error.tsx`, `[id]/not-found.tsx`: estados da navegação de Agentes.
-- `src/components/shell/TenantShell.tsx` e `tenant-shell.css`: navegação comum
-  do tenant; a ponte de estilos adapta as páginas existentes só no tema claro,
-  e o escuro reaproveita as variantes `panel:`. Cores da área de Agentes usam
-  variáveis semânticas dos dois temas.
-- `TenantTheme.tsx`: preferências de tema e switch compartilhados por tenant e
-  admin; `Switch.thumbContent` recebe o ícone decorativo no menu recolhido.
-- `ImpersonationBanner.tsx`: aviso "Acesso de administrador", identificação da
-  conta visualizada e retorno ao admin, com contraste nos dois temas.
-- `src/lib/utils.ts`: registra `text-micro` como tamanho no `tailwind-merge`;
-  uma classe de cor não pode remover o tamanho e ampliar links/botões.
-- `FilterTabs`, `PageHeader` e `Stat`: filtros sem caixa alta, títulos e números
-  com escala mais contida; a mudança é visual, não altera métricas.
+## Rascunho de Conhecimento e teste
 
-## Contratos preservados
+O rascunho vive na memória do navegador e é protegido pelo guard de alterações
+não salvas. Recarregar/descartar o remove. Editar não muda a versão em atendimento.
 
-Os botões de editar abrem `PersonaForm`, `RulesForm`, `VariablesSettings`,
-`KnowledgeManager`, `ScheduleSettings`, `FollowUpSettings`, `HandoffSettings`
-e `BehaviorSettings`. Testar abre `Sandbox` com o **id do agente selecionado**.
-Os formulários, as validações, os limites e as regras de domínio permanecem
-nas fontes anteriores; não há nova API, tabela ou mudança no worker.
+`getDocumentContent` fornece texto, título e revisão SHA-256. O botão Aplicar ao
+teste repete a última pergunta com o histórico anterior (até dez mensagens),
+numa conversa separada, `isTest`, sem WhatsApp ou gravação na agenda. O documento
+editado é substituído só na recuperação daquele teste, com embeddings temporários;
+os outros documentos continuam elegíveis. Falha de embeddings interrompe o teste,
+sem usar silenciosamente a versão antiga.
 
-Os resumos refletem a configuração salva. Horários usam a grade semanal existente,
-inclusive pausas; não presumem um expediente. A agenda do fechai continua sendo a
-fonte da verdade, com Clinicorp indicado quando conectado. Ações indisponíveis do
-catálogo aparecem como **Em breve**, sem interruptor. Triagem continua utilizável.
-Voz exige a voz escolhida e disponibilidade da instalação antes de ligar áudio.
+A inspeção mostra os trechos realmente enviados ao contexto, as instruções da
+persona disponíveis e os nomes das tools executadas. Não é raciocínio interno
+nem prova de que o modelo se apoiou em cada trecho. Sem fonte, a tela informa.
 
-O diálogo de edição usa `showModal()` para foco, Escape e isolamento de teclado.
-O fechamento passa por `useUnsavedNavigation`; os formulários originais mantêm
-seu registro de rascunhos. Retornos usam o ToastProvider existente, e formulários
-que já tinham `FormFeedback` dentro de diálogo continuam com o retorno inline.
-As abas dos formulários aceitam setas, Home e End.
+Publicar exige aplicar a revisão atual ao teste nesta interface. A action existente
+`updateDocumentAction` recebe `baseRevision`; o servidor verifica a revisão e
+`publishDocumentDraft` troca documento/trechos/vetores numa transação condicional.
+A rede é usada antes da transação. Documento alterado concorrentemente é recusado;
+falha de preparação não modifica o publicado. Auditoria/revalidação são mantidas.
+A revisão evita reenviar o texto original inteiro no formulário. Limite do teste:
+500 mil caracteres por documento e os limites de payload já existentes no salvar.
+Não há nova tabela ou migração. O endpoint `/api/sandbox` foi ampliado.
 
-## Responsividade e escopo
+A sessão de teste tem UUID próprio; reabrir a página não herda memória invisível.
+O motor exige conversa de teste do tenant e `dryRunScheduling` para inspeção,
+rascunho e histórico substituído. As três travas de teste continuam valendo:
+sem cota de atendimento, responde com agente desligado, agenda apenas simulada.
 
-No desktop, lista e resumo ocupam 220px e 300px. Em telas intermediárias a grade
-usa três colunas e o resumo segue abaixo dela; selecionar um item leva o foco ao
-detalhe. No celular, agentes viram uma lista horizontal e a navegação principal
-abre em gaveta. A preferência de expandir a navegação é independente do admin.
-O recolhimento anima a largura e os rótulos, sem escalar texto; a gaveta também
-anima entrada e saída. `prefers-reduced-motion` desliga essas transições.
+## Decisões visuais e funcionamento
 
-As preferências são independentes: `fechai:tenant-theme`/`fechai:admin-theme` e
-`fechai:tenant-menu-expanded`/`fechai:admin-menu-expanded`. Sem localStorage, há
-fallback em memória. `data-panel` identifica o contexto e `data-surface` o tema.
-Não há coluna de usuário para essas escolhas. A identificação do admin fica no
-cabeçalho compacto; rotas e ferramentas administrativas continuam as existentes.
-O `main` permanece `position: relative` para conter elementos absolutos das
-tabelas e evitar transbordamento horizontal no tamanho menor.
+- Ações indisponíveis continuam Em breve; Triagem permanece utilizável.
+- Os toggles de habilidade/comportamento e certas opções de voz/permissão
+  mantêm o salvamento imediato existente. Não indicam um rascunho inexistente.
+- Campos livres de tom e escrita continuam acessíveis por Personalizar.
+- Formulários extensos conservam recursos além dos exemplos das prints.
+- Resumos laterais são da configuração salva; não exibem valores ilustrativos.
+- Mobile usa grupos horizontais e teste sobreposto, com botão de fechar;
+  tablet omite o resumo lateral. Grade larga rola dentro do próprio contêiner.
 
-As outras rotas do tenant recebem a casca e a navegação novas, preservando a
-organização de seus conteúdos. Submenus específicos e redesenho interno dessas
-áreas ficam fora desta entrega.
+## Validação em 27/10/2026
 
-## Validação realizada
-
-- Build e lint completos passaram durante a implementação; lint dos componentes
-  e `npx tsc --noEmit` foram conferidos novamente após o switch final.
-- 56 testes unitários existentes de agente, pacote, personalidade, follow-up e
-  feedback passaram na refatoração inicial. Na correção de tipografia, passaram
-  os 3 casos de `tests/ui-class-merge.test.ts` e 24 de `tests/toast-feedback.test.ts`.
-- A prévia isolada, com dados e actions simulados, passou por 26 verificações de
-  navegador: editores, rascunhos, busca, limites e larguras de 320 a 1440px.
-- No servidor real foram conferidos admin, personificação do tenant demo,
-  relatórios, editor de personalidade, claro/escuro, persistência, menu mobile e
-  switch final à direita; sol no claro e lua no escuro foram verificados no DOM.
-
-Essas conferências não representam um teste de envio real de WhatsApp nem uma
-nova validação integrada de todas as gravações; as actions de domínio foram
-reutilizadas. Para repetir a regressão de UI:
-
-```sh
-npx vitest run tests/ui-class-merge.test.ts tests/toast-feedback.test.ts
-npm run lint
-npm run build
-```
+Suíte completa: 2.318 testes em 140 arquivos. Build, lint e TypeScript conferidos.
+Novas regressões: `sandbox-draft`, `sandbox-engine-inspection` e
+`knowledge-draft-publish` (17 casos: posse, histórico, fontes, falhas e concorrência).
+Conferência real no navegador: comparação com IA, fonte do rascunho, publicação
+habilitada, descarte protegido, grade por teclado, layouts desktop/mobile, filtros
+e painel do contato. O rascunho de QA foi descartado; não se publicou sobre o
+documento existente nem se enviou mensagem a contatos reais. A publicação foi
+verificada pelos testes do contrato e da transação; o aceite de negócio segue
+na homologação. Referências e contexto: [painel](../../../../.claude/context/painel/_index.md).

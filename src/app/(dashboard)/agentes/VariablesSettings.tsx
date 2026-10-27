@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useUnsavedChanges } from "@/components/ui/unsaved-changes";
 import { DEFAULT_VARIABLES, MAX_CUSTOM_VARIABLES, type VariableDefinition } from "@/modules/agent-engine/variable-definitions";
 import { saveAgentVariables, type Result } from "./actions";
+import { SaveBar } from "./SaveBar";
 
 export function VariablesSettings({ agentId, initial }: { agentId: string; initial: VariableDefinition[] }) {
   const [rows, setRows] = useState(initial);
@@ -39,25 +40,22 @@ export function VariablesSettings({ agentId, initial }: { agentId: string; initi
   }
 
   return <div ref={rootRef} className="space-y-5">
-    <p className="text-sm leading-relaxed text-white/60">
-      O agente guarda os dados informados em cada conversa e usa os valores nos próximos atendimentos. Um campo sem valor aparece como “não informado”.
-    </p>
     <div>
-      <h3 className="text-sm font-semibold text-white">Variáveis padrão</h3>
+      <h3 className="text-sm font-semibold text-white">Campos padrão</h3>
       <ul className="mt-2 space-y-2">
         {DEFAULT_VARIABLES.map((row) => <li key={row.key} className="rounded-control border border-white/10 p-3 text-sm">
-          <code className="text-iris">{`{{${row.key}}}`}</code>
-          <span className="ml-2 text-white/60">{row.description}</span>
+          <span className="block font-medium">{{ nome: "Nome", numero: "Número", endereco: "Endereço" }[row.key] ?? row.key}</span>
+          <span className="mt-2 block text-xs text-white/60">{row.description}</span>
         </li>)}
       </ul>
     </div>
     <fieldset disabled={pending} className="min-w-0 space-y-3">
-      <legend className="text-sm font-semibold text-white">Variáveis personalizadas</legend>
+      <legend className="text-sm font-semibold text-white">Campos personalizados</legend>
       {rows.length === 0 && <p className="text-sm text-white/50">Nenhuma variável personalizada.</p>}
       {rows.map((row, index) => <div key={index} className="space-y-3 rounded-control border border-white/10 p-3">
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-40 flex-1">
-            <label htmlFor={`variable-key-${index}`} className="text-sm text-white/80">Nome da variável</label>
+            <label htmlFor={`variable-key-${index}`} className="text-sm text-white/80">Nome do campo</label>
             <Input id={`variable-key-${index}`} className="mt-1" value={row.key} maxLength={40}
               placeholder="ex: tipo_paciente" onChange={(e) => change(index, { key: e.target.value })} />
           </div>
@@ -74,9 +72,9 @@ export function VariablesSettings({ agentId, initial }: { agentId: string; initi
       </div>)}
       <Button type="button" variant="outline" disabled={rows.length >= MAX_CUSTOM_VARIABLES}
         onClick={() => { setRows([...rows, { key: "", description: "" }]); setState(null); }}>
-        <Plus size={15} aria-hidden />Adicionar variável
+        <Plus size={15} aria-hidden />Adicionar campo
       </Button>
     </fieldset>
-    <Button type="button" onClick={save} loading={pending} loadingLabel="Salvando variáveis">Salvar variáveis</Button>
+    <SaveBar dirty={JSON.stringify(rows) !== saved} pending={pending} onSave={save} />
   </div>;
 }

@@ -34,7 +34,9 @@ const STATUS: Record<string, { label: string; tone: "success" | "warn" | "danger
   no_embeddings: { label: "Sem embeddings", tone: "warn" },
 };
 
-export function KnowledgeManager({ agentId, documents }: { agentId: string; documents: Doc[] }) {
+export function KnowledgeManager({ agentId, documents, addOnly = false }: { agentId: string; documents: Doc[]; addOnly?: boolean }) {
+  const [showText, setShowText] = useState(!addOnly);
+  const [showFiles, setShowFiles] = useState(!addOnly);
   const [state, setState] = useState<Result | null>(null);
   const [pending, setPending] = useState(false);
   useActionToast(state, pending, { entity: "documento", action: "create" });
@@ -122,7 +124,8 @@ export function KnowledgeManager({ agentId, documents }: { agentId: string; docu
             <Input {...fieldProps("kb-title")} name="title" placeholder="Ex: Tabela de preços" value={title} onChange={(e) => setTitle(e.target.value)} required={Boolean(content.trim())} />
           </Field>
 
-          <Field
+          {addOnly && <div className="knowledge-add-modes"><Button variant="outline" type="button" onClick={() => setShowText(true)}>Escrever conteúdo</Button><Button variant="outline" type="button" onClick={() => setShowFiles(true)}>Enviar arquivos</Button></div>}
+          <div hidden={!showText}><Field
             label="Conteúdo"
             htmlFor="kb-content"
             hint="Cole um texto e/ou selecione arquivos abaixo. Cada arquivo vira um documento separado."
@@ -136,9 +139,9 @@ export function KnowledgeManager({ agentId, documents }: { agentId: string; docu
               rows={5}
               placeholder="Cole aqui o texto da sua base de conhecimento..."
             />
-          </Field>
+          </Field></div>
 
-          <Field label="Arquivos" htmlFor="kb-file" hint="Selecione vários .txt, .md ou .pdf de uma vez. Até 50MB por arquivo; o envio acontece um por vez." optional>
+          <div hidden={!showFiles}><Field label="Arquivos" htmlFor="kb-file" hint="Selecione vários .txt, .md ou .pdf de uma vez. Até 50MB por arquivo; o envio acontece um por vez." optional>
             <input
               {...fieldProps("kb-file", { hint: true })}
               type="file"
@@ -148,7 +151,8 @@ export function KnowledgeManager({ agentId, documents }: { agentId: string; docu
               onChange={handleFileChange}
               className="w-full text-sm text-white/70 file:mr-3 file:rounded-control file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-sm file:text-white file:transition-colors hover:file:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris"
             />
-          </Field>
+          </Field></div>
+          {addOnly && <p className="agent-help">Arquivos .txt, .md ou .pdf · até 50 MB por arquivo</p>}
 
           {files.length > 0 && <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -175,7 +179,7 @@ export function KnowledgeManager({ agentId, documents }: { agentId: string; docu
 
 
           {progress && <p role="status" className="text-sm text-white/70">{progress}</p>}
-          <Button type="submit" loading={pending} loadingLabel="Enviando documentos">
+          <Button type="submit" disabled={!content.trim() && !files.length} loading={pending} loadingLabel="Enviando documentos">
             {files.some((file) => file.error) ? "Tentar enviar os pendentes" : "Adicionar à base"}
           </Button>
         </form>
@@ -260,5 +264,5 @@ export function KnowledgeManager({ agentId, documents }: { agentId: string; docu
     },
   ];
 
-  return <StepTabs tabs={tabs} />;
+  return addOnly ? tabs[0].content : <StepTabs tabs={tabs} />;
 }

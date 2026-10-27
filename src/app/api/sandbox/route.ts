@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { sandboxDraftSchema } from "@/modules/agent-engine/sandbox-draft";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import {
@@ -19,8 +21,12 @@ function sandboxPhone(agentId?: string) {
 }
 
 const schema = z.object({
-  message: z.string().trim().min(1),
+  message: z.string().trim().min(1).max(4000),
   agentId: z.string().trim().min(1).optional(),
+  sessionId: z.string().uuid().optional(),
+  draft: sandboxDraftSchema.optional(),
+  compare: z.boolean().optional(),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(10_000) })).max(10).optional(),
 });
 
 /** Garante que o agente é da conta antes de usá-lo (id vem do cliente). */
@@ -45,14 +51,20 @@ export async function POST(req: Request) {
   }
 
   const agentId = await ownedAgentId(tenantId, parsed.data.agentId);
+  if (parsed.data.agentId && !agentId) return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
+  if (parsed.data.draft) {
+    const doc = await prisma.knowledgeDocument.findFirst({ where: { id: parsed.data.draft.documentId, tenantId, agentId }, select: { id: true } });
+    if (!agentId || !doc) return NextResponse.json({ error: "Documento não encontrado." }, { status: 404 });
+  }
   const { lead, conversation } = await getOrCreateConversation(
     tenantId,
-    sandboxPhone(agentId),
+    parsed.data.compare ? `sandbox:${agentId}:comparison:${randomUUID()}` : parsed.data.sessionId ? `${sandboxPhone(agentId)}:session:${parsed.data.sessionId}` : sandboxPhone(agentId),
     "Chat de teste",
     { isTest: true },
   );
 
-  const { reply, toolsUsed, status } = await runAgentTurn({
+  try {
+  const { reply, toolsUsed, status, inspection } = await runAgentTurn({
     tenantId,
     conversationId: conversation.id,
     leadId: lead.id,
@@ -67,9 +79,16 @@ export async function POST(req: Request) {
     skipEnabledCheck: true,
     // Teste não pode ocupar a agenda real nem espelhar no Clinicorp/Google/iCloud.
     dryRunScheduling: true,
+    inspect: true,
+    ...(parsed.data.draft ? { sandboxDraft: parsed.data.draft } : {}),
+    ...(parsed.data.compare ? { historyOverride: parsed.data.history ?? [] } : {}),
   });
 
-  return NextResponse.json({ reply, toolsUsed, status });
+  return NextResponse.json({ reply, toolsUsed, status, inspection });
+  } catch (error) {
+    console.error("[sandbox] test failed", error);
+    return NextResponse.json({ error: "Não foi possível executar o teste. Verifique a configuração de IA e tente novamente." }, { status: 503 });
+  }
 }
 
 /**
@@ -83,6 +102,9 @@ export async function DELETE(req: Request) {
     tenantId,
     new URL(req.url).searchParams.get("agentId") ?? undefined,
   );
-  await startFreshTestConversation(tenantId, sandboxPhone(agentId));
+  if (new URL(req.url).searchParams.has("agentId") && !agentId) return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
+  const session = new URL(req.url).searchParams.get("sessionId");
+  if (session && !z.string().uuid().safeParse(session).success) return NextResponse.json({ error: "Teste inválido." }, { status: 400 });
+  await startFreshTestConversation(tenantId, session ? `${sandboxPhone(agentId)}:session:${session}` : sandboxPhone(agentId));
   return NextResponse.json({ ok: true });
 }

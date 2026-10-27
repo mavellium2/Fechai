@@ -29,7 +29,7 @@ export function ImportAgentButton({ usage, variant = "button" }: { usage: AgentU
         onClick={() => dialogRef.current?.showModal()}
       >
         <Upload size={14} aria-hidden />
-        {variant === "shortcut" ? "Importar agente" : "Importar"}
+        Importar agente
       </Button>
 
       <dialog

@@ -144,6 +144,24 @@ export async function updateDocument(
   return prisma.knowledgeDocument.update({ where: { id: documentId }, data: { status } });
 }
 
+/** Publish a tested local draft atomically. Embedding/network work precedes the transaction. */
+export async function publishDocumentDraft(tenantId: string, agentId: string, documentId: string,
+  input: { title: string; content: string; baseTitle: string; baseContent: string }) {
+  const pieces = chunkText(input.content);
+  const vectors = pieces.length ? await embedTexts(pieces) : [];
+  if (!vectors || vectors.length !== pieces.length) return { ok: false as const, error: "Não foi possível preparar o documento. Tente publicar novamente." };
+  return prisma.$transaction(async tx => {
+    const claimed = await tx.knowledgeDocument.updateMany({ where: { id: documentId, tenantId, agentId, title: input.baseTitle, content: input.baseContent }, data: { title: input.title, content: input.content, status: "ready" } });
+    if (!claimed.count) return { ok: false as const, error: "Este documento mudou desde que você abriu. Reabra a versão publicada antes de tentar novamente." };
+    await tx.knowledgeChunk.deleteMany({ where: { tenantId, agentId, documentId } });
+    for (let i = 0; i < pieces.length; i++) {
+      const row = await tx.knowledgeChunk.create({ data: { tenantId, agentId, documentId, content: pieces[i] } });
+      await tx.$executeRaw`UPDATE "KnowledgeChunk" SET embedding = ${toVectorLiteral(vectors[i])}::vector WHERE id = ${row.id} AND "tenantId" = ${tenantId}`;
+    }
+    return { ok: true as const, status: "ready" };
+  }, { timeout: 30_000 });
+}
+
 export async function deleteDocument(tenantId: string, documentId: string) {
   // Busca antes de apagar: é o único jeito de saber o fileUrl pra limpar a CDN.
   const doc = await prisma.knowledgeDocument.findFirst({
@@ -175,12 +193,14 @@ export async function searchSimilarChunks(
   agentId: string,
   queryEmbedding: number[],
   limit = 4,
-): Promise<{ content: string; distance: number }[]> {
+  excludeDocumentId?: string,
+): Promise<{ content: string; distance: number; documentId: string; title: string }[]> {
   const literal = toVectorLiteral(queryEmbedding);
-  return prisma.$queryRaw<{ content: string; distance: number }[]>(Prisma.sql`
-    SELECT content, embedding <=> ${literal}::vector AS distance
-    FROM "KnowledgeChunk"
-    WHERE "tenantId" = ${tenantId} AND "agentId" = ${agentId} AND embedding IS NOT NULL
-    ORDER BY embedding <=> ${literal}::vector
+  return prisma.$queryRaw<{ content: string; distance: number; documentId: string; title: string }[]>(Prisma.sql`
+    SELECT c.content, c.embedding <=> ${literal}::vector AS distance, c."documentId", d.title
+    FROM "KnowledgeChunk" c JOIN "KnowledgeDocument" d ON d.id = c."documentId" AND d."tenantId" = c."tenantId" AND d."agentId" = c."agentId"
+    WHERE c."tenantId" = ${tenantId} AND c."agentId" = ${agentId} AND c.embedding IS NOT NULL
+      AND c."documentId" <> ${excludeDocumentId ?? ""}
+    ORDER BY c.embedding <=> ${literal}::vector
     LIMIT ${limit}`);
 }

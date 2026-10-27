@@ -35,7 +35,7 @@ export function NewAgentButton({ usage, variant = "button" }: { usage: AgentUsag
         title={`Seu plano permite ${usage.limit} agente(s)`}
       >
         <Plus size={14} aria-hidden />
-        Novo agente
+        {variant === "shortcut" ? "Novo agente" : "Criar agente"}
       </Button>
     );
   }
@@ -44,7 +44,7 @@ export function NewAgentButton({ usage, variant = "button" }: { usage: AgentUsag
     <>
       <Button type="button" size="sm" variant={variant === "shortcut" ? "ghost" : "default"} className={variant === "shortcut" ? "agent-shortcut" : undefined} onClick={() => ref.current?.showModal()}>
         <Plus size={14} aria-hidden />
-        Novo agente
+        {variant === "shortcut" ? "Novo agente" : "Criar agente"}
       </Button>
 
       <dialog

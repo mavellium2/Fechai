@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { loadWhatsAppGroupsAction, saveHandoffConfigAction } from "./actions";
 import { UnsavedForm } from "@/components/ui/unsaved-changes";
+import { FormSaveBar } from "./SaveBar";
 
 const LOAD_FAILED: GroupListResult = {
   ok: false,
@@ -125,9 +126,8 @@ export function HandoffSettings({ agentId, config }: { agentId: string; config: 
       </div>
 
 
-      <Button type="submit" variant="outline" loading={pending} loadingLabel="Salvando transferência">
-        Salvar transferência
-      </Button>
+      <section className="agent-form-section"><h3>O que a equipe recebe</h3><div className="agent-example"><p>Nome: nome informado pelo contato</p><p>Número: WhatsApp do contato</p><p>Resumo: pedido do contato e motivo da transferência</p></div><p className="agent-help">A conversa aparece em Conversas › Precisa de você.</p></section>
+      <FormSaveBar result={state} pending={pending} />
     </UnsavedForm>
   );
 }
