@@ -137,6 +137,7 @@ model Tenant {
   actions          TenantAction[]
   /// Uma conexão por provedor (QR/Evolution e Meta). Ver `WhatsappInstance`.
   whatsappInstances WhatsappInstance[]
+  whatsappHistoryRecoveries WhatsappHistoryRecovery[]
   whatsappBlocked  WhatsappBlockedNumber[]
   leads            Lead[]
   conversations    Conversation[]
@@ -863,6 +864,39 @@ model WhatsappInstance {
 /// de saúde (`modules/whatsapp/incidents.ts`). Base da "disponibilidade do
 /// agente" no relatório mensal. Só o que o provedor confirmou: silêncio
 /// suspeito não vira incidente. `endedAt` null = ainda fora do ar.
+model WhatsappHistoryRecovery {
+  id            String @id @default(cuid())
+  tenantId      String
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  externalId    String
+  requestedBy   String
+  since         DateTime
+  until         DateTime
+  status        String @default("queued") // queued | running | completed | failed
+  page          Int @default(1)
+  sourceTotal   Int?
+  stats         Json @default("{}")
+  error         String?
+  leaseToken    String?
+  lockedUntil   DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  items         WhatsappHistoryRecoveryItem[]
+
+  @@index([tenantId, createdAt])
+  @@index([status, lockedUntil])
+}
+
+/// Só identificadores da origem, para provar que a paginação cobriu o total.
+model WhatsappHistoryRecoveryItem {
+  recoveryId String
+  recovery   WhatsappHistoryRecovery @relation(fields: [recoveryId], references: [id], onDelete: Cascade)
+  sourceId   String
+
+  @@id([recoveryId, sourceId])
+}
+
 model WhatsappIncident {
   id        String    @id @default(cuid())
   tenantId  String
@@ -1005,6 +1039,8 @@ model Message {
   /// resposta sairia gravada duas vezes — uma pelo orquestrador, outra pelo
   /// webhook. Null em mensagens de sandbox e nas manuais antes deste campo.
   whatsappMessageId String?      @unique
+  /// Importada da origem, sem turno, envio ou autoria de resposta presumida.
+  recoveredAt       DateTime?
   /// Áudio desta mensagem na CDN, quando ela foi enviada ou recebida como voz.
   /// Null = mensagem de texto comum (a esmagadora maioria).
   ///

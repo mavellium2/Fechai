@@ -42,7 +42,7 @@ export type FollowUpCandidate = {
   followUpStep: number;
   followUpReason: string | null;
   /** Quem falou por último e quando — o silêncio começa aí. */
-  lastMessage?: { role: string; createdAt: Date } | null;
+  lastMessage?: { role: string; createdAt: Date; sentBy?: string | null } | null;
   hasActiveAppointment?: boolean;
   /** Chave geral do agente (`Agent.enabled`). Pausado não reengaja ninguém. */
   agentEnabled?: boolean;
@@ -86,6 +86,7 @@ export function nextFollowUp(conv: FollowUpCandidate, cfg: FollowUpConfig): Next
   // Humano assumiu a conversa manualmente: a esteira automática não pode
   // falar por cima de quem está atendendo (mesmo motivo de `needsHuman`).
   if (conv.agentPaused) return null;
+  if (conv.lastMessage?.sentBy === "history") return null;
   // Chave geral do agente desligada: pausar é para ele parar de falar com
   // cliente, e follow-up é justamente isso. `undefined` (agente sem
   // `agentId`, chamada antiga do candidato) não bloqueia por si só — quem
@@ -217,7 +218,7 @@ export async function scanAndSendFollowUps(now: Date = new Date()) {
         where: { role: { in: ["user", "assistant"] } },
         orderBy: { createdAt: "desc" },
         take: 1,
-        select: { role: true, createdAt: true },
+        select: { role: true, createdAt: true, sentBy: true },
       },
       // Pesquisa de satisfação que o contato recebeu (ver `lastSurveySentAt`).
       satisfactionSurveys: {

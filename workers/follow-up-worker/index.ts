@@ -11,6 +11,7 @@ import { scanBitrixSync } from "../../src/modules/bitrix/worker";
 import { scanClinicorpSync } from "../../src/modules/scheduling/clinicorp-sync";
 import { scanIcloudSync } from "../../src/modules/scheduling/icloud-sync";
 import { scanIcloudHealth } from "../../src/modules/scheduling/icloud-health";
+import { scanWhatsappHistoryRecovery } from "../../src/modules/whatsapp/history-recovery-worker";
 
 // Worker de mensagens no tempo. Follow-up/lembretes rodam na cadência comercial
 // configurada; a saúde do WhatsApp tem um job próprio, mais rápido:
@@ -62,6 +63,11 @@ const ICLOUD_QUEUE = "icloud-calendar";
 const ICLOUD_EVERY_MS = Math.max(15, Number(process.env.ICLOUD_SCAN_EVERY_SECONDS ?? 60)) * 1000;
 
 async function main() {
+  const historyQueue = new Queue("whatsapp-history-recovery", { connection });
+  await historyQueue.setGlobalConcurrency(1);
+  await historyQueue.upsertJobScheduler("history-recovery-scheduler", { every: 10_000 }, { name: "recover-history" });
+  const historyWorker = new Worker("whatsapp-history-recovery", async () => scanWhatsappHistoryRecovery(), { connection, concurrency: 1 });
+  historyWorker.on("failed", () => console.error("[whatsapp histórico] A recuperação será conferida na próxima varredura."));
   const followUpQueue = new Queue(FOLLOWUP_QUEUE, { connection });
   const reminderQueue = new Queue(REMINDER_QUEUE, { connection });
   const healthQueue = new Queue(HEALTH_QUEUE, { connection });

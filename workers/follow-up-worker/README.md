@@ -48,6 +48,14 @@ gerado tanto no web quanto no worker.
 
 ## Arquivos
 
+A fila `whatsapp-history-recovery` chama `scanWhatsappHistoryRecovery` a cada
+10 s, com concorrência global 1. Recuperação solicitada pelo admin fica em
+`WhatsappHistoryRecovery`, com cursor/lease e registros únicos de leitura em
+`WhatsappHistoryRecoveryItem`. Processa uma página por conta/rodada, sem IA nem
+envio. Reinício retoma a página não concluída; falha mostra resultado parcial e
+permite nova reconciliação idempotente. Requer schema/client novos nos dois
+processos. Mensagens importadas não avançam relógios de automação.
+
 A página **Disparos** usa também este processo, em uma fila independente
 `whatsapp-broadcasts` a cada 10 segundos. O núcleo fica em
 [`src/modules/broadcasts/worker.ts`](../../src/modules/broadcasts/worker.ts).

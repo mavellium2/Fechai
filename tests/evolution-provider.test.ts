@@ -282,3 +282,72 @@ describe("Telefone do contato no webhook", () => {
     });
   });
 });
+
+describe("Mensagens temporárias da Evolution", () => {
+  const event = (message: Record<string, unknown>, fromMe = false) => ({
+    instance: "tenant_abc",
+    data: {
+      key: { remoteJid: "5511987654321@s.whatsapp.net", id: "TEMP1", fromMe },
+      pushName: "Contato",
+      message,
+    },
+  });
+  const ephemeral = (message: Record<string, unknown>) => ({ ephemeralMessage: { message } });
+
+  it("recebe texto temporário com anúncio sem confundir anúncio e fala do contato", async () => {
+    const provider = await novoProvider();
+    expect(provider.parseWebhook(event(ephemeral({ extendedTextMessage: {
+      text: "Olá! Tenho interesse e queria mais informações, por favor.",
+      contextInfo: { externalAdReply: { title: "Anúncio de teste" } },
+    } })))).toMatchObject({
+      instanceExternalId: "tenant_abc",
+      fromPhone: "5511987654321",
+      fromName: "Contato",
+      messageKeyId: "TEMP1",
+      text: "Olá! Tenho interesse e queria mais informações, por favor.",
+      isFromMe: false,
+      hasAudio: false,
+    });
+  });
+
+  it("lê texto simples dentro de envelopes temporários aninhados", async () => {
+    const provider = await novoProvider();
+    expect(provider.parseWebhook(event(ephemeral(ephemeral({ conversation: "Oi" }))))).toMatchObject({ text: "Oi" });
+  });
+
+  it("preserva o áudio temporário e a duração medida", async () => {
+    const provider = await novoProvider();
+    expect(provider.parseWebhook(event(ephemeral({ audioMessage: { seconds: 18 } })))).toMatchObject({
+      hasAudio: true, audioSeconds: 18, messageKeyId: "TEMP1",
+    });
+  });
+
+  it("preserva a identificação do atendente e de reações", async () => {
+    const provider = await novoProvider();
+    expect(provider.parseWebhook(event(ephemeral({ reactionMessage: { text: "👍" } }), true))).toMatchObject({
+      isReaction: true, isFromMe: true, fromName: undefined, text: "👍",
+    });
+  });
+
+  it("ignora configuração, envelope vazio e texto apenas citado", async () => {
+    const provider = await novoProvider();
+    for (const message of [
+      { ephemeralMessage: {} },
+      { ephemeralMessage: { message: null } },
+      ephemeral({ protocolMessage: { type: "EPHEMERAL_SETTING" } }),
+      ephemeral({ extendedTextMessage: { contextInfo: { quotedMessage: { conversation: "Não é uma nova mensagem" } } } }),
+    ]) {
+      expect(provider.parseWebhook(event(message))).toBeNull();
+    }
+  });
+
+  it("limita a profundidade e não trava com envelope cíclico", async () => {
+    const provider = await novoProvider();
+    let message: Record<string, unknown> = { conversation: "Oi" };
+    for (let depth = 0; depth < 6; depth++) message = ephemeral(message);
+    expect(provider.parseWebhook(event(message))).toBeNull();
+    const cycle: Record<string, unknown> = {};
+    cycle.ephemeralMessage = { message: cycle };
+    expect(provider.parseWebhook(event(cycle))).toBeNull();
+  });
+});

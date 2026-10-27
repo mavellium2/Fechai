@@ -422,6 +422,47 @@ pausar o agente**, e a resposta do contato é capturada antes do turno
 - Não persiste conversas/leads — quem grava é o orquestrador.
 - `onMessageReceived` é feito via webhook (`api/webhooks/whatsapp`), não por polling.
 
+### Mensagens temporárias na Evolution
+
+O texto e o áudio podem chegar dentro de `ephemeralMessage.message`. O parser
+abre esse envelope antes de ler o conteúdo, preservando a chave, o telefone e
+`fromMe` do evento original. Não lê mensagens citadas nem transforma eventos de
+configuração em conversa; envelopes vazios ou profundos demais são ignorados.
+Isso vale também para conversas pausadas: a pausa impede a resposta da IA,
+mas não o registro da mensagem recebida. Corrigir o parser não recupera eventos
+antigos: a recuperação exige o registro original no provedor, com id e data,
+sem recriar uma mensagem a partir de print ou disparar um novo turno de IA.
+
+### Recuperação dos últimos 30 dias
+
+`history-recovery.ts` agenda uma reconciliação da instância inteira, inclusive
+contatos ausentes no painel. Só SUPERADMIN personificando uma conta ativa pode
+iniciá-la em Integrações; cada leitura/action confere conta e liberação do QR.
+`history-recovery-worker.ts` roda na fila independente `whatsapp-history-recovery`:
+lotes pequenos, janela congelada de 30 × 24 h, cursor e lease no banco, retomada
+após reinício. `evolution-history.ts` consulta `POST /chat/findMessages/{instance}`
+com as duas bordas ISO, `page` e `offset`. Nunca requisita reenvio de mensagens.
+
+Somente ids ausentes são inseridos, com `createdAt` original e `recoveredAt`.
+Saídas de autoria desconhecida usam `sentBy: history` (nunca IA/humano presumido).
+A recuperação não chama o webhook, IA, transcrição, pesquisa, aviso ou envio,
+nem altera pausa, prioridade, etapa de follow-up, `lastInboundAt` ou canal já
+definido. Conversa nova fica pausada, para revisão humana antes de automatizar.
+Contatos novos nascem com a data mais antiga encontrada. Conversas existentes
+mantêm seus dados operacionais; só o histórico é completado. Bloqueados, testes,
+grupos e mensagens de pesquisa já identificadas ficam fora. Telefone ambíguo não
+é unido por palpite. Criação compartilha lock por conta/telefone com a entrada
+ao vivo. O banco único de ids de WhatsApp resolve a disputa com o webhook.
+
+O resultado distingue já existentes, recuperadas, fora da janela, sem telefone,
+conteúdo não suportado e mídia sem arquivo. Áudio vira `[Áudio]` sem transcrição
+fabricada; anexos reconhecidos têm legenda/marcador, sem prometer arquivo salvo.
+Mudança de total ou páginas incompletas não vira sucesso. Cada registro da origem
+é contado uma vez em `WhatsappHistoryRecoveryItem`; no fim, o total único precisa
+fechar com o anunciado pela Evolution. A fonte pode já ter apagado mensagens:
+concluir a varredura comprova apenas o que ela ainda conserva, não o WhatsApp todo.
+Schema novo exige `db push` + `generate` em web e worker.
+
 
 ## Confirmações QR autorizadas e recibos (09/10/2026)
 

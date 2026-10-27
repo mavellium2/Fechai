@@ -137,7 +137,7 @@ async function buildCandidate(
     where: { conversationId: c.id, createdAt: { gt: episodeStart }, role: { in: ["user", "assistant"] } },
     orderBy: { createdAt: "desc" },
     take: 400,
-    select: { role: true, sentBy: true, createdAt: true },
+    select: { role: true, sentBy: true, createdAt: true, recoveredAt: true },
   });
   const last = messages[0] ?? null;
   const [handoffs, automated, blocked] = await Promise.all([
@@ -155,7 +155,7 @@ async function buildCandidate(
     const base = {
       needsHuman: c.needsHuman, agentPaused: c.agentPaused, lastInboundAt: c.lastInboundAt,
       followUpSentAt: c.followUpSentAt, followUpStep: c.followUpStep, followUpReason: c.followUpReason,
-      lastMessage: last ? { role: last.role, createdAt: last.createdAt } : null,
+      lastMessage: last ? { role: last.role, createdAt: last.createdAt, sentBy: last.sentBy } : null,
       hasActiveAppointment: c.lead.appointments.length > 0,
       agentEnabled: c.agent?.enabled,
     };
@@ -173,9 +173,10 @@ async function buildCandidate(
     followUpReason: c.followUpReason,
     blocked,
     lastInboundAt: c.lastInboundAt,
-    lastMessage: last ? { role: last.role, createdAt: last.createdAt } : null,
+    lastMessage: last ? { role: last.role, createdAt: last.createdAt, sentBy: last.sentBy } : null,
     lastMessageAutomated: automated > 0,
-    contactMessages: messages.filter((m) => m.role === "user").length,
+    // Completar o passado não qualifica um episódio novo para uma pesquisa.
+    contactMessages: messages.filter((m) => m.role === "user" && !m.recoveredAt).length,
     agentReplies: messages.filter((m) => m.role === "assistant" && m.sentBy === "agent").length,
     followUpActive,
     // Reativação (P-88) ainda não existe: ponto de extensão em `isInReactivation`.

@@ -198,6 +198,9 @@ describe("configuração", () => {
 });
 
 describe("quem recebe a pesquisa", () => {
+  it("recuperação de histórico não dispara pesquisa", () => {
+    expect(evaluateSurvey(candidate({ lastMessage: { role: "assistant", createdAt: ago(300), sentBy: "history" } }), SETTINGS, NOW)).toEqual({ action: "skip", reason: "not_real_conversation" });
+  });
   it("conversa real, terminada e dentro do prazo: envia", () => {
     expect(evaluateSurvey(candidate(), SETTINGS, NOW)).toEqual({ action: "send" });
   });

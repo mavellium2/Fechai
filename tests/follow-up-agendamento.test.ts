@@ -255,6 +255,10 @@ describe("esteira (regra pura)", () => {
     expect(nextFollowUp(silent({ agentPaused: true }), ESTEIRA)).toBeNull();
   });
 
+  it("histórico recuperado não dispara follow-up", () => {
+    expect(nextFollowUp({ ...silent(), lastMessage: { role: "assistant", createdAt: ago(119), sentBy: "history" } }, ESTEIRA)).toBeNull();
+  });
+
   it("agente com a chave geral desligada não reengaja", () => {
     expect(nextFollowUp({ ...silent(), agentEnabled: false }, ESTEIRA)).toBeNull();
   });

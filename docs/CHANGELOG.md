@@ -2,6 +2,22 @@
 
 Uma linha por milestone concluído (mais recente no topo).
 
+## Recuperação de 30 dias do WhatsApp e mensagens temporárias — 2026-10-26
+
+Admin personificando uma conta ativa pode reconciliar todas as conversas da
+Evolution nos últimos 30 dias, inclusive contatos ausentes. Fila durável no worker,
+claim condicional, cobertura por ids únicos da origem e cursor atômico com as
+inserções. Idempotente, preserva datas, pausas, canal e relógios de atendimento;
+conversas novas ficam pausadas. Não envia, não chama IA nem pesquisa, e saídas
+sem autoria conhecida não viram respostas da IA ou da equipe. Início aguarda
+dois minutos para concluir entregas ao vivo. Bloqueios, testes e pesquisas
+registradas são respeitados. Mídia sem arquivo e itens não recuperáveis aparecem
+nas ressalvas; não promete restaurar o que a origem já apagou. O parser também
+abre `ephemeralMessage.message`, antes descartado como conteúdo vazio.
+Schema: `WhatsappHistoryRecovery`, `WhatsappHistoryRecoveryItem` e
+`Message.recoveredAt` — `db push` + `generate` na web e no worker.
+Validação: 2.301 testes, lint, TypeScript, build e smoke PostgreSQL com rollback.
+
 ## Contexto de manutenção do painel — 2026-10-26
 
 Documentação pela skill `module-docs`: seis arquivos em

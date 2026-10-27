@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { getWhatsAppProviderForInstance } from "@/modules/whatsapp/meta-config";
 import {
   channelProvider,
@@ -11,6 +12,8 @@ import {
   type WhatsappChannel,
 } from "@/modules/whatsapp/instances";
 import { storeVoiceMessage } from "@/modules/voice/storage";
+import { withConversationContactLock } from "./conversation-lock";
+import { contactPhoneAliases } from "@/modules/whatsapp/contact-phone";
 
 /**
  * Encontra (ou cria) o lead + conversa de um telefone, dentro do tenant.
@@ -26,15 +29,27 @@ export async function getOrCreateConversation(
   name?: string,
   options: { isTest?: boolean } = {},
 ) {
-  const isTest = options.isTest ?? false;
+  return withConversationContactLock(tenantId, phone, (db) => getOrCreateLockedConversation(db, tenantId, phone, name, options));
+}
 
-  let lead = await prisma.lead.findFirst({
+async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenantId: string, phone: string, name: string | undefined, options: { isTest?: boolean }) {
+  const isTest = options.isTest ?? false;
+  let lead = await db.lead.findFirst({
     where: { tenantId, phone },
     include: { conversation: true },
   });
 
+  if (!lead && !isTest) {
+    const aliases = contactPhoneAliases(phone).filter((alias) => alias !== phone);
+    if (aliases.length) {
+      const matches = await db.lead.findMany({ where: { tenantId, phone: { in: aliases } }, include: { conversation: true }, take: 2 });
+      if (matches.length > 1) throw new Error("Mais de um contato corresponde a este telefone.");
+      lead = matches[0] ?? null;
+    }
+  }
+
   if (!lead) {
-    lead = await prisma.lead.create({
+    lead = await db.lead.create({
       data: {
         tenantId,
         phone,
@@ -47,7 +62,7 @@ export async function getOrCreateConversation(
   } else if (!lead.name && name?.trim() && !lead.isTest) {
     // Uma conversa iniciada pelo atendente nasce sem nome. O primeiro perfil
     // recebido do próprio contato pode completar esse dado.
-    lead = await prisma.lead.update({
+    lead = await db.lead.update({
       where: { id: lead.id },
       data: { name: name.trim() },
       include: { conversation: true },
@@ -55,17 +70,15 @@ export async function getOrCreateConversation(
   }
 
   if (!lead.conversation) {
-    const conversation = await prisma.conversation.create({
+    const conversation = await db.conversation.create({
       data: { tenantId, leadId: lead.id, isTest: lead.isTest },
     });
     lead = { ...lead, conversation };
   } else if (isTest && !lead.isTest) {
     // Sandbox de contas antigas: o lead "sandbox" já existia sem a marca.
     // Corrigir na leitura evita depender de o backfill ter rodado.
-    await prisma.$transaction([
-      prisma.lead.update({ where: { id: lead.id }, data: { isTest: true } }),
-      prisma.conversation.update({ where: { id: lead.conversation.id }, data: { isTest: true } }),
-    ]);
+    await db.lead.update({ where: { id: lead.id }, data: { isTest: true } });
+    await db.conversation.update({ where: { id: lead.conversation.id }, data: { isTest: true } });
     lead = { ...lead, isTest: true, conversation: { ...lead.conversation, isTest: true } };
   }
 

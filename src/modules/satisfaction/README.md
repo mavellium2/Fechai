@@ -55,6 +55,10 @@ o alerta de notas baixas no `/inicio` e o relatório mensal.
 
 ## Quem recebe (`eligibility.ts`, regra pura)
 
+Última mensagem recuperada (`sentBy: history`) não inicia uma pesquisa. A
+reconciliação de histórico exclui ids já guardados em `SatisfactionSurvey` e
+nunca chama a captura ou o envio da pesquisa.
+
 Conversou de verdade (≥ 2 mensagens do contato e ≥ 1 resposta do agente no
 episódio; sem `whatsappProvider`, site/widget, fica fora). **Não recebe**: teste,
 agente desligado, transferido para a equipe/prioridade (`needsHuman`,

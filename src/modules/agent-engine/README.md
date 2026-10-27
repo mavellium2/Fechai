@@ -49,6 +49,11 @@ handoffToolDescription(config?) -> string              // descrição de handoff
 
 Consumidores: `api/webhooks/whatsapp` (WhatsApp real), `api/sandbox` (chat de teste) e `agent-mcp/simulate.ts` (simulação pelo MCP).
 
+Criação de conversa usa lock transacional por conta/telefone (`conversation-lock.ts`),
+compartilhado com a recuperação de histórico para não duplicar contatos durante
+uma entrada ao vivo. Histórico recuperado não passa por `appendMessage`: conserva
+data original, não altera `lastInboundAt` e nunca inicia um turno.
+
 ### Variáveis da conversa
 
 `Agent.variableDefinitions` guarda até 20 chaves personalizadas com descrição.

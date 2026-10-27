@@ -12,6 +12,24 @@ function isPhoneJid(value: unknown): value is string {
     /^\d{8,15}@(s\.whatsapp\.net|c\.us)$/.test(value);
 }
 
+type EvolutionMessageContent = {
+  conversation?: string;
+  extendedTextMessage?: { text?: string };
+  audioMessage?: { seconds?: unknown } | null;
+  pttMessage?: { seconds?: unknown } | null;
+  reactionMessage?: { text?: string; key?: { remoteJid?: string } };
+  ephemeralMessage?: { message?: EvolutionMessageContent | null } | null;
+};
+
+function unwrapEphemeralMessage(message: EvolutionMessageContent | undefined) {
+  // O temporizador do contato pode envolver texto/voz em vez de mudar o tipo
+  // interno. Limite evita ciclos/profundidade arbitrária em payload inválido.
+  for (let depth = 0; message?.ephemeralMessage && depth < 5; depth++) {
+    message = message.ephemeralMessage.message ?? undefined;
+  }
+  return message?.ephemeralMessage ? undefined : message;
+}
+
 // Adapter da Evolution API (self-hosted). Docs variam por versão; os endpoints
 // abaixo seguem a v2 (/instance/create, /instance/connect, /message/sendText).
 export class EvolutionProvider implements WhatsAppProvider {
@@ -336,13 +354,7 @@ export class EvolutionProvider implements WhatsAppProvider {
           id?: string;
         };
         pushName?: string;
-        message?: {
-          conversation?: string;
-          extendedTextMessage?: { text?: string };
-          audioMessage?: { seconds?: unknown } | null;
-          pttMessage?: { seconds?: unknown } | null;
-          reactionMessage?: { text?: string; key?: { remoteJid?: string } };
-        };
+        message?: EvolutionMessageContent;
       };
     };
     const data = p?.data;
@@ -352,18 +364,20 @@ export class EvolutionProvider implements WhatsAppProvider {
     // pelo key.id contra o que o app já gravou ao enviar.
     if (!data) return null;
 
+    const message = unwrapEphemeralMessage(data.message);
+
     // Reação (emoji sobreposta a uma mensagem) nunca dispara um turno nem entra
     // no histórico. O webhook usa `fromMe` para distinguir o comando rápido do
     // atendente (pausar o agente) de uma reação comum do cliente (ignorar).
-    const reaction = data.message?.reactionMessage;
+    const reaction = message?.reactionMessage;
     const text =
       reaction?.text ??
-      data.message?.conversation ??
-      data.message?.extendedTextMessage?.text ??
+      message?.conversation ??
+      message?.extendedTextMessage?.text ??
       "";
     // Voz (pttMessage) e arquivo de áudio (audioMessage) têm a mesma forma,
     // inclusive a duração em `seconds`, que o relatório mensal soma.
-    const audio = data.message?.audioMessage ?? data.message?.pttMessage;
+    const audio = message?.audioMessage ?? message?.pttMessage;
     const hasAudio = Boolean(audio);
     const audioSeconds = hasAudio ? reportedAudioSeconds(audio?.seconds) : undefined;
     const jid = typeof data.key?.remoteJid === "string" ? data.key.remoteJid : "";

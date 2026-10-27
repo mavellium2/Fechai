@@ -37,7 +37,7 @@ export type SurveyCandidate = {
   blocked: boolean;
   lastInboundAt: Date | null;
   /** Última mensagem da conversa (de qualquer lado). */
-  lastMessage: { role: string; createdAt: Date } | null;
+  lastMessage: { role: string; createdAt: Date; sentBy?: string | null } | null;
   /** A última fala do agente foi um Disparo, lembrete ou follow-up (não é fim de atendimento). */
   lastMessageAutomated: boolean;
   contactMessages: number;
@@ -142,6 +142,7 @@ export function evaluateSurvey(
   if (!c.lastInboundAt || !c.lastMessage) return skip("not_real_conversation");
   // O contato falou por último: ele espera o atendimento, não uma pesquisa.
   if (c.lastMessage.role !== "assistant") return skip("contact_last");
+  if (c.lastMessage.sentBy === "history") return skip("not_real_conversation");
   if (c.lastMessageAutomated) return skip("automated_last");
 
   if (options.ignoreTiming) return { action: "send" };

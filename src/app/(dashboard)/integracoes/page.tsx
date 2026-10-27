@@ -4,7 +4,7 @@ import Link from "next/link";
 import { BitrixCard } from "./BitrixCard";
 import { getBitrixStatus } from "@/modules/bitrix/integration";
 import { AtSign, Globe, MessageCircle, ShieldCheck } from "lucide-react";
-import { requireTenant } from "@/lib/session";
+import { requireSession, requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getWhatsAppProvider } from "@/modules/whatsapp";
 import { metaWebhookUrl, readMetaWebhookSecrets } from "@/modules/whatsapp/meta-config";
@@ -33,6 +33,8 @@ import { embeddedSignupPublicConfig } from "@/modules/whatsapp/embedded-signup-c
 import { AttendanceControls } from "./WhatsappControls";
 import { WhatsappBlocklist } from "./WhatsappBlocklist";
 import { SnippetBox } from "./SnippetBox";
+import { WhatsappHistoryRecovery } from "./WhatsappHistoryRecovery";
+import { readHistoryRecovery } from "@/modules/whatsapp/history-recovery";
 
 const STATUS_LABEL: Record<string, { label: string; tone: "success" | "warn" | "neutral" }> = {
   disconnected: { label: "Não conectado", tone: "neutral" },
@@ -53,6 +55,7 @@ export default async function IntegracoesPage({
   searchParams: Promise<{ aba?: string }>;
 }) {
   const { tenantId } = await requireTenant();
+  const actualSession = await requireSession();
   const { aba } = await searchParams;
   // Parâmetro de URL é editável: qualquer coisa fora da lista cai em "canais".
   const tab = TABS.some((t) => t.key === aba) ? (aba as (typeof TABS)[number]["key"]) : "canais";
@@ -309,6 +312,9 @@ export default async function IntegracoesPage({
 
       {tab === "canais" && (
         <>
+      {actualSession.user.role === "SUPERADMIN" && evolutionEnabled && evolutionRow?.externalId && (
+        <WhatsappHistoryRecovery initial={await readHistoryRecovery(tenantId)} />
+      )}
       {evolutionEnabled && !evolutionConfigured && (
         <Alert tone="warn" title="Conexão indisponível neste ambiente">
           A Evolution API não está configurada neste ambiente.{" "}

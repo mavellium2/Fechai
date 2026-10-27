@@ -19,6 +19,7 @@ type ThreadMessage = {
   content: string;
   createdAt: Date;
   sentBy: string | null;
+  recoveredAt?: Date | null;
   /** Mensagem enviada ou recebida como voz: o player entra junto do texto. */
   audioUrl?: string | null;
 };
@@ -56,6 +57,7 @@ export function ConversationThread({
 
   function senderLabel(m: ThreadMessage) {
     if (m.role === "user") return name;
+    if (m.sentBy === "history") return "WhatsApp";
     return m.sentBy === "human" ? "você" : "agente";
   }
 
@@ -165,7 +167,7 @@ export function ConversationThread({
               <div className={sameSpeaker ? "mt-1" : newDay ? "" : "mt-4"}>
                 <ChatBubble
                   role={m.role === "user" ? "user" : "assistant"}
-                  footer={`${senderLabel(m)}${m.audioUrl ? " · áudio" : ""} · ${timeLabel(m.createdAt)}`}
+                  footer={`${senderLabel(m)}${m.audioUrl ? " · áudio" : ""}${m.recoveredAt ? " · recuperada" : ""} · ${timeLabel(m.createdAt)}`}
                 >
                   {/* Áudio + texto na MESMA bolha: o texto é o que a mensagem
                       diz (ditado ou falado), o player é como ela chegou. Separar

@@ -203,6 +203,7 @@ export const AUDIT_EVENTS = {
 
   // ── integrações ───────────────────────────────────────────────────────
   "whatsapp.connected": { label: "Conectou o WhatsApp", kind: "update", group: "integracoes" },
+  "whatsapp.history_recovery_started": { label: "Solicitou recuperação do histórico do WhatsApp", kind: "create", group: "integracoes" },
   "whatsapp.disconnected": {
     label: "Desconectou o WhatsApp",
     kind: "update",

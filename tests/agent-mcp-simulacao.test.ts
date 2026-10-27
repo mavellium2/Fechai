@@ -73,6 +73,14 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: mocks.rate, rateLimitReserve: mocks.reserve }));
+// Este arquivo vigia os efeitos da simulação; concorrência/lock real é
+// conferida no smoke PostgreSQL da recuperação de histórico.
+vi.mock("@/modules/agent-engine/conversation-lock", () => ({
+  withConversationContactLock: async (...args: [string, string, (db: typeof import("@/lib/prisma").prisma) => Promise<unknown>]) => {
+    const { prisma } = await import("@/lib/prisma");
+    return args[2](prisma);
+  },
+}));
 // A auditoria puxa a sessão (next-auth), que não é o assunto aqui.
 vi.mock("@/modules/audit/log", () => ({ recordAudit: vi.fn(async () => {}), recordChange: vi.fn(async () => {}) }));
 vi.mock("@/lib/app-url", () => ({ appBaseUrl: vi.fn(async () => "https://fechai.test") }));
