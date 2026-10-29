@@ -108,7 +108,7 @@ export default async function RelatoriosPage({
         ])
       : [null, null];
 
-  // Campanhas: leads por anúncio no período, mais o envio semanal ao grupo das perguntas.
+  // Campanhas: leads por anúncio no período, mais o envio semanal (grupo ou número).
   const [campaigns, campaignSettings, campaignGroup] =
     view === "campanhas"
       ? await Promise.all([
@@ -429,7 +429,7 @@ export default async function RelatoriosPage({
           <CampaignView
             report={campaigns}
             settings={campaignSettings}
-            groupName={parseGapSettings(campaignGroup).groupName ?? (parseGapSettings(campaignGroup).groupId ? "do WhatsApp" : null)}
+            questionsGroup={{ id: parseGapSettings(campaignGroup).groupId, name: parseGapSettings(campaignGroup).groupName }}
             period={range.label}
           />
         </FadeIn>

@@ -103,7 +103,10 @@ describe("settings do envio semanal", () => {
   it("guarda o que é válido", () => {
     const sent = new Date("2026-10-30T11:00:00Z");
     expect(parseCampaignSettings({ enabled: true, weekday: 6, hour: 10, timezone: "America/Manaus", lastSentAt: sent, lastStatus: "sent" }))
-      .toEqual({ enabled: true, weekday: 6, hour: 10, timezone: "America/Manaus", lastSentAt: sent, lastStatus: "sent" });
+      .toEqual({
+        ...DEFAULT_CAMPAIGN_SETTINGS,
+        enabled: true, weekday: 6, hour: 10, timezone: "America/Manaus", lastSentAt: sent, lastStatus: "sent",
+      });
   });
 
   it("descreve o horário em uma linha", () => {

@@ -6,16 +6,20 @@
 - **Chamado em:** `whatsapp/process-incoming.ts` (ramo recebido, depois da deduplicação, só se `!isGroup && !lead.isTest`).
 
 ## deliverCampaignReport(tenantId, now?)
-- **Retorno:** `"sent" | "no_group" | "no_channel" | "no_data" | "failed"`; grava `lastStatus` (e `lastSentAt` se enviou).
-- **Fluxo:** grupo (`KnowledgeGapSettings.groupId`) → `loadCampaignReport` (semana + anterior) → sem `trackedSince` = `no_data` → `formatCampaignMessage` → `sendToInternalGroup`.
+- **Retorno:** `"sent" | "no_group" | "no_phone" | "no_channel" | "no_data" | "refused" | "failed"`; grava `lastStatus` (e `lastSentAt` se enviou).
+- **Fluxo:** destino (grupo próprio → grupo de `KnowledgeGapSettings`; ou número) → número: `isPhoneRefused` (`phone.ts`) → `loadCampaignReport` (semana + anterior) → sem `trackedSince` = `no_data` → `formatCampaignMessage` → `sendToInternalGroup` | `sendToInternalPhone` (só QR, nunca Meta).
 
 ## scanCampaignReports(now?) — worker
 - Roda na volta de 2 min do worker de perguntas (`workers/follow-up-worker/index.ts`).
-- **Claim:** `updateMany lastSentAt null | < slot` antes de enviar. `no_group/no_channel/no_data` **devolvem** o horário (tenta de novo até a tolerância); `failed` **não** (nunca repete sozinho).
+- **Claim:** `updateMany lastSentAt null | < slot` antes de enviar. `no_group/no_phone/no_channel/no_data` **devolvem** o horário (tenta de novo até a tolerância); `failed` e `refused` **não** (nunca repete sozinho).
 
 ## backfillAdOrigins({ tenantId, since, apply })
 - Lê `/chat/findMessages` da Evolution em fatias de 7 dias, liga ao lead pelo telefone (`readHistoryMessage` + `contactPhoneAliases`), grava com `via: "history"`. Sem `apply` só conta. Script: `scripts/backfill-lead-ad-origin.ts`.
 
+## requestHistoryImport(tenantId) / runPendingHistoryImports() — `history-import.ts`
+- A tela só marca `historyImportStatus = requested` (exige QR conectado, recusa se já há uma na fila/rodando). O **worker** (volta de 2 min) pega **uma por vez**, marca `running`, roda `backfillAdOrigins` (últimos 60 dias, `apply`) em segundo plano e grava `done`/`failed` + resumo só com contagens. `running` há >30 min libera pedir de novo.
+
 ## Server Actions (`relatorios/actions.ts`, `requireProductAccess`)
-- `saveCampaignSettingsAction` — Zod `campaignSettingsFormSchema` (enabled, weekday 0–6, hour 0–23, timezone); audita `campaign_report.settings_updated`.
+- `saveCampaignSettingsAction` — Zod `campaignSettingsFormSchema` (enabled, weekday, hour, timezone, destination, groupId/groupName, phone via `normalizeBrazilianPhone`); `destinationProblem` recusa ligar sem destino completo; audita `campaign_report.settings_updated` (nunca o número: só `hasPhone`).
 - `sendCampaignReportNowAction` — chama `deliverCampaignReport`; erro por status; audita `campaign_report.sent_now`.
+- `requestCampaignHistoryImportAction` — chama `requestHistoryImport`; audita `campaign_report.history_import_requested`.

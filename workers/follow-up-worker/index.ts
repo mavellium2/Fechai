@@ -8,6 +8,7 @@ import { scanBroadcasts } from "../../src/modules/broadcasts/worker";
 import { touchBroadcastWorker } from "../../src/modules/broadcasts/health";
 import { scanKnowledgeGaps } from "../../src/modules/knowledge-gaps/notify";
 import { scanCampaignReports } from "../../src/modules/campaign-reports/send";
+import { runPendingHistoryImports } from "../../src/modules/campaign-reports/history-import";
 import { scanBitrixSync } from "../../src/modules/bitrix/worker";
 import { scanClinicorpSync } from "../../src/modules/scheduling/clinicorp-sync";
 import { scanIcloudSync } from "../../src/modules/scheduling/icloud-sync";
@@ -235,7 +236,11 @@ async function main() {
       if (campaigns.sent || campaigns.waiting) {
         console.log(`[campanhas] enviados=${campaigns.sent} aguardando=${campaigns.waiting}`);
       }
-      return { ...r, campaigns };
+      // Importação do histórico de anúncios pedida na tela: roda em segundo plano,
+      // sem segurar a volta (a leitura da Evolution leva minutos).
+      const imports = await runPendingHistoryImports();
+      if (imports) console.log(`[campanhas] importação do histórico iniciada`);
+      return { ...r, campaigns, imports };
     },
     { connection },
   );

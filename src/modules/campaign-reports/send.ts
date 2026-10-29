@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { parseGapSettings } from "@/modules/knowledge-gaps/settings";
-import { sendToInternalGroup } from "@/modules/knowledge-gaps/group";
+import { sendToInternalGroup, sendToInternalPhone } from "@/modules/knowledge-gaps/group";
 import { formatCampaignMessage } from "./message";
+import { isPhoneRefused } from "./phone";
 import { loadCampaignReport } from "./queries";
 import {
   currentSlot,
@@ -11,9 +12,10 @@ import {
 } from "./settings";
 
 /**
- * Envio do relatório semanal ao grupo interno da clínica — o mesmo das
- * perguntas sem resposta. Roda no worker (`scanCampaignReports`), nunca no
- * turno do agente, e também sob demanda ("Enviar agora").
+ * Envio do relatório semanal: a um grupo interno da clínica (o escolhido aqui ou,
+ * sem escolha, o dos avisos de perguntas sem resposta) ou a um número (o da
+ * própria pessoa). Roda no worker (`scanCampaignReports`), nunca no turno do
+ * agente, e também sob demanda ("Enviar agora").
  *
  * Regras:
  * - **Uma vez por semana.** O envio reivindica o horário (`lastSentAt`) antes
@@ -21,9 +23,12 @@ import {
  * - **Falha de envio nunca repete sozinha.** Timeout ou erro do WhatsApp pode
  *   ter entregado antes de falhar; reenviar duplicaria no grupo. O painel mostra
  *   o estado e "Enviar agora" repete por decisão de uma pessoa.
- * - **O que não depende de rede espera.** Sem grupo, sem conexão por QR ou sem
+ * - **O que não depende de rede espera.** Sem destino, sem conexão por QR ou sem
  *   anúncio capturado nada foi tentado, então o horário é devolvido e a
  *   próxima volta tenta de novo, até a tolerância (`SEND_GRACE_MS`) acabar.
+ * - **Número só pelo QR e só para quem a clínica pode procurar** (`isPhoneRefused`):
+ *   bloqueado, "pare" e contato da Meta ficam de fora, e a Meta nunca é o
+ *   plano B. Grupo e número só existem no QR code.
  * - Nunca lança: o worker não pode cair por causa de um relatório.
  */
 
@@ -32,7 +37,7 @@ function baseUrl(): string | null {
   return configured ? configured.trim().replace(/\/+$/, "") : null;
 }
 
-const NOT_ATTEMPTED: CampaignSendStatus[] = ["no_group", "no_channel", "no_data"];
+const NOT_ATTEMPTED: CampaignSendStatus[] = ["no_group", "no_phone", "no_channel", "no_data"];
 
 /** Monta e envia o relatório da semana que termina hoje. Grava `lastStatus`. */
 export async function deliverCampaignReport(tenantId: string, now = new Date()): Promise<CampaignSendStatus> {
@@ -50,8 +55,13 @@ async function attempt(tenantId: string, now: Date): Promise<CampaignSendStatus>
       prisma.knowledgeGapSettings.findUnique({ where: { tenantId }, select: { groupId: true } }),
     ]);
     const settings = parseCampaignSettings(settingsRow);
-    const groupId = parseGapSettings(gapRow).groupId;
-    if (!groupId) return "no_group";
+    const toPhone = settings.destination === "phone";
+    const phone = toPhone ? settings.phone : null;
+    // Sem grupo próprio vale o dos avisos de Perguntas (único destino da primeira versão).
+    const groupId = toPhone ? null : (settings.groupId ?? parseGapSettings(gapRow).groupId);
+    if (toPhone && !phone) return "no_phone";
+    if (!toPhone && !groupId) return "no_group";
+    if (phone && (await isPhoneRefused(tenantId, phone))) return "refused";
 
     const window = weekWindow(now, settings.timezone);
     const report = await loadCampaignReport(tenantId, { from: window.from, to: window.to }, { previousFrom: window.prevFrom, now });
@@ -69,7 +79,10 @@ async function attempt(tenantId: string, now: Date): Promise<CampaignSendStatus>
       trackedSince: report.trackedSince,
       link: link ? `${link}/relatorios?visao=campanhas` : null,
     });
-    return (await sendToInternalGroup(tenantId, groupId, text)) ? "sent" : "no_channel";
+    const delivered = phone
+      ? await sendToInternalPhone(tenantId, phone, text)
+      : groupId ? await sendToInternalGroup(tenantId, groupId, text) : false;
+    return delivered ? "sent" : "no_channel";
   } catch (err) {
     console.error("[campanhas] envio do relatório falhou", tenantId, err);
     return "failed";

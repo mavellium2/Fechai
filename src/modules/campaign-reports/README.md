@@ -7,8 +7,8 @@
 
 Guarda de qual anúncio (Click-to-WhatsApp, Instagram/Facebook) cada lead veio e
 mostra, por anúncio, o que aconteceu com os leads. O mesmo relatório sai toda
-semana, no dia e hora que a clínica escolher, no **grupo do WhatsApp das
-perguntas sem resposta**.
+semana, no dia e hora que a clínica escolher, em **um grupo do WhatsApp** ou **no
+número da própria pessoa**.
 
 ```text
 mensagem do lead (Evolution: contextInfo.externalAdReply | Meta: referral)
@@ -16,10 +16,12 @@ mensagem do lead (Evolution: contextInfo.externalAdReply | Meta: referral)
         ▼
 IncomingMessage.adOrigin ─► process-incoming ─► recordLeadAdOrigin ─► LeadAdOrigin (1 por lead)
                                                          ▲
-histórico da Evolution ─► backfillAdOrigins (script) ────┘   (só leads que já existem)
+histórico da Evolution ─► backfillAdOrigins ─────────────┘   (só leads que já existem)
+   ▲  botão "Importar histórico" ─► fila (CampaignReportSettings) ─► worker (history-import.ts)
+   └─ ou script scripts/backfill-lead-ad-origin.ts
 
 LeadAdOrigin + Lead + leadOutcome ─► summarizeCampaigns ─► /relatorios?visao=campanhas
-                                                        └─► formatCampaignMessage ─► grupo (worker, semanal)
+                                       └─► formatCampaignMessage ─► grupo | número (worker, semanal)
 ```
 
 ## Arquivos
@@ -28,14 +30,18 @@ LeadAdOrigin + Lead + leadOutcome ─► summarizeCampaigns ─► /relatorios?v
 - `record.ts` — `recordLeadAdOrigin` (**nunca lança**; primeiro anúncio vence).
 - `summary.ts` — puro. `summarizeCampaigns`, `percent`.
 - `queries.ts` — `loadCampaignSummary`, `loadCampaignReport` (com semana anterior e `trackedSince`). Só metadados.
-- `settings.ts` / `settings-store.ts` — dia, hora e fuso do envio (`CampaignReportSettings`); `currentSlot`, `weekWindow`.
+- `settings.ts` / `settings-store.ts` — destino (grupo ou número), dia, hora e fuso do envio (`CampaignReportSettings`); `currentSlot`, `weekWindow`, `destinationProblem`, estado da importação do histórico.
 - `message.ts` — puro. `formatCampaignMessage`, `rangeLabel`.
-- `send.ts` — `deliverCampaignReport` (monta e envia) e `scanCampaignReports` (volta do worker).
-- `backfill.ts` — `backfillAdOrigins`, usado por `scripts/backfill-lead-ad-origin.ts`.
-- `../knowledge-gaps/group.ts` — `sendToInternalGroup`, o envio ao grupo interno que as perguntas e este relatório compartilham.
+- `send.ts` — `deliverCampaignReport` (monta e envia ao destino) e `scanCampaignReports` (volta do worker).
+- `phone.ts` — `isPhoneRefused`: o número digitado pode receber pelo QR? (bloqueado, "pare", contato da Meta: não).
+- `backfill.ts` — `backfillAdOrigins`, usado pelo script e pela importação da tela.
+- `history-import.ts` — `requestHistoryImport` (a tela pede) e `runPendingHistoryImports` (o worker lê, uma por vez).
+- `../knowledge-gaps/group.ts` — `sendToInternalGroup` (compartilhado com as perguntas) e `sendToInternalPhone`.
+- `../whatsapp/contact-phone.ts` — `normalizeBrazilianPhone`, a regra do número digitado (a mesma do envio de teste da satisfação).
 
 Telas: `(dashboard)/relatorios/CampaignView.tsx` (aba **Campanhas**) e
-`CampaignSettingsForm.tsx` (dia, hora, "Enviar agora"); ações em `relatorios/actions.ts`.
+`CampaignSettingsForm.tsx` (destino, dia, hora, "Enviar agora", "Importar
+histórico"); ações em `relatorios/actions.ts`.
 
 ## Regras que não podem quebrar
 
@@ -87,35 +93,63 @@ Evolution grava a mesma mensagem mais de uma vez (`@lid` e telefone), então
 conta-se por pessoa, não por mensagem. Meta não tem passado: ela não guarda os
 webhooks.
 
-**O envio vai ao mesmo grupo das perguntas** (`KnowledgeGapSettings.groupId`,
-escolhido em Perguntas), use ou não os avisos de perguntas por WhatsApp. Grupo
-é do número por QR code (a Meta não tem grupos) e, sem ele, o envio **espera,
-nunca troca de número**. Desligado por padrão (`CampaignReportSettings.enabled`).
-Padrão sexta 8h, fuso da conta; a semana cobre os 7 dias até a meia-noite de
-hoje (hoje fica de fora).
+**O destino é um grupo ou um número** (`CampaignReportSettings.destination`).
+Os dois ficam guardados: trocar de um para o outro não apaga o outro.
+- **Grupo:** o escolhido na própria aba (`groupId`, mesmo seletor de Perguntas) ou,
+  sem escolha, o dos avisos de Perguntas (`KnowledgeGapSettings.groupId`, único
+  destino da primeira versão). Grupo é do número por QR code (a Meta não tem grupos).
+- **Número** (`phone`, só dígitos com 55, validado por `normalizeBrazilianPhone`): a
+  própria pessoa recebe numa conversa com o número da clínica. Sai **só pelo QR
+  code** e **nunca pela Meta** (texto livre fora das 24h é recusado lá). É primeiro
+  contato pelo QR, que é o que leva ao bloqueio do número da clínica; por isso a
+  tela pede para a pessoa mandar um "oi" desse número antes do primeiro envio, e
+  `isPhoneRefused` barra o número de quem a clínica não pode procurar por aqui:
+  **bloqueado, pediu para parar ou fala pela Meta** (status `refused`, que nunca
+  repete sozinho). Lê com cautela: na dúvida de leitura recusa.
+- Sem QR conectado o envio **espera, nunca troca de número**. Ligar o envio exige
+  destino completo (`destinationProblem`); desligado salva como rascunho.
+
+Desligado por padrão (`CampaignReportSettings.enabled`). Padrão sexta 8h, fuso da
+conta; a semana cobre os 7 dias até a meia-noite de hoje (hoje fica de fora).
 
 **Envio semanal**, `scanCampaignReports` na volta de 2 min do worker de
 perguntas: dentro do dia e da hora (`currentSlot`, com tolerância de 6 h que não
 atravessa a meia-noite), reivindica `lastSentAt` antes de enviar — dois workers
 não mandam duas vezes. **Falha de envio nunca repete sozinha** (timeout pode ter
 entregado; repetir duplica no grupo): o painel mostra o estado e "Enviar agora"
-repete por decisão de uma pessoa. O que **não foi tentado** (sem grupo, sem QR,
-conta sem nenhum anúncio) devolve o horário e a volta seguinte tenta de novo
-até a tolerância acabar. Conta que nunca registrou anúncio não recebe
+repete por decisão de uma pessoa. O que **não foi tentado** (sem grupo, sem
+número, sem QR, conta sem nenhum anúncio) devolve o horário e a volta seguinte
+tenta de novo até a tolerância acabar. Conta que nunca registrou anúncio não recebe
 "0 leads" toda sexta. "Enviar agora" pode repetir o que o horário marcado manda
 depois, no mesmo dia.
 
 ## Schema
 
 `LeadAdOrigin` (uma por lead, cascata) e `CampaignReportSettings` (uma por
-conta). Mudança de schema pede `prisma db push` + `prisma generate` **nos dois
-processos** (web e worker).
+conta; destino, grupo, número e estado da importação do histórico). Mudança de
+schema pede `prisma db push` + `prisma generate` **nos dois processos** (web e
+worker). As colunas novas são todas opcionais ou com padrão: `db push` não pede
+`--accept-data-loss`.
 
-## Backfill (uma vez por conta)
+## Importar o histórico (uma vez por conta)
+
+A aba só se preenche sozinha com contatos **novos**. Quem já tinha chegado de
+anúncio entra depois de ler o que a Evolution guardou, e isso se pede de dois
+jeitos (o mesmo `backfillAdOrigins`, sempre só em leads que já existem):
+
+**Pela tela** (botão "Importar histórico", na aba Campanhas): a requisição só marca
+`historyImportStatus = requested`; **quem lê é o worker** (`runPendingHistoryImports`,
+na volta de 2 min), porque a leitura leva minutos. Uma importação por vez em todo o
+worker, em segundo plano (não segura os avisos nem o envio semanal). Lê os últimos
+60 dias (`HISTORY_IMPORT_DAYS`). A página se atualiza sozinha enquanto há uma
+importação em andamento; `running` há mais de 30 min (worker que caiu) libera pedir
+de novo. O resumo guardado (`historyImportSummary`) só tem contagens.
+
+**Pelo script** (dentro do container do worker, que leva `scripts/` e `tsx`):
 
 ```bash
-npx tsx scripts/backfill-lead-ad-origin.ts --tenant <id> --desde 2026-09-01          # simula
-npx tsx scripts/backfill-lead-ad-origin.ts --tenant <id> --desde 2026-09-01 --apply  # grava
+docker compose exec worker npx tsx scripts/backfill-lead-ad-origin.ts --tenant <id> --desde 2026-09-01          # simula
+docker compose exec worker npx tsx scripts/backfill-lead-ad-origin.ts --tenant <id> --desde 2026-09-01 --apply  # grava
 ```
 
 A saída só tem contagens. Antes de gravar, confira "sem telefone identificado" e

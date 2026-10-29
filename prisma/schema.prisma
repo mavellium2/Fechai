@@ -275,8 +275,9 @@ model KnowledgeGapSettings {
 }
 
 /// Envio semanal do relatório de campanhas, por conta. Sem linha = desligado.
-/// O destino é o grupo já escolhido em `KnowledgeGapSettings` (o mesmo das
-/// perguntas sem resposta); aqui só moram o dia, a hora e o controle do envio.
+/// O destino é um grupo do WhatsApp ou um número (o da própria pessoa); sem grupo
+/// próprio, vale o dos avisos de `KnowledgeGapSettings`. Aqui moram também o dia,
+/// a hora, o controle do envio e o pedido de importar o histórico de anúncios.
 /// Ver `src/modules/campaign-reports/README.md`.
 model CampaignReportSettings {
   tenantId     String    @id
@@ -289,8 +290,22 @@ model CampaignReportSettings {
   timezone     String    @default("America/Sao_Paulo")
   /// Instante do último envio automático ou manual (claim do envio da semana).
   lastSentAt   DateTime?
-  /// O que aconteceu na última tentativa: sent | no_group | no_channel | failed | empty.
+  /// O que aconteceu na última tentativa: sent | no_group | no_phone | no_channel | no_data | refused | failed.
   lastStatus   String?
+  /// Para onde vai: "group" ou "phone". Os dois destinos ficam guardados:
+  /// trocar de um para o outro não apaga o que estava salvo no outro.
+  destination  String    @default("group")
+  /// Grupo escolhido aqui. Vazio = o grupo dos avisos de Perguntas, que era o
+  /// único destino na primeira versão.
+  groupId      String?
+  groupName    String?
+  /// Número do destino "phone": só dígitos, com 55 (ex.: 5511987654321).
+  phone        String?
+  /// Importação do histórico de anúncios (lê a Evolution): requested | running | done | failed.
+  historyImportStatus  String?
+  historyImportAt      DateTime?
+  /// Só contagens: nunca telefone, nome ou texto de conversa.
+  historyImportSummary String?
   updatedAt    DateTime  @updatedAt
 }
 

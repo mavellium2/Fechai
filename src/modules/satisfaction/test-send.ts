@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { normalizeBrazilianPhone } from "@/modules/whatsapp/contact-phone";
 import { OPEN_STATUSES, SURVEY_WINDOW_HOURS } from "./eligibility";
 import { sendSurvey } from "./send";
 import { getSurveySettings } from "./settings-store";
@@ -19,12 +20,7 @@ import { getSurveySettings } from "./settings-store";
  */
 
 /** "(11) 98765-4321" → "5511987654321"; null quando não parece um número. */
-export function normalizeTestPhone(raw: string): string | null {
-  const digits = raw.replace(/\D/g, "");
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
-  return null;
-}
+export const normalizeTestPhone = normalizeBrazilianPhone;
 
 /** As formas do mesmo celular com e sem o nono dígito: o lead pode ter sido gravado por qualquer uma. */
 function phoneForms(phone: string): string[] {

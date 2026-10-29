@@ -60,9 +60,10 @@ export function RadioCards({
               "group relative flex cursor-pointer items-center gap-2.5 rounded-control border px-3 py-2.5 text-sm transition-all",
               // o anel de foco vem do input escondido, via peer-focus-visible
               "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-iris has-[:focus-visible]:ring-offset-1",
+              // `panel:` = painel escuro: sem isso o cartão ficava branco com texto claro.
               selected
-                ? "border-iris bg-iris/5 text-ink"
-                : "border-ink/15 bg-white text-neutral hover:border-ink/30 hover:text-ink",
+                ? "border-iris bg-iris/5 text-ink panel:bg-iris/15 panel:text-white"
+                : "border-ink/15 bg-white text-neutral hover:border-ink/30 hover:text-ink panel:border-white/15 panel:bg-white/5 panel:text-white/70 panel:hover:border-white/30 panel:hover:text-white",
             )}
           >
             <input
@@ -78,14 +79,14 @@ export function RadioCards({
             {Icon ? (
               <Icon
                 size={16}
-                className={cn("shrink-0 transition-colors", selected ? "text-iris" : "text-neutral")}
+                className={cn("shrink-0 transition-colors", selected ? "text-iris" : "text-neutral panel:text-white/55")}
                 aria-hidden
               />
             ) : null}
 
             <span className="min-w-0 flex-1">
               <span className={cn("block truncate", selected && "font-medium")}>{o.label}</span>
-              {o.hint && <span className="block truncate text-xs text-neutral">{o.hint}</span>}
+              {o.hint && <span className="block truncate text-xs text-neutral panel:text-white/55">{o.hint}</span>}
             </span>
 
             {/* o check confirma a escolha sem depender só da cor da borda */}

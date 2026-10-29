@@ -20,6 +20,14 @@ import { sendToInternalGroup } from "@/modules/knowledge-gaps/group";
 const sent = await sendToInternalGroup(tenantId, groupId, text); // false = sem canal; lança se o envio falhou
 ```
 
+## Enviar a um número (QR, nunca Meta; quem chama checa `isPhoneRefused` antes)
+```typescript
+import { sendToInternalPhone } from "@/modules/knowledge-gaps/group";
+import { isPhoneRefused } from "@/modules/campaign-reports/phone";
+if (await isPhoneRefused(tenantId, phone)) return "refused";
+const sent = await sendToInternalPhone(tenantId, phone, text); // false = sem QR; lança se o envio falhou
+```
+
 ## Backfill do passado
 ```bash
 npx tsx scripts/backfill-lead-ad-origin.ts --tenant <id> --desde 2026-09-01          # simula

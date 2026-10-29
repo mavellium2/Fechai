@@ -1,15 +1,21 @@
 import { Megaphone } from "lucide-react";
-import { Alert } from "@/components/ui/alert";
 import { Card, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Stat } from "@/components/ui/stat";
 import { HorizontalBars } from "@/components/charts/HorizontalBars";
-import { describeCampaignSchedule, type CampaignSendStatus, type CampaignSettings } from "@/modules/campaign-reports/settings";
+import {
+  HISTORY_IMPORT_DAYS,
+  canRequestHistoryImport,
+  describeCampaignSchedule,
+  formatReportPhone,
+  type CampaignSendStatus,
+  type CampaignSettings,
+} from "@/modules/campaign-reports/settings";
 import { percent } from "@/modules/campaign-reports/summary";
 import type { CampaignReport } from "@/modules/campaign-reports/queries";
 import { formatInZone } from "@/modules/scheduling/time";
-import { CampaignSendNowForm, CampaignSettingsForm } from "./CampaignSettingsForm";
+import { CampaignHistoryImport, CampaignSendNowForm, CampaignSettingsForm } from "./CampaignSettingsForm";
 
 const pct = (n: number, d: number) => {
   const value = percent(n, d);
@@ -17,11 +23,13 @@ const pct = (n: number, d: number) => {
 };
 
 const STATUS_LABEL: Record<CampaignSendStatus, string> = {
-  sent: "enviado ao grupo",
+  sent: "enviado",
   no_group: "não enviado: sem grupo escolhido",
+  no_phone: "não enviado: sem número informado",
   no_channel: "não enviado: WhatsApp por QR code desconectado",
   no_data: "não enviado: ainda sem anúncio registrado",
-  failed: "envio sem confirmação — confira o grupo",
+  refused: "não enviado: esse número é de um contato que a clínica não pode procurar por aqui",
+  failed: "envio sem confirmação — confira o WhatsApp",
 };
 
 const dateLabel = (date: Date) =>
@@ -29,19 +37,32 @@ const dateLabel = (date: Date) =>
 
 /**
  * Campanhas: de qual anúncio vieram os leads do período e o que aconteceu com
- * eles, mais o envio semanal desse relatório ao grupo da clínica. Só agregados:
- * nenhum nome, telefone ou texto de conversa.
+ * eles, mais o envio semanal desse relatório a um grupo ou a um número. Só
+ * agregados: nenhum nome, telefone ou texto de conversa.
  */
-export function CampaignView({ report, settings, groupName, period }: {
+export function CampaignView({ report, settings, questionsGroup, period }: {
   report: CampaignReport;
   settings: CampaignSettings;
-  groupName: string | null;
+  /** Grupo dos avisos de Perguntas: é o que o envio usa quando nenhum grupo foi escolhido aqui. */
+  questionsGroup: { id: string | null; name: string | null };
   period: string;
 }) {
   const { current: c, trackedSince } = report;
-  const sendBlocked = !groupName
-    ? "Escolha o grupo nos avisos de Perguntas para poder enviar."
-    : !trackedSince ? "Ainda não há anúncio registrado nesta conta." : null;
+  const hasGroup = Boolean(settings.groupId ?? questionsGroup.id);
+  const missingDestination = settings.destination === "phone"
+    ? (settings.phone ? null : "Informe o número e salve para poder enviar.")
+    : (hasGroup ? null : "Escolha o grupo e salve para poder enviar.");
+  const sendBlocked = missingDestination ?? (trackedSince ? null : "Ainda não há anúncio registrado nesta conta.");
+  const destinationLabel = settings.destination === "phone" && settings.phone
+    ? `para ${formatReportPhone(settings.phone)}`
+    : "no grupo";
+  const historyImport = (
+    <CampaignHistoryImport
+      history={settings.history}
+      canRequest={canRequestHistoryImport(settings.history, new Date())}
+      days={HISTORY_IMPORT_DAYS}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -50,7 +71,8 @@ export function CampaignView({ report, settings, groupName, period }: {
           <EmptyState
             icon={Megaphone}
             title="Ainda não há anúncio registrado"
-            description="Assim que chegar um contato vindo de anúncio do Instagram ou do Facebook, o Fechai guarda de qual anúncio ele veio e este relatório começa a se preencher."
+            description="Contatos novos vindos de anúncio do Instagram ou do Facebook entram aqui sozinhos. Quem já tinha chegado antes só aparece depois de importar o histórico do WhatsApp."
+            action={historyImport}
           />
         </Card>
       ) : c.leads === 0 ? (
@@ -69,7 +91,7 @@ export function CampaignView({ report, settings, groupName, period }: {
               about="Leads de anúncio com algum agendamento não cancelado, até agora." />
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>
               <CardTitle hint="Quantos leads cada anúncio trouxe no período.">Leads por anúncio</CardTitle>
               <HorizontalBars
@@ -97,19 +119,21 @@ export function CampaignView({ report, settings, groupName, period }: {
         </>
       )}
 
+      {trackedSince && (
+        <Card>
+          <CardTitle hint="Liga os leads que já existem ao anúncio de onde vieram, lendo o que o WhatsApp guardou. Pode repetir sem duplicar: vale o primeiro anúncio de cada lead.">Histórico de anúncios</CardTitle>
+          {historyImport}
+        </Card>
+      )}
+
       <Card>
-        <CardTitle hint="O relatório da semana vai ao mesmo grupo de WhatsApp dos avisos de perguntas sem resposta.">Envio semanal no grupo</CardTitle>
+        <CardTitle hint="O relatório da semana vai a um grupo do WhatsApp ou ao seu número, no dia e na hora que você escolher.">Envio semanal</CardTitle>
         <div className="space-y-5">
-          {!groupName && (
-            <Alert tone="warn" title="Nenhum grupo escolhido">
-              Escolha o grupo do WhatsApp nos avisos de Perguntas. O relatório de campanhas usa o mesmo.
-            </Alert>
-          )}
-          <CampaignSettingsForm settings={settings} groupName={groupName} />
+          <CampaignSettingsForm settings={settings} questionsGroup={questionsGroup} />
           <div className="space-y-2 border-t border-ink/10 pt-5 panel:border-white/10">
-            <CampaignSendNowForm disabledReason={sendBlocked} />
+            <CampaignSendNowForm disabledReason={sendBlocked} destination={settings.destination} />
             <p className="text-xs text-neutral panel:text-white/55">
-              {settings.enabled ? `Programado: ${describeCampaignSchedule(settings)}.` : "Envio automático desligado."}
+              {settings.enabled ? `Programado ${destinationLabel}: ${describeCampaignSchedule(settings)}.` : "Envio automático desligado."}
               {settings.lastStatus ? ` Última tentativa: ${STATUS_LABEL[settings.lastStatus]}.` : ""}
               {settings.lastSentAt ? ` Último envio: ${formatInZone(settings.lastSentAt, settings.timezone)}.` : ""}
             </p>

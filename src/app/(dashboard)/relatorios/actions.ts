@@ -9,8 +9,9 @@ import { requireProductAccess } from "@/lib/require-product";
 import { isSurveyTopic } from "@/modules/satisfaction/categories";
 import { getSurveySettings, saveSurveySettings, surveySettingsFormSchema } from "@/modules/satisfaction/settings-store";
 import { sendSurveyTest } from "@/modules/satisfaction/test-send";
-import { campaignSettingsFormSchema, getCampaignSettings, saveCampaignSettings } from "@/modules/campaign-reports/settings-store";
+import { campaignSettingsFormSchema, destinationProblem, getCampaignSettings, saveCampaignSettings } from "@/modules/campaign-reports/settings-store";
 import { deliverCampaignReport } from "@/modules/campaign-reports/send";
+import { requestHistoryImport } from "@/modules/campaign-reports/history-import";
 import type { CampaignSendStatus } from "@/modules/campaign-reports/settings";
 import {
   MAX_HOURLY_COST_CENTS,
@@ -158,7 +159,7 @@ export async function sendSurveyTestAction(_prev: Result | null, formData: FormD
   return { ok: true, info: result.info };
 }
 
-/** Dia, hora e fuso do envio semanal do relatório de campanhas ao grupo do WhatsApp. */
+/** Destino (grupo ou número), dia, hora e fuso do envio semanal do relatório de campanhas. */
 export async function saveCampaignSettingsAction(_prev: Result | null, formData: FormData): Promise<Result> {
   const tooLarge = payloadTooLarge(formData);
   if (tooLarge) return { ok: false, error: tooLarge };
@@ -168,23 +169,34 @@ export async function saveCampaignSettingsAction(_prev: Result | null, formData:
   const parsed = campaignSettingsFormSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
 
+  const questions = await prisma.knowledgeGapSettings.findUnique({ where: { tenantId }, select: { groupId: true } });
+  const problem = destinationProblem(parsed.data, questions?.groupId ?? null);
+  if (problem) return { ok: false, error: problem };
+
   const before = await getCampaignSettings(tenantId);
   const after = await saveCampaignSettings(tenantId, parsed.data);
+  // O número não vai ao log de auditoria inteiro: só que existe e para onde o envio aponta.
+  const audit = (s: typeof after) => ({
+    enabled: s.enabled, weekday: s.weekday, hour: s.hour, timezone: s.timezone,
+    destination: s.destination, hasGroup: Boolean(s.groupId), hasPhone: Boolean(s.phone),
+  });
   await recordAudit({
     event: "campaign_report.settings_updated",
     target: { type: "CampaignReportSettings", id: tenantId, label: "Relatório semanal de campanhas" },
-    before: { enabled: before.enabled, weekday: before.weekday, hour: before.hour, timezone: before.timezone },
-    after: { enabled: after.enabled, weekday: after.weekday, hour: after.hour, timezone: after.timezone },
+    before: audit(before),
+    after: audit(after),
   });
   revalidatePath("/relatorios");
   return { ok: true, info: after.enabled ? "Envio semanal salvo." : "Envio semanal salvo, desligado." };
 }
 
 const SEND_NOW_ERRORS: Record<Exclude<CampaignSendStatus, "sent">, string> = {
-  no_group: "Escolha o grupo do WhatsApp nos avisos de Perguntas: o relatório vai para o mesmo grupo.",
-  no_channel: "O WhatsApp por QR code não está conectado, e só ele envia para grupos. Reconecte em Integrações.",
+  no_group: "Escolha o grupo do WhatsApp que recebe o relatório.",
+  no_phone: "Informe o número que recebe o relatório e salve antes de enviar.",
+  no_channel: "O WhatsApp por QR code não está conectado, e só ele envia relatório. Reconecte em Integrações.",
   no_data: "Ainda não há anúncio registrado nesta conta, então não há o que enviar.",
-  failed: "Não foi possível confirmar o envio. Confira o grupo antes de tentar de novo, para não duplicar.",
+  refused: "Esse número é de um contato que a clínica não pode procurar por aqui (bloqueado, pediu para parar ou fala pela API oficial). Use outro número ou um grupo.",
+  failed: "Não foi possível confirmar o envio. Confira o WhatsApp antes de tentar de novo, para não duplicar.",
 };
 
 /** Envia agora o relatório da última semana fechada, sem esperar o horário (também serve de teste). */
@@ -199,7 +211,25 @@ export async function sendCampaignReportNowAction(): Promise<Result> {
   });
   revalidatePath("/relatorios");
   if (status !== "sent") return { ok: false, error: SEND_NOW_ERRORS[status] };
-  return { ok: true, info: "Relatório enviado ao grupo." };
+  const { destination } = await getCampaignSettings(tenantId);
+  return { ok: true, info: destination === "phone" ? "Relatório enviado ao seu WhatsApp." : "Relatório enviado ao grupo." };
+}
+
+/**
+ * Pede a leitura do histórico da Evolution para ligar os leads que já existem ao
+ * anúncio de onde vieram. Só registra o pedido: o worker lê (leva minutos).
+ */
+export async function requestCampaignHistoryImportAction(): Promise<Result> {
+  const { session } = await requireProductAccess();
+  const tenantId = session.user.tenantId;
+  const result = await requestHistoryImport(tenantId);
+  if (!result.ok) return { ok: false, error: result.error };
+  await recordAudit({
+    event: "campaign_report.history_import_requested",
+    target: { type: "CampaignReportSettings", id: tenantId, label: "Histórico de anúncios" },
+  });
+  revalidatePath("/relatorios");
+  return { ok: true, info: "Importação pedida. Leva alguns minutos; a página se atualiza sozinha." };
 }
 
 /** Correção humana do motivo: vale mais que a classificação da IA e nunca é sobrescrita por ela. */
