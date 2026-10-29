@@ -124,10 +124,13 @@ if (semanas > 0) {
       for (const r of records) {
         const ad = findAdReply(r);
         if (!ad || r.key?.fromMe) continue;
-        leads.add(r.key?.remoteJid);
+        // Mesma pessoa pode aparecer pelo @lid e pelo telefone: o jid alternativo (telefone) unifica.
+        const person = String(r.key?.remoteJidAlt ?? r.key?.senderPn ?? r.key?.remoteJid);
+        leads.add(person);
         const code = adCode(ad);
         const label = code ? `${code[1].toUpperCase()} - ${code[2].trim()}` : `sem código (sourceId ${ad.sourceId ?? "?"})`;
-        ads.set(label, (ads.get(label) ?? 0) + 1);
+        if (!ads.has(label)) ads.set(label, new Set());
+        ads.get(label).add(person);
       }
       rows.push({ since, total: records.length, leads: leads.size, ads, truncated });
       until = since;
@@ -137,7 +140,8 @@ if (semanas > 0) {
     for (const r of rows) {
       const d = r.since.toISOString().slice(0, 10);
       console.log(`semana desde ${d}: ${r.total} mensagens · ${r.leads} leads de anúncio${r.truncated ? " · ⚠ LIMITE de 5000 atingido, contagem incompleta" : ""}`);
-      for (const [label, n] of [...r.ads].sort((a, b) => b[1] - a[1])) console.log(`     ${n}× ${label}`);
+      if (args.includes("--resumo")) continue;
+      for (const [label, people] of [...r.ads].sort((a, b) => b[1].size - a[1].size)) console.log(`     ${people.size}× ${label}`);
     }
     console.log(oldest
       ? `\nMensagem mais antiga encontrada: semana desde ${oldest.toISOString().slice(0, 10)}`
