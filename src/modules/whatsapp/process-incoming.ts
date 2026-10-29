@@ -20,6 +20,7 @@ import { shouldPauseAgentForReaction } from "./reactions";
 import { sendAgentReply } from "./send-agent-reply";
 import { handleSurveyReply } from "@/modules/satisfaction/capture";
 import { isSurveyOutbound } from "@/modules/satisfaction/echo";
+import { recordLeadAdOrigin } from "@/modules/campaign-reports/record";
 
 export type IncomingWebhookResult = {
   body: Record<string, unknown>;
@@ -244,6 +245,16 @@ export async function processIncomingWhatsapp(
       select: { id: true },
     });
     if (existing) return ok({ ok: true, silent: "mensagem já registrada" });
+  }
+  // De qual anúncio o contato veio (nunca lança; o primeiro anúncio do lead vence).
+  if (incoming.adOrigin && !incoming.isGroup && !lead.isTest) {
+    await recordLeadAdOrigin({
+      tenantId,
+      leadId: lead.id,
+      origin: incoming.adOrigin,
+      at: incoming.occurredAt ?? new Date(),
+      via: "webhook",
+    });
   }
   const received = incoming.hasAudio
     ? await receiveAudio({

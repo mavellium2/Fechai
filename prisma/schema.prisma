@@ -168,6 +168,8 @@ model Tenant {
   knowledgeGapSettings KnowledgeGapSettings?
   satisfactionSettings SatisfactionSurveySettings?
   satisfactionSurveys  SatisfactionSurvey[]
+  leadAdOrigins        LeadAdOrigin[]
+  campaignReportSettings CampaignReportSettings?
   serviceArea       TenantServiceArea?
   conversationInsights ConversationInsight[]
   reportTrackingStartedAt DateTime @default(now())
@@ -270,6 +272,56 @@ model KnowledgeGapSettings {
   responders     String   @default("clinic") // clinic | mavellium | both
   lastDigestAt   DateTime?
   updatedAt      DateTime @updatedAt
+}
+
+/// Envio semanal do relatório de campanhas, por conta. Sem linha = desligado.
+/// O destino é o grupo já escolhido em `KnowledgeGapSettings` (o mesmo das
+/// perguntas sem resposta); aqui só moram o dia, a hora e o controle do envio.
+/// Ver `src/modules/campaign-reports/README.md`.
+model CampaignReportSettings {
+  tenantId     String    @id
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled      Boolean   @default(false)
+  /// Dia da semana do envio, domingo = 0 (como `Date.getDay()`).
+  weekday      Int       @default(5)
+  /// Hora local (0–23) do envio.
+  hour         Int       @default(8)
+  timezone     String    @default("America/Sao_Paulo")
+  /// Instante do último envio automático ou manual (claim do envio da semana).
+  lastSentAt   DateTime?
+  /// O que aconteceu na última tentativa: sent | no_group | no_channel | failed | empty.
+  lastStatus   String?
+  updatedAt    DateTime  @updatedAt
+}
+
+/// De qual anúncio (Click-to-WhatsApp) o lead veio. Uma linha por lead, e o
+/// **primeiro** anúncio vence: nunca é sobrescrito (`leadId @unique`). Gravada
+/// pelo webhook (Evolution `externalAdReply`, Meta `referral`) e, para o
+/// passado, pela varredura do histórico da Evolution. Sem nome, telefone ou
+/// texto de conversa. Ver `src/modules/campaign-reports/README.md`.
+model LeadAdOrigin {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leadId     String   @unique
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// Id do anúncio na Meta: a chave estável (o nome pode ser editado).
+  sourceId   String?
+  /// Código da campanha escrito pelo gestor de tráfego: "AD27".
+  code       String?
+  /// Nome depois do código: "Alinhadores Invisíveis".
+  name       String?
+  sourceUrl  String?
+  /// facebook | instagram, quando o provedor informa.
+  platform   String?
+  /// webhook | history: de onde veio o registro.
+  capturedVia String  @default("webhook")
+  /// Quando chegou a mensagem que trazia o anúncio.
+  firstAdAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, firstAdAt])
+  @@index([tenantId, code])
 }
 
 /// Pesquisa de satisfação pós-conversa, por conta. Sem linha = desligada, com
@@ -940,6 +992,7 @@ model Lead {
 
   conversation Conversation?
   appointments Appointment[]
+  adOrigin     LeadAdOrigin?
 
   @@index([tenantId, updatedAt, id])
   @@index([tenantId])

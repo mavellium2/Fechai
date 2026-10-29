@@ -12,6 +12,7 @@ número. Contas antigas continuam só com a Evolution.
 
 - `provider.ts` — interface `WhatsAppProvider` (`createInstance`, `getQrCode`, `sendMessage`, `parseWebhook`) e tipos (`IncomingMessage`, `WhatsAppStatus`).
 - `evolution.ts` — `EvolutionProvider`: chama a Evolution API v2 (`/instance/create`, `/instance/connect`, `/message/sendText`) e faz parse do evento `messages.upsert`. `isConfigured()` = tem URL+key.
+- `ad-origin.ts` — puro. Anúncio (Click-to-WhatsApp) que trouxe o contato: `extractEvolutionAdOrigin` (`contextInfo.externalAdReply`) e `extractMetaAdOrigin` (`referral`) alimentam `IncomingMessage.adOrigin`; quem grava e relata é `modules/campaign-reports/` (ver o README de lá).
 - `meta.ts` — `MetaCloudProvider`: Graph API oficial (texto, upload/download de
   áudio, perfil do número, inscrição do app no WABA e parse de webhook).
 - `meta-config.ts` — resolve o adapter pela linha `WhatsappInstance`, decifra

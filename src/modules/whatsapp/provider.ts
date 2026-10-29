@@ -1,5 +1,6 @@
 // Interface comum da Evolution e da WhatsApp Cloud API oficial. O motor de
 // conversa recebe o mesmo contrato independentemente do provider do tenant.
+import type { AdOrigin } from "./ad-origin";
 
 export type WhatsAppStatus = "disconnected" | "pending_qr" | "connected";
 
@@ -10,6 +11,11 @@ export type CreateInstanceResult = {
 };
 
 export type IncomingMessage = {
+  /**
+   * Anúncio (Click-to-WhatsApp) que trouxe o contato, quando a mensagem o
+   * carrega. Só mensagens recebidas; ver `ad-origin.ts`.
+   */
+  adOrigin?: AdOrigin;
   instanceExternalId: string;
   fromPhone: string;
   fromName?: string;
