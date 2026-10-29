@@ -9,6 +9,9 @@ import { requireProductAccess } from "@/lib/require-product";
 import { isSurveyTopic } from "@/modules/satisfaction/categories";
 import { getSurveySettings, saveSurveySettings, surveySettingsFormSchema } from "@/modules/satisfaction/settings-store";
 import { sendSurveyTest } from "@/modules/satisfaction/test-send";
+import { campaignSettingsFormSchema, getCampaignSettings, saveCampaignSettings } from "@/modules/campaign-reports/settings-store";
+import { deliverCampaignReport } from "@/modules/campaign-reports/send";
+import type { CampaignSendStatus } from "@/modules/campaign-reports/settings";
 import {
   MAX_HOURLY_COST_CENTS,
   MAX_MINUTES_PER_LEAD,
@@ -153,6 +156,50 @@ export async function sendSurveyTestAction(_prev: Result | null, formData: FormD
   if (!result.ok) return { ok: false, error: result.error };
   await recordAudit({ event: "survey.test_sent", target: { type: "SatisfactionSurveySettings", id: tenantId, label: "Pesquisa de satisfação" } });
   return { ok: true, info: result.info };
+}
+
+/** Dia, hora e fuso do envio semanal do relatório de campanhas ao grupo do WhatsApp. */
+export async function saveCampaignSettingsAction(_prev: Result | null, formData: FormData): Promise<Result> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+  const { session } = await requireProductAccess();
+  const tenantId = session.user.tenantId;
+
+  const parsed = campaignSettingsFormSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const before = await getCampaignSettings(tenantId);
+  const after = await saveCampaignSettings(tenantId, parsed.data);
+  await recordAudit({
+    event: "campaign_report.settings_updated",
+    target: { type: "CampaignReportSettings", id: tenantId, label: "Relatório semanal de campanhas" },
+    before: { enabled: before.enabled, weekday: before.weekday, hour: before.hour, timezone: before.timezone },
+    after: { enabled: after.enabled, weekday: after.weekday, hour: after.hour, timezone: after.timezone },
+  });
+  revalidatePath("/relatorios");
+  return { ok: true, info: after.enabled ? "Envio semanal salvo." : "Envio semanal salvo, desligado." };
+}
+
+const SEND_NOW_ERRORS: Record<Exclude<CampaignSendStatus, "sent">, string> = {
+  no_group: "Escolha o grupo do WhatsApp nos avisos de Perguntas: o relatório vai para o mesmo grupo.",
+  no_channel: "O WhatsApp por QR code não está conectado, e só ele envia para grupos. Reconecte em Integrações.",
+  no_data: "Ainda não há anúncio registrado nesta conta, então não há o que enviar.",
+  failed: "Não foi possível confirmar o envio. Confira o grupo antes de tentar de novo, para não duplicar.",
+};
+
+/** Envia agora o relatório da última semana fechada, sem esperar o horário (também serve de teste). */
+export async function sendCampaignReportNowAction(): Promise<Result> {
+  const { session } = await requireProductAccess();
+  const tenantId = session.user.tenantId;
+  const status = await deliverCampaignReport(tenantId);
+  await recordAudit({
+    event: "campaign_report.sent_now",
+    target: { type: "CampaignReportSettings", id: tenantId, label: "Relatório semanal de campanhas" },
+    meta: { status },
+  });
+  revalidatePath("/relatorios");
+  if (status !== "sent") return { ok: false, error: SEND_NOW_ERRORS[status] };
+  return { ok: true, info: "Relatório enviado ao grupo." };
 }
 
 /** Correção humana do motivo: vale mais que a classificação da IA e nunca é sobrescrita por ela. */

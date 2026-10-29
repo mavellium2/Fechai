@@ -181,6 +181,10 @@ export const AUDIT_EVENTS = {
   "survey.settings_updated": { label: "Alterou a pesquisa de satisfação", kind: "update", group: "conta" },
   "survey.test_sent": { label: "Enviou um teste da pesquisa de satisfação", kind: "create", group: "conta" },
 
+  // Relatório semanal de campanhas (leads por anúncio) enviado ao grupo.
+  "campaign_report.settings_updated": { label: "Alterou o envio semanal do relatório de campanhas", kind: "update", group: "conta" },
+  "campaign_report.sent_now": { label: "Enviou agora o relatório de campanhas ao grupo", kind: "create", group: "conta" },
+
   // ── contatos / agenda ─────────────────────────────────────────────────
   "lead.created": { label: "Cadastrou um contato", kind: "create", group: "contatos" },
   "lead.updated": {

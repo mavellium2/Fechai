@@ -7,6 +7,7 @@ import { scanWhatsappHealth } from "../../src/modules/whatsapp/health";
 import { scanBroadcasts } from "../../src/modules/broadcasts/worker";
 import { touchBroadcastWorker } from "../../src/modules/broadcasts/health";
 import { scanKnowledgeGaps } from "../../src/modules/knowledge-gaps/notify";
+import { scanCampaignReports } from "../../src/modules/campaign-reports/send";
 import { scanBitrixSync } from "../../src/modules/bitrix/worker";
 import { scanClinicorpSync } from "../../src/modules/scheduling/clinicorp-sync";
 import { scanIcloudSync } from "../../src/modules/scheduling/icloud-sync";
@@ -225,7 +226,16 @@ async function main() {
       if (r.notices || r.digests || r.admin) {
         console.log(`[perguntas] avisos=${r.notices} resumos=${r.digests} mavellium=${r.admin}`);
       }
-      return r;
+      // O relatório semanal de campanhas vai ao mesmo grupo e pega a mesma volta:
+      // o dia e a hora são conferidos por conta, então a cadência de 2 min basta.
+      const campaigns = await scanCampaignReports().catch((err) => {
+        console.error("[campanhas] varredura falhou", err);
+        return { sent: 0, waiting: 0 };
+      });
+      if (campaigns.sent || campaigns.waiting) {
+        console.log(`[campanhas] enviados=${campaigns.sent} aguardando=${campaigns.waiting}`);
+      }
+      return { ...r, campaigns };
     },
     { connection },
   );

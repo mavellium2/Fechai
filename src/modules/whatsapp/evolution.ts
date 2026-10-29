@@ -6,6 +6,7 @@ import type {
   WhatsAppStatus,
 } from "./provider";
 import { reportedAudioSeconds } from "@/modules/voice/received-audio";
+import { extractEvolutionAdOrigin } from "./ad-origin";
 
 function isPhoneJid(value: unknown): value is string {
   return typeof value === "string" &&
@@ -395,7 +396,11 @@ export class EvolutionProvider implements WhatsAppProvider {
     const fromPhone = contactJid.split("@")[0];
     if ((!text && !hasAudio) || !fromPhone) return null;
 
+    // O anúncio vem na mensagem do próprio lead; o que a clínica envia não o carrega.
+    const adOrigin = data.key?.fromMe || isGroup ? null : extractEvolutionAdOrigin(data);
+
     return {
+      ...(adOrigin ? { adOrigin } : {}),
       instanceExternalId: p.instance ?? "",
       fromPhone,
       // Em mensagens enviadas pela própria conta, pushName é o nome do

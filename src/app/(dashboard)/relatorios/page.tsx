@@ -37,12 +37,16 @@ import { ContactContextSummary } from "./ContactContextSummary";
 import { SatisfactionView } from "./SatisfactionView";
 import { loadSatisfaction } from "@/modules/satisfaction/queries";
 import { getSurveySettings } from "@/modules/satisfaction/settings-store";
+import { CampaignView } from "./CampaignView";
+import { loadCampaignReport } from "@/modules/campaign-reports/queries";
+import { getCampaignSettings } from "@/modules/campaign-reports/settings-store";
+import { parseGapSettings } from "@/modules/knowledge-gaps/settings";
 
 const PERIODS: PeriodKey[] = ["hoje", "7", "30", "mes", "ano", "tudo"];
 // A aba "Afiliados" só existe para quem está no programa — o filtro abaixo
 // remove a opção de quem não é afiliado, e a página cai na visão padrão se
 // alguém digitar ?visao=afiliados na URL sem ter cadastro.
-const VIEWS = ["operacional", "financeiro", "leads", "satisfacao", "mensal", "afiliados"] as const;
+const VIEWS = ["operacional", "financeiro", "leads", "campanhas", "satisfacao", "mensal", "afiliados"] as const;
 type View = (typeof VIEWS)[number];
 
 export default async function RelatoriosPage({
@@ -103,6 +107,17 @@ export default async function RelatoriosPage({
           getSurveySettings(tenantId),
         ])
       : [null, null];
+
+  // Campanhas: leads por anúncio no período, mais o envio semanal ao grupo das perguntas.
+  const [campaigns, campaignSettings, campaignGroup] =
+    view === "campanhas"
+      ? await Promise.all([
+          // "Tudo" não tem início: a conta toda, desde sempre.
+          loadCampaignReport(tenantId, { from: range.from ?? new Date(0), to: new Date(range.to.getTime() + 1) }),
+          getCampaignSettings(tenantId),
+          prisma.knowledgeGapSettings.findUnique({ where: { tenantId }, select: { groupId: true, groupName: true } }),
+        ])
+      : [null, null, null];
 
   const [hasAnyData, report, financial, leadQuality, affiliateOverview] = await Promise.all([
     affiliateOnly ? 1 : prisma.lead.count({ where: { tenantId, isTest: false } }),
@@ -181,6 +196,8 @@ export default async function RelatoriosPage({
               ? `Retorno estimado do investimento no projeto — ${range.label}.`
             : view === "leads"
               ? `De onde vêm os leads, o que perguntam e por que não fecham — ${range.label}.`
+            : view === "campanhas"
+              ? `De qual anúncio vieram os leads e o que aconteceu com eles — ${range.label}.`
             : view === "satisfacao"
               ? `O que os contatos acharam do atendimento — ${range.label}.`
               : `Acompanhe a evolução da conta — ${range.label}.`
@@ -197,6 +214,7 @@ export default async function RelatoriosPage({
                 { key: "operacional", label: "Operacional" },
                 { key: "financeiro", label: "Financeiro" },
                 { key: "leads", label: "Qualidade dos leads" },
+                { key: "campanhas", label: "Campanhas" },
                 { key: "satisfacao", label: "Satisfação" },
                 ...(publishedMonths.length ? [{ key: "mensal", label: "Relatório mensal" }] : []),
                 ...(affiliate ? [{ key: "afiliados", label: "Afiliados" }] : []),
@@ -405,6 +423,15 @@ export default async function RelatoriosPage({
       ) : view === "leads" && leadQuality ? (
         <FadeIn>
           <LeadQualityView quality={leadQuality} period={range.label} />
+        </FadeIn>
+      ) : view === "campanhas" && campaigns && campaignSettings ? (
+        <FadeIn>
+          <CampaignView
+            report={campaigns}
+            settings={campaignSettings}
+            groupName={parseGapSettings(campaignGroup).groupName ?? (parseGapSettings(campaignGroup).groupId ? "do WhatsApp" : null)}
+            period={range.label}
+          />
         </FadeIn>
       ) : view === "satisfacao" && satisfaction && surveySettings ? (
         <FadeIn>

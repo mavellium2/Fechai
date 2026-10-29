@@ -1,8 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendMail } from "@/lib/mail";
-import { getWhatsAppProviderForInstance } from "@/modules/whatsapp/meta-config";
-import { findWhatsappChannel } from "@/modules/whatsapp/instances";
 import { partsInZone, zonedTimeToUtc } from "@/modules/scheduling/time";
+import { sendToInternalGroup } from "./group";
 import { clinicAnswers, mavelliumAnswers, parseGapSettings, type GapSettings } from "./settings";
 
 /**
@@ -93,14 +92,7 @@ async function deliver(tenantId: string, settings: GapSettings, subject: string,
   if (settings.notifyWhatsapp && settings.groupId) {
     try {
       // Grupo é do número conectado por QR code (a Meta não tem grupos).
-      const instance = await findWhatsappChannel(tenantId, "evolution");
-      if (instance?.externalId) {
-        const provider = getWhatsAppProviderForInstance(instance);
-        if (provider.sendGroupMessage && provider.isConfigured()) {
-          await provider.sendGroupMessage(instance.externalId, settings.groupId, text);
-          delivered = true;
-        }
-      }
+      if (await sendToInternalGroup(tenantId, settings.groupId, text)) delivered = true;
     } catch (err) {
       console.error("[knowledge-gaps] aviso no grupo falhou", tenantId, err);
     }

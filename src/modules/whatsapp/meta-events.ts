@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "./provider";
+import { extractMetaAdOrigin } from "./ad-origin";
 
 const object = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v)
@@ -51,8 +52,10 @@ function liveMessages(payload: unknown): IncomingMessage[] {
       const contact = array(value.contacts)
         .map(object)
         .find((c) => c.wa_id === fromPhone);
+      const adOrigin = extractMetaAdOrigin(m.referral);
       return [
         {
+          ...(adOrigin ? { adOrigin } : {}),
           instanceExternalId,
           fromPhone,
           messageKeyId,
