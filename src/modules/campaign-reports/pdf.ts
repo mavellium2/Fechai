@@ -214,9 +214,6 @@ export async function generateCampaignPdf(input: CampaignPdfInput): Promise<Uint
   part(current.lines.length ? "03" : "01", "Como contamos");
   flow("Conta os leads criados na semana, com o anúncio da primeira mensagem: o primeiro anúncio de cada contato vale, e clicar em outro depois não muda. \"Sem anúncio identificado\" não é o mesmo que orgânico: é uma mensagem que não trazia anúncio (inclui contatos de antes de o Fechai registrar a origem).", 8, muted);
   flow("O resultado é calculado quando o relatório é gerado: agendou = algum agendamento não cancelado; perdeu = motivo registrado, triagem, follow-up recusado ou 72 horas sem resposta; equipe = a conversa foi passada para uma pessoa.", 8, muted);
-  if (input.trackedSince) {
-    flow(`Há registro de anúncio desde ${new Intl.DateTimeFormat("pt-BR", { timeZone: timezone }).format(input.trackedSince)}; antes disso, "sem anúncio identificado" é falta de registro.`, 8, muted);
-  }
 
   /* ----------------------------- Rodapé ----------------------------- */
   const generated = new Intl.DateTimeFormat("pt-BR", { timeZone: timezone, dateStyle: "short", timeStyle: "short" }).format(input.generatedAt);
