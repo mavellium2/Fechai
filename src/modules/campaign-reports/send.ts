@@ -1,18 +1,17 @@
 import { prisma } from "@/lib/prisma";
 import { parseGapSettings } from "@/modules/knowledge-gaps/settings";
-import { sendToInternalGroup, sendToInternalPhone } from "@/modules/knowledge-gaps/group";
-import { formatCampaignMessage } from "./message";
-import { isPhoneRefused } from "./phone";
-import { loadCampaignReport } from "./queries";
 import {
-  currentSlot,
-  parseCampaignSettings,
-  weekWindow,
-  type CampaignSendStatus,
-} from "./settings";
+  sendDocumentToInternalGroup,
+  sendDocumentToInternalPhone,
+  sendToInternalGroup,
+  sendToInternalPhone,
+} from "@/modules/knowledge-gaps/group";
+import { buildCampaignDocument } from "./document";
+import { isPhoneRefused } from "./phone";
+import { currentSlot, parseCampaignSettings, type CampaignSendStatus } from "./settings";
 
 /**
- * Envio do relatório semanal: a um grupo interno da clínica (o escolhido aqui ou,
+ * Envio do relatório semanal, em PDF (`document.ts`): a um grupo interno da clínica (o escolhido aqui ou,
  * sem escolha, o dos avisos de perguntas sem resposta) ou a um número (o da
  * própria pessoa). Roda no worker (`scanCampaignReports`), nunca no turno do
  * agente, e também sob demanda ("Enviar agora").
@@ -31,11 +30,6 @@ import {
  *   plano B. Grupo e número só existem no QR code.
  * - Nunca lança: o worker não pode cair por causa de um relatório.
  */
-
-function baseUrl(): string | null {
-  const configured = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL;
-  return configured ? configured.trim().replace(/\/+$/, "") : null;
-}
 
 const NOT_ATTEMPTED: CampaignSendStatus[] = ["no_group", "no_phone", "no_channel", "no_data"];
 
@@ -63,25 +57,24 @@ async function attempt(tenantId: string, now: Date): Promise<CampaignSendStatus>
     if (!toPhone && !groupId) return "no_group";
     if (phone && (await isPhoneRefused(tenantId, phone))) return "refused";
 
-    const window = weekWindow(now, settings.timezone);
-    const report = await loadCampaignReport(tenantId, { from: window.from, to: window.to }, { previousFrom: window.prevFrom, now });
     // Conta que nunca registrou um anúncio não recebe "0 leads de anúncio" toda sexta.
-    if (!report.trackedSince) return "no_data";
+    const report = await buildCampaignDocument(tenantId, settings.timezone, now);
+    if (!report) return "no_data";
 
-    const link = baseUrl();
-    const text = formatCampaignMessage({
-      from: window.from,
-      to: window.to,
-      timezone: settings.timezone,
-      current: report.current,
-      previous: report.previous,
-      previousFrom: window.prevFrom,
-      trackedSince: report.trackedSince,
-      link: link ? `${link}/relatorios?visao=campanhas` : null,
-    });
-    const delivered = phone
-      ? await sendToInternalPhone(tenantId, phone, text)
-      : groupId ? await sendToInternalGroup(tenantId, groupId, text) : false;
+    // O PDF vai como documento, com a legenda curta; sem PDF (geração falhou) vai o texto.
+    const document = report.pdf
+      ? { base64: Buffer.from(report.pdf).toString("base64"), mimetype: "application/pdf", fileName: report.fileName, caption: report.caption }
+      : null;
+    let delivered = false;
+    if (phone) {
+      delivered = document
+        ? await sendDocumentToInternalPhone(tenantId, phone, document)
+        : await sendToInternalPhone(tenantId, phone, report.text);
+    } else if (groupId) {
+      delivered = document
+        ? await sendDocumentToInternalGroup(tenantId, groupId, document)
+        : await sendToInternalGroup(tenantId, groupId, report.text);
+    }
     return delivered ? "sent" : "no_channel";
   } catch (err) {
     console.error("[campanhas] envio do relatório falhou", tenantId, err);

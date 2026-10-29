@@ -116,6 +116,16 @@ export interface WhatsAppProvider {
     text: string,
   ): Promise<string | null>;
   /**
+   * Envia um arquivo (PDF) como DOCUMENTO, para um número ou grupo, com legenda.
+   * Opcional: só o QR code (Evolution) implementa; o relatório de campanhas é o
+   * único chamador. Lança na falha; quem chama decide o que fazer.
+   */
+  sendDocument?(
+    externalId: string,
+    to: string,
+    document: { base64: string; mimetype: string; fileName: string; caption: string },
+  ): Promise<string | null>;
+  /**
    * Envia uma lista interativa de escolha única (até 10 linhas) — a pesquisa de
    * satisfação a usa para a nota. Opcional: só a Cloud API da Meta tem; no QR a
    * pergunta vai como texto numerado. Devolve o id da mensagem; lança na falha.

@@ -8,7 +8,8 @@
 Guarda de qual anúncio (Click-to-WhatsApp, Instagram/Facebook) cada lead veio e
 mostra, por anúncio, o que aconteceu com os leads. O mesmo relatório sai toda
 semana, no dia e hora que a clínica escolher, em **um grupo do WhatsApp** ou **no
-número da própria pessoa**.
+número da própria pessoa**, como **PDF** (o mesmo visual do relatório mensal, com
+os logos) e uma legenda curta.
 
 ```text
 mensagem do lead (Evolution: contextInfo.externalAdReply | Meta: referral)
@@ -32,16 +33,19 @@ LeadAdOrigin + Lead + leadOutcome ─► summarizeCampaigns ─► /relatorios?v
 - `queries.ts` — `loadCampaignSummary`, `loadCampaignReport` (com semana anterior e `trackedSince`). Só metadados.
 - `settings.ts` / `settings-store.ts` — destino (grupo ou número), dia, hora e fuso do envio (`CampaignReportSettings`); `currentSlot`, `weekWindow`, `destinationProblem`, estado da importação do histórico.
 - `message.ts` — puro. `formatCampaignMessage`, `rangeLabel`.
+- `document.ts` — `buildCampaignDocument`: a **única** montagem do relatório (PDF, nome do arquivo, legenda, texto de reserva). O envio e a prévia da tela chamam esta função.
+- `pdf.ts` — `generateCampaignPdf` (`pdf-lib`, sem navegador: o worker gera sozinho) e `campaignPdfFileName`.
 - `send.ts` — `deliverCampaignReport` (monta e envia ao destino) e `scanCampaignReports` (volta do worker).
 - `phone.ts` — `isPhoneRefused`: o número digitado pode receber pelo QR? (bloqueado, "pare", contato da Meta: não).
 - `backfill.ts` — `backfillAdOrigins`, usado pelo script e pela importação da tela.
 - `history-import.ts` — `requestHistoryImport` (a tela pede) e `runPendingHistoryImports` (o worker lê, uma por vez).
-- `../knowledge-gaps/group.ts` — `sendToInternalGroup` (compartilhado com as perguntas) e `sendToInternalPhone`.
+- `../knowledge-gaps/group.ts` — `sendToInternalGroup` (compartilhado com as perguntas), `sendToInternalPhone` e os dois de documento (`sendDocumentToInternalGroup`/`...Phone`).
 - `../whatsapp/contact-phone.ts` — `normalizeBrazilianPhone`, a regra do número digitado (a mesma do envio de teste da satisfação).
 
-Telas: `(dashboard)/relatorios/CampaignView.tsx` (aba **Campanhas**) e
+Telas: `(dashboard)/relatorios/CampaignView.tsx` (aba **Campanhas**, com a prévia do PDF) e
 `CampaignSettingsForm.tsx` (destino, dia, hora, "Enviar agora", "Importar
-histórico"); ações em `relatorios/actions.ts`.
+histórico"); ações em `relatorios/actions.ts`; o PDF da prévia sai de
+`relatorios/campanhas/pdf/route.ts`.
 
 ## Regras que não podem quebrar
 
@@ -111,6 +115,19 @@ Os dois ficam guardados: trocar de um para o outro não apaga o outro.
 
 Desligado por padrão (`CampaignReportSettings.enabled`). Padrão sexta 8h, fuso da
 conta; a semana cobre os 7 dias até a meia-noite de hoje (hoje fica de fora).
+
+**O relatório é um PDF e a prévia é o mesmo arquivo.** `buildCampaignDocument` é
+chamado pelo envio e pela rota `/relatorios/campanhas/pdf`, então o que a aba mostra
+em "Prévia do relatório semanal" (última semana fechada, gerado na hora) é exatamente
+o que chega no WhatsApp. Vai como **documento** (`sendMedia` da Evolution, só QR code)
+com uma legenda curta: período, contagens e o link. O PDF tem cabeçalho com os logos
+da Fechai e da Mavellium, faixa de título, quatro números (agendamento em destaque),
+barras por anúncio (escuro = agendaram), tabela de resultado completa (quebra de página
+sozinha) e "Como contamos"; só agregados, nunca nome, telefone ou texto de conversa.
+**Se a geração do PDF falhar, o relatório sai em texto** (`formatCampaignMessage`): ele
+não deixa de chegar por causa do arquivo. A rota é a única que o painel embute num
+`<iframe>`: `next.config.ts` abre uma exceção estreita (`X-Frame-Options: SAMEORIGIN`,
+`frame-ancestors 'self'`) só para ela, e `frame-src` do painel inclui `'self'`.
 
 **Envio semanal**, `scanCampaignReports` na volta de 2 min do worker de
 perguntas: dentro do dia e da hora (`currentSlot`, com tolerância de 6 h que não

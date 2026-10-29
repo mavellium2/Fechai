@@ -2,6 +2,18 @@
 
 **Instrução:** Atualize aqui cada vez que mexer neste módulo.
 
+### [2026-10-29] — Relatório semanal em PDF, com prévia na aba
+
+**Arquivos:**
+- novos `campaign-reports/pdf.ts`, `document.ts`, `relatorios/campanhas/pdf/route.ts`; `send.ts`, `message.ts` (`adTrend`, `formatCampaignCaption`)
+- `whatsapp/provider.ts` + `evolution.ts` (`sendDocument`, via `sendMedia`); `knowledge-gaps/group.ts` (envio de documento ao grupo e ao número)
+- `relatorios/CampaignView.tsx` (card "Prévia do relatório semanal", `<iframe>`), `next.config.ts` (exceção `SAMEORIGIN` só para a rota do PDF; `frame-src 'self'`)
+- `ui/unsaved-form-state.ts` (`[data-unsaved-ignore]`): a lista de grupos que carrega sozinha não marca mais o formulário como alterado
+
+**Razão:** o cliente quer o relatório em PDF, no padrão dos relatórios, e ver na página como vai chegar.
+
+**Impacto:** sem mudança de schema. O envio passa a ser documento + legenda; se o PDF falhar, sai em texto. Só QR code (Evolution `sendMedia`).
+
 ### [2026-10-29] — Destino do envio (grupo ou número) e importação do histórico pela tela
 
 **Arquivos:**

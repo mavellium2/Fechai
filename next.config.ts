@@ -43,7 +43,7 @@ const csp = [
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "connect-src 'self' https://*.posthog.com https://api.stripe.com https://www.facebook.com https://graph.facebook.com",
-  "frame-src https://js.stripe.com https://hooks.stripe.com https://www.facebook.com https://web.facebook.com",
+  "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.facebook.com https://web.facebook.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -75,10 +75,25 @@ const nextConfig: NextConfig = {
          * acrescenta os seus. Verificado com curl: o widget recebia DENY e
          * deixaria de carregar dentro do site do cliente.
          */
-        source: "/:path((?!api/widget).*)",
+        source: "/:path((?!api/widget|relatorios/campanhas/pdf).*)",
         headers: [
           ...securityHeaders,
           { key: "Content-Security-Policy-Report-Only", value: csp },
+        ],
+      },
+      {
+        /**
+         * Prévia do PDF de campanhas: a única rota que o próprio painel embute
+         * (`<object>` na aba Campanhas). Mesmos cabeçalhos de segurança, mas o
+         * quadro só pode ser do mesmo site (`SAMEORIGIN`/`frame-ancestors 'self'`),
+         * nunca de outro domínio. Fica fora da regra geral acima pelo mesmo motivo
+         * do widget: as regras de `headers()` se somam, não se anulam.
+         */
+        source: "/relatorios/campanhas/pdf",
+        headers: [
+          ...securityHeaders.filter((h) => h.key !== "X-Frame-Options"),
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy-Report-Only", value: csp.replace("frame-ancestors 'none'", "frame-ancestors 'self'") },
         ],
       },
       {

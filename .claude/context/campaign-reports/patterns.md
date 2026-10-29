@@ -20,6 +20,14 @@ import { sendToInternalGroup } from "@/modules/knowledge-gaps/group";
 const sent = await sendToInternalGroup(tenantId, groupId, text); // false = sem canal; lança se o envio falhou
 ```
 
+## Enviar o relatório como PDF (documento com legenda, só QR)
+```typescript
+import { buildCampaignDocument } from "@/modules/campaign-reports/document";
+import { sendDocumentToInternalGroup } from "@/modules/knowledge-gaps/group";
+const doc = await buildCampaignDocument(tenantId, timezone, now); // null = sem anúncio registrado
+if (doc?.pdf) await sendDocumentToInternalGroup(tenantId, groupId, { base64: Buffer.from(doc.pdf).toString("base64"), mimetype: "application/pdf", fileName: doc.fileName, caption: doc.caption });
+```
+
 ## Enviar a um número (QR, nunca Meta; quem chama checa `isPhoneRefused` antes)
 ```typescript
 import { sendToInternalPhone } from "@/modules/knowledge-gaps/group";

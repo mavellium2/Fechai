@@ -1,5 +1,9 @@
 # campaign-reports — Leituras
 
+## buildCampaignDocument(tenantId, timezone, now?) — `document.ts`
+- **Retorna:** `{ pdf | null, fileName, caption, text, window } | null` (`null` = conta sem nenhum anúncio registrado). **Única** montagem: o envio e a rota `GET /relatorios/campanhas/pdf` (prévia da aba, `?baixar=1` baixa) usam esta função.
+- `generateCampaignPdf` (`pdf.ts`) é puro `pdf-lib`; `formatCampaignCaption`/`formatCampaignMessage` e `adTrend` (comparação com a semana anterior) vêm de `message.ts`.
+
 ## loadCampaignSummary(tenantId, { from, to }, now?)
 - **Retorno:** `CampaignSummary`. Leads **criados** em `[from, to)`, `isTest: false`, conversa real; `adOrigin` + `leadOutcome`. Só metadados.
 

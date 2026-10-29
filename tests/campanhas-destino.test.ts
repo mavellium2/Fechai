@@ -12,8 +12,9 @@ const db = vi.hoisted(() => ({
   campaignReportSettings: { findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(), upsert: vi.fn() },
   knowledgeGapSettings: { findUnique: vi.fn() },
   conversation: { findMany: vi.fn() },
+  tenant: { findUnique: vi.fn() },
 }));
-const group = vi.hoisted(() => ({ sendToInternalGroup: vi.fn(), sendToInternalPhone: vi.fn() }));
+const group = vi.hoisted(() => ({ sendDocumentToInternalGroup: vi.fn(), sendDocumentToInternalPhone: vi.fn(), sendToInternalGroup: vi.fn(), sendToInternalPhone: vi.fn() }));
 const queries = vi.hoisted(() => ({ loadCampaignReport: vi.fn() }));
 const blocklist = vi.hoisted(() => ({ isPhoneBlocked: vi.fn() }));
 const instances = vi.hoisted(() => ({ findWhatsappChannel: vi.fn() }));
@@ -62,8 +63,9 @@ beforeEach(() => {
   db.knowledgeGapSettings.findUnique.mockResolvedValue({ groupId: GROUP });
   db.conversation.findMany.mockResolvedValue([]);
   queries.loadCampaignReport.mockResolvedValue(report);
-  group.sendToInternalGroup.mockResolvedValue(true);
-  group.sendToInternalPhone.mockResolvedValue(true);
+  db.tenant.findUnique.mockResolvedValue({ name: "Instituto Teste" });
+  group.sendDocumentToInternalGroup.mockResolvedValue(true);
+  group.sendDocumentToInternalPhone.mockResolvedValue(true);
   blocklist.isPhoneBlocked.mockResolvedValue(false);
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -138,26 +140,26 @@ describe("envio por destino", () => {
   it("grupo escolhido aqui vale mais que o das perguntas", async () => {
     db.campaignReportSettings.findUnique.mockResolvedValue(row({ groupId: OTHER_GROUP }));
     await expect(deliverCampaignReport("t1", FRIDAY_8H30)).resolves.toBe("sent");
-    expect(group.sendToInternalGroup).toHaveBeenCalledWith("t1", OTHER_GROUP, expect.any(String));
+    expect(group.sendDocumentToInternalGroup).toHaveBeenCalledWith("t1", OTHER_GROUP, expect.objectContaining({ mimetype: "application/pdf" }));
   });
 
   it("sem grupo próprio usa o das perguntas (comportamento da primeira versão)", async () => {
     await deliverCampaignReport("t1", FRIDAY_8H30);
-    expect(group.sendToInternalGroup).toHaveBeenCalledWith("t1", GROUP, expect.any(String));
+    expect(group.sendDocumentToInternalGroup).toHaveBeenCalledWith("t1", GROUP, expect.objectContaining({ mimetype: "application/pdf" }));
   });
 
   it("destino número envia ao número, nunca ao grupo", async () => {
     db.campaignReportSettings.findUnique.mockResolvedValue(row({ destination: "phone", phone: "5511987654321", groupId: OTHER_GROUP }));
     await expect(deliverCampaignReport("t1", FRIDAY_8H30)).resolves.toBe("sent");
-    expect(group.sendToInternalPhone).toHaveBeenCalledWith("t1", "5511987654321", expect.stringContaining("Relatório semanal de campanhas"));
-    expect(group.sendToInternalGroup).not.toHaveBeenCalled();
+    expect(group.sendDocumentToInternalPhone).toHaveBeenCalledWith("t1", "5511987654321", expect.objectContaining({ caption: expect.stringContaining("Relatório semanal de campanhas") }));
+    expect(group.sendDocumentToInternalGroup).not.toHaveBeenCalled();
   });
 
   it("destino número sem número: nada é tentado", async () => {
     db.campaignReportSettings.findUnique.mockResolvedValue(row({ destination: "phone" }));
     await expect(deliverCampaignReport("t1", FRIDAY_8H30)).resolves.toBe("no_phone");
     expect(queries.loadCampaignReport).not.toHaveBeenCalled();
-    expect(group.sendToInternalPhone).not.toHaveBeenCalled();
+    expect(group.sendDocumentToInternalPhone).not.toHaveBeenCalled();
   });
 
   it("número recusado não monta nem envia", async () => {
@@ -165,14 +167,14 @@ describe("envio por destino", () => {
     blocklist.isPhoneBlocked.mockResolvedValue(true);
     await expect(deliverCampaignReport("t1", FRIDAY_8H30)).resolves.toBe("refused");
     expect(queries.loadCampaignReport).not.toHaveBeenCalled();
-    expect(group.sendToInternalPhone).not.toHaveBeenCalled();
+    expect(group.sendDocumentToInternalPhone).not.toHaveBeenCalled();
   });
 
   it("QR desconectado vira no_channel; erro de envio vira failed", async () => {
     db.campaignReportSettings.findUnique.mockResolvedValue(row({ destination: "phone", phone: "5511987654321" }));
-    group.sendToInternalPhone.mockResolvedValue(false);
+    group.sendDocumentToInternalPhone.mockResolvedValue(false);
     await expect(deliverCampaignReport("t1", FRIDAY_8H30)).resolves.toBe("no_channel");
-    group.sendToInternalPhone.mockRejectedValue(new Error("timeout"));
+    group.sendDocumentToInternalPhone.mockRejectedValue(new Error("timeout"));
     await expect(deliverCampaignReport("t1", FRIDAY_8H30)).resolves.toBe("failed");
   });
 

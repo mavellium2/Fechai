@@ -253,6 +253,40 @@ export class EvolutionProvider implements WhatsAppProvider {
     return data.key?.id ?? null;
   }
 
+  async sendDocument(
+    externalId: string,
+    to: string,
+    document: { base64: string; mimetype: string; fileName: string; caption: string },
+  ): Promise<string | null> {
+    // Destino: JID de grupo ou telefone, nunca outra coisa (mesma trava do texto).
+    if (!/^\d[\d-]*@g\.us$/.test(to) && !/^\d{10,15}$/.test(to)) throw new Error("Destino do documento inválido.");
+    // `sendMedia` com `mediatype: "document"` chega como arquivo anexado, com o
+    // nome e a legenda; o base64 vai sem o prefixo `data:`.
+    const res = await this.fetchWithTimeout(
+      `${this.baseUrl}/message/sendMedia/${externalId}`,
+      {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({
+          number: to,
+          mediatype: "document",
+          mimetype: document.mimetype,
+          media: document.base64,
+          fileName: document.fileName,
+          caption: document.caption,
+        }),
+      },
+      30_000,
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Evolution sendMedia falhou (${res.status}): ${(await res.text().catch(() => "")).slice(0, 200)}`,
+      );
+    }
+    const data = (await res.json()) as { key?: { id?: string } };
+    return data.key?.id ?? null;
+  }
+
   async listGroups(externalId: string): Promise<WhatsAppGroup[]> {
     // `getParticipants=false` é obrigatório na v2 e deixa a resposta leve: com
     // participantes, uma conta com muitos grupos grandes demora dezenas de

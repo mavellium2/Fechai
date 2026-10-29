@@ -7,7 +7,7 @@
 
 ## deliverCampaignReport(tenantId, now?)
 - **Retorno:** `"sent" | "no_group" | "no_phone" | "no_channel" | "no_data" | "refused" | "failed"`; grava `lastStatus` (e `lastSentAt` se enviou).
-- **Fluxo:** destino (grupo próprio → grupo de `KnowledgeGapSettings`; ou número) → número: `isPhoneRefused` (`phone.ts`) → `loadCampaignReport` (semana + anterior) → sem `trackedSince` = `no_data` → `formatCampaignMessage` → `sendToInternalGroup` | `sendToInternalPhone` (só QR, nunca Meta).
+- **Fluxo:** destino (grupo próprio → grupo de `KnowledgeGapSettings`; ou número) → número: `isPhoneRefused` (`phone.ts`) → `buildCampaignDocument` (semana + anterior; sem `trackedSince` = `no_data`) → PDF como documento com legenda via `sendDocumentToInternalGroup` | `sendDocumentToInternalPhone` (só QR, nunca Meta); sem PDF, texto via `sendToInternalGroup` | `sendToInternalPhone`.
 
 ## scanCampaignReports(now?) — worker
 - Roda na volta de 2 min do worker de perguntas (`workers/follow-up-worker/index.ts`).

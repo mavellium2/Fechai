@@ -117,7 +117,8 @@ export function CampaignSettingsForm({ settings, questionsGroup }: {
         />
       </Fieldset>
 
-      <div hidden={destination !== "group"}>
+      {/* A lista carrega sozinha ao abrir: fora da conta do "alterações não salvas". A escolha vale pelo `groupId` oculto. */}
+      <div hidden={destination !== "group"} data-unsaved-ignore>
         <GroupPicker
           fieldId={groupFieldId}
           labelId={`${groupFieldId}-label`}

@@ -22,6 +22,31 @@ function comparison(now: number, before: number): string {
   return `${delta > 0 ? "+" : "−"}${Math.abs(delta)}% sobre a semana anterior (${before})`;
 }
 
+/** A versão curta, para caber num cartão do PDF. */
+function shortComparison(now: number, before: number): string {
+  if (before === 0) return now === 0 ? "igual à anterior" : "anterior sem anúncio";
+  const delta = Math.round(((now - before) / before) * 100);
+  if (delta === 0) return "igual à anterior";
+  return `${delta > 0 ? "+" : "-"}${Math.abs(delta)}% vs. semana anterior`;
+}
+
+/**
+ * Comparação dos leads de anúncio com a semana anterior — só quando essa semana
+ * já tinha captura de anúncio; com captura pela metade seria uma conta falsa.
+ * `null` = não comparar.
+ */
+export function adTrend(input: {
+  current: CampaignSummary;
+  previous: CampaignSummary | null;
+  previousFrom: Date | null;
+  trackedSince: Date | null;
+}): { long: string; short: string } | null {
+  const { current, previous, previousFrom, trackedSince } = input;
+  if (current.adLeads === 0 || !previous || !previousFrom || !trackedSince) return null;
+  if (trackedSince.getTime() > previousFrom.getTime() + DAY_MS) return null;
+  return { long: comparison(current.adLeads, previous.adLeads), short: shortComparison(current.adLeads, previous.adLeads) };
+}
+
 /**
  * O relatório semanal como mensagem de WhatsApp (formatação `*negrito*`).
  * Só contagens e o nome da campanha: nunca nome, telefone ou texto de conversa
@@ -51,8 +76,8 @@ export function formatCampaignMessage(input: {
     if (current.adLeads > 0) {
       const rate = percent(current.adScheduled, current.adLeads);
       lines.push(`• ${plural(current.adScheduled, "agendou", "agendaram")} entre os de anúncio${rate === null ? "" : ` (${rate}%)`}`);
-      const comparable = previous && previousFrom && trackedSince && trackedSince.getTime() <= previousFrom.getTime() + DAY_MS;
-      if (comparable) lines.push(`• ${comparison(current.adLeads, previous.adLeads)}`);
+      const trend = adTrend({ current, previous, previousFrom, trackedSince });
+      if (trend) lines.push(`• ${trend.long}`);
     }
   }
 
@@ -67,5 +92,26 @@ export function formatCampaignMessage(input: {
 
   lines.push("", link ? `Detalhes: ${link}` : "Detalhes em Relatórios › Campanhas, no painel.");
   lines.push("_Agendamentos contam até agora, de quem chegou na semana. \"Sem anúncio identificado\" pode ser orgânico ou contato antigo._");
+  return lines.join("\n");
+}
+
+/**
+ * A legenda do PDF no WhatsApp: curta, porque o relatório inteiro vai no
+ * arquivo. Só contagens, nunca nome, telefone ou texto de conversa.
+ */
+export function formatCampaignCaption(input: {
+  from: Date;
+  to: Date;
+  timezone: string;
+  current: CampaignSummary;
+  link: string | null;
+}): string {
+  const { current, link } = input;
+  const lines = [`*Relatório semanal de campanhas*`, rangeLabel(input.from, input.to, input.timezone)];
+  if (current.leads === 0) lines.push("Nenhum lead novo na semana.");
+  else {
+    lines.push(`${plural(current.leads, "lead novo", "leads novos")} · ${current.adLeads} de anúncio · ${plural(current.adScheduled, "agendou", "agendaram")}`);
+  }
+  if (link) lines.push(`Detalhes: ${link}`);
   return lines.join("\n");
 }

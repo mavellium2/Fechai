@@ -9,9 +9,11 @@ import {
   canRequestHistoryImport,
   describeCampaignSchedule,
   formatReportPhone,
+  weekWindow,
   type CampaignSendStatus,
   type CampaignSettings,
 } from "@/modules/campaign-reports/settings";
+import { rangeLabel } from "@/modules/campaign-reports/message";
 import { percent } from "@/modules/campaign-reports/summary";
 import type { CampaignReport } from "@/modules/campaign-reports/queries";
 import { formatInZone } from "@/modules/scheduling/time";
@@ -56,6 +58,8 @@ export function CampaignView({ report, settings, questionsGroup, period }: {
   const destinationLabel = settings.destination === "phone" && settings.phone
     ? `para ${formatReportPhone(settings.phone)}`
     : "no grupo";
+  const week = weekWindow(new Date(), settings.timezone);
+  const previewRange = rangeLabel(week.from, week.to, settings.timezone);
   const historyImport = (
     <CampaignHistoryImport
       history={settings.history}
@@ -123,6 +127,27 @@ export function CampaignView({ report, settings, questionsGroup, period }: {
         <Card>
           <CardTitle hint="Liga os leads que já existem ao anúncio de onde vieram, lendo o que o WhatsApp guardou. Pode repetir sem duplicar: vale o primeiro anúncio de cada lead.">Histórico de anúncios</CardTitle>
           {historyImport}
+        </Card>
+      )}
+
+      {trackedSince && (
+        <Card>
+          <CardTitle hint="O arquivo que vai no WhatsApp: a última semana fechada, gerado agora com os mesmos dados do envio. O período do topo da página não muda esta prévia.">Prévia do relatório semanal</CardTitle>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral panel:text-white/60">
+              <p>Semana de {previewRange}. É este PDF que chega no WhatsApp, com uma legenda curta.</p>
+              <p className="flex gap-4">
+                <a href="/relatorios/campanhas/pdf" target="_blank" rel="noopener" className="font-medium text-iris hover:underline">Abrir em outra aba</a>
+                <a href="/relatorios/campanhas/pdf?baixar=1" className="font-medium text-iris hover:underline">Baixar PDF</a>
+              </p>
+            </div>
+            <iframe
+              src="/relatorios/campanhas/pdf#toolbar=0&view=FitH"
+              title={`Prévia do relatório de campanhas, semana de ${previewRange}`}
+              loading="lazy"
+              className="h-[640px] w-full rounded-control border border-ink/10 bg-white panel:border-white/10"
+            />
+          </div>
         </Card>
       )}
 
