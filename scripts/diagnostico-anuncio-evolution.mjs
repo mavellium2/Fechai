@@ -82,6 +82,55 @@ async function findRecords(instance, jid) {
   return data?.messages?.records ?? [];
 }
 
+// Modo varredura (--dias N): olha TODAS as mensagens dos últimos N dias da instância,
+// sem filtrar por telefone. Serve para achar mensagens do lead guardadas sob outro
+// identificador (@lid) e para contar quantas trazem dado de anúncio.
+const dias = Number(arg("dias") ?? 0);
+if (dias > 0) {
+  const until = new Date();
+  const since = new Date(until.getTime() - dias * 86_400_000);
+  const digits = variants(phone);
+  for (const instance of await instanceNames()) {
+    const all = [];
+    for (let page = 1; page <= 50; page++) {
+      const data = await call(`/chat/findMessages/${encodeURIComponent(instance)}`, {
+        where: { messageTimestamp: { gte: since.toISOString(), lte: until.toISOString() } },
+        page,
+        offset: 100,
+      });
+      const m = data?.messages;
+      all.push(...(m?.records ?? []));
+      if (!m || page >= Number(m.pages ?? 0)) break;
+    }
+    const withAd = [];
+    const jidKinds = {};
+    let fromLead = 0;
+    for (const r of all) {
+      const jid = String(r.key?.remoteJid ?? "");
+      const kind = jid.endsWith("@lid") ? "@lid" : jid.endsWith("@s.whatsapp.net") ? "telefone" : jid.endsWith("@g.us") ? "grupo" : "outro";
+      const k = `${r.key?.fromMe ? "enviada" : "recebida"}/${kind}`;
+      jidKinds[k] = (jidKinds[k] ?? 0) + 1;
+      const found = [];
+      walk(r, "", found);
+      // "é o lead do print": o número aparece em qualquer lugar do registro (sem imprimir o número).
+      const isLead = digits.some((d) => JSON.stringify(r).includes(d));
+      if (isLead) fromLead++;
+      if (found.length) withAd.push({ r, found, isLead });
+    }
+    console.log(`\n=== instância ${instance} · últimos ${dias} dias · ${all.length} mensagens ===`);
+    console.log("por tipo (direção/identificador):", JSON.stringify(jidKinds));
+    console.log(`mensagens ligadas ao número do print: ${fromLead}`);
+    console.log(`mensagens com algum campo de anúncio: ${withAd.length}`);
+    withAd.sort((a, b) => Number(b.isLead) - Number(a.isLead));
+    for (const { r, found, isLead } of withAd.slice(0, limit)) {
+      const when = new Date(Number(r.messageTimestamp) * 1000).toISOString().slice(0, 16).replace("T", " ");
+      console.log(`\n- ${when} UTC · ${r.key?.fromMe ? "enviada" : "recebida"} · ${isLead ? "É O LEAD DO PRINT" : "outro lead"}`);
+      found.forEach((f) => console.log(`   anúncio: ${f}`));
+    }
+  }
+  process.exit(0);
+}
+
 let achou = false;
 for (const instance of await instanceNames()) {
   for (const p of variants(phone)) {
