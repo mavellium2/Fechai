@@ -7,6 +7,7 @@ import { ACTION_STATUS_LABEL, type ActionStatus } from "@/modules/reports/monthl
 import { caseFactItems } from "@/modules/reports/monthly-case";
 import { NO_PROBLEMS, STATUS_SEAL, attendanceSummary, deltaLabel, formatCount, formatPercent, formatReais, formatSpan, hoursLabel, humanClosedDatesLabel, openingSentence, periodLabel, problemText } from "@/modules/reports/monthly-format";
 import { SUGGESTION_DISCLAIMER } from "@/modules/lead-insights/summary";
+import { NO_AD_LABEL, campaignBars, percent } from "@/modules/campaign-reports/summary";
 import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
 
@@ -86,6 +87,29 @@ function HourBands({ data }: { data: MonthlyReportData }) {
   </figure>;
 }
 
+function CampaignLeads({ data }: { data: MonthlyReportData }) {
+  const c = data.campaigns;
+  if (!c) return null;
+  const chart = campaignBars({ lines: c.lines, otherLeads: c.withoutAd, otherScheduled: c.withoutAdScheduled });
+  const max = Math.max(1, ...chart.bars.map((b) => b.leads));
+  const rate = (scheduled: number, leads: number) => formatPercent(percent(scheduled, leads));
+  const scheduledTotal = c.lines.reduce((n, l) => n + l.scheduled, 0) + c.withoutAdScheduled;
+  return <figure className="space-y-3 break-inside-avoid">
+    <figcaption className="text-sm font-semibold text-ink">Leads por anúncio</figcaption>
+    <ul className="space-y-2">{chart.bars.map((b) => <li key={b.key} className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_2.5rem] items-center gap-3 text-sm">
+      <span className="truncate">{b.label}</span>
+      <span className="flex h-3.5 overflow-hidden rounded-sm bg-ink/10"><span className={cn("block h-full", b.kind === "none" ? "bg-neutral/50" : "bg-iris")} style={{ width: `${Math.max(2, b.leads / max * 100)}%` }} /></span>
+      <span className="text-right font-mono tabular-nums">{formatCount(b.leads)}</span>
+    </li>)}</ul>
+    <Table strongLast head={["Anúncio", "Leads", "Agendaram", "Taxa"]} rows={[
+      ...c.lines.map((l) => [l.label, formatCount(l.leads), formatCount(l.scheduled), rate(l.scheduled, l.leads)]),
+      [NO_AD_LABEL, formatCount(c.withoutAd), formatCount(c.withoutAdScheduled), rate(c.withoutAdScheduled, c.withoutAd)],
+      ["Total", formatCount(c.leads), formatCount(scheduledTotal), rate(scheduledTotal, c.leads)],
+    ]} />
+    <p className="text-xs text-neutral">Como contamos: leads novos são os contatos criados no mês, com o anúncio da primeira mensagem; por isso o total difere dos contatos atendidos, que incluem retornos e abordagens. Agendaram conta quem tem algum agendamento não cancelado, criado até o fim do mês. “{NO_AD_LABEL}” quer dizer que a mensagem não trazia anúncio, não que o contato seja orgânico.</p>
+  </figure>;
+}
+
 function Funnel({ data }: { data: MonthlyReportData }) {
   const steps: [string, Split][] = [["Contatos", data.service.contacts], ["Qualificados", data.schedule.qualified],
     ["Agendaram", data.schedule.cohort.total], ["Compareceram", data.schedule.cohort.attended]];
@@ -135,7 +159,7 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
   const sat = d.satisfaction;
   const satReliable = Boolean(sat && !sat.smallSample);
   const { estimatedReturn: er, financialSummary: financial } = monthlyFinancialPresentation(d, r.assumptions);
-  const hasLeads = leads.firstDoubts.length > 0 || leads.reasons.length > 0 || shown(leads.outOfArea);
+  const hasLeads = leads.firstDoubts.length > 0 || leads.reasons.length > 0 || shown(leads.outOfArea) || Boolean(d.campaigns);
   const role = OWNER_ROLE[r.decisionMakerRole ?? ""];
   const meeting = r.meetingAt ? new Intl.DateTimeFormat("pt-BR", { timeZone: d.meta.timezone, day: "2-digit", month: "2-digit" }).format(new Date(r.meetingAt)) : null;
 
@@ -224,7 +248,7 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
         <Table head={["Contexto", "Contatos", "Agendaram", "Conversão"]} rows={s.contexts.groups.filter((g) => g.contacts > 0)
           .map((g) => [g.label, formatCount(g.contacts), formatCount(g.scheduledContacts), formatPercent(g.conversionPercent)])} />
         <p className="text-xs text-neutral">Contatos incluem quem não respondeu. Cada pessoa que agendou entra uma vez; a taxa usa somente sua própria base, com avaliação criada pelo agente depois da entrada. Total atendido inclui novos contatos, retornos da base e respostas a abordagens.</p>
-        <p className="text-xs text-neutral">Origem de aquisição não registrada: uma entrada não comprova tráfego pago, e contato antigo não comprova base qualificada. A finalidade de abordagem sem registro permanece desconhecida.</p>
+        <p className="text-xs text-neutral">{d.campaigns ? "Origem por anúncio: veja Qualidade dos leads, somente para leads novos do mês; as taxas por contexto acima não comprovam tráfego pago." : "Origem de aquisição não registrada: uma entrada não comprova tráfego pago, e contato antigo não comprova base qualificada."} A finalidade de abordagem sem registro permanece desconhecida.</p>
         {s.contexts.unattributedEvaluations > 0 && <p className="text-xs text-neutral">{formatCount(s.contexts.unattributedEvaluations)} avaliações sem vínculo com entrada anterior nesta janela estão no total de avaliações, fora das taxas por contexto.</p>}
       </div> : <Funnel data={d} />}
       <div className="grid items-start gap-6 sm:grid-cols-2">
@@ -263,6 +287,7 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
     </Block>
 
     {hasLeads && <Block number="04" title="Qualidade dos leads">
+      <CampaignLeads data={d} />
       <div className="grid items-start gap-6 sm:grid-cols-2">
         {leads.firstDoubts.length > 0 && <Table head={["Primeira dúvida", "% dos contatos"]} rows={leads.firstDoubts.map((x) => [x.label, formatPercent(x.percent)])} />}
         {leads.reasons.length > 0 && <Table head={["Motivo principal de não agendar", "Contatos"]} strongLast rows={[

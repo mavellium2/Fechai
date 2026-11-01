@@ -28,6 +28,13 @@ controle de publicação.
   `modules/lead-insights`, congelada no snapshot; opcional em fechamentos
   antigos). O PDF inclui o bloco na análise detalhada só quando `leadQuality.leads > 0`.
   Ver [`lead-insights/README.md`](../lead-insights/README.md).
+- `monthly-campaigns.ts`: bloco opcional **Leads por anúncio** (`MonthlyReportData.campaigns?`,
+  parte 04 do documento). Puro sobre `MonthlyInput.campaigns`, lido por
+  `loadCampaignRows`/`loadCampaignTrackedSince` (`campaign-reports/queries.ts`) no escopo de
+  agentes da revisão. Só ids na evidência (`evidence.campaigns`); some sem captura no mês ou
+  sem lead de anúncio. Validador `campaigns_sum`/`campaigns_scheduled` em `monthly-validate.ts`;
+  limitação `campaigns` quando a captura começou no meio do mês. Ver
+  [`campaign-reports/README.md`](../campaign-reports/README.md).
 - `monthly-evidence.ts` e `monthly-quality.ts`: os registros por trás de cada
   número e o selo de qualidade de cada indicador — ver "Registros e selo de
   qualidade" no [README da seção](../../app/(dashboard)/relatorios/README.md).
@@ -103,3 +110,4 @@ computeFinancialSummary(tenantId, range): Promise<FinancialSummary>
   para exibir ou exportar uma publicação.
 - A visão Financeira é estimativa: não há histórico de assinatura no modelo (o investido presume o plano atual por todo o período) nem valor de lead automático.
 - Gráficos são componentes locais em `/relatorios` (SVG/divs, sem biblioteca de charts).
+- Leads por anúncio (`MonthlyReportData.campaigns`) não mede custo por lead nem entra em receita, economia ou ROI: o Fechai não conhece a verba da campanha.

@@ -18,4 +18,5 @@ Para usar, saiba:
 - [ ] Envio: destino é **grupo** (o escolhido aqui ou, sem escolha, `KnowledgeGapSettings.groupId`) **ou número** (`phone`, só QR, nunca Meta); os dois ficam guardados. Sem canal **espera, nunca troca**; falha **nunca repete sozinha**; número bloqueado/"pare"/contato da Meta é `refused`.
 - [ ] Passado: botão **Importar histórico** na aba (a tela só pede; o **worker** lê, uma por vez) ou `scripts/backfill-lead-ad-origin.ts` (simula por padrão). Só leads existentes. Meta não tem passado.
 - [ ] O relatório é **PDF** (`pdf.ts`, `pdf-lib`), montado só por `buildCampaignDocument` (`document.ts`): envio e prévia (`/relatorios/campanhas/pdf`, `<iframe>`) usam o mesmo arquivo. PDF falhou = sai em texto.
+- [ ] Aba: gráfico com os 10 maiores, "Outros N" e "Sem anúncio identificado" por último (soma = total de leads). O mesmo recorte é o bloco opcional "Leads por anúncio" da parte 04 do relatório mensal v2 (sem ROI).
 - [ ] Guia completo: `src/modules/campaign-reports/README.md`.

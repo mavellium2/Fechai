@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeCampaigns, type CampaignRow } from "@/modules/campaign-reports/summary";
+import { campaignBars, summarizeCampaigns, type CampaignRow } from "@/modules/campaign-reports/summary";
 import { formatCampaignMessage, rangeLabel } from "@/modules/campaign-reports/message";
 import {
   DEFAULT_CAMPAIGN_SETTINGS,
@@ -209,5 +209,25 @@ describe("formatCampaignMessage", () => {
   it("sem link configurado manda o caminho no painel", () => {
     const text = formatCampaignMessage({ ...base, link: null, current: summarizeCampaigns([row(null)], NOW) });
     expect(text).toContain("Relatórios › Campanhas");
+  });
+});
+
+describe("campaignBars", () => {
+  it("soma das barras = leads, Outros agrega o resto e sem anúncio vem por último", () => {
+    const rows: CampaignRow[] = [];
+    for (let i = 1; i <= 12; i++) for (let n = 0; n < i; n++) rows.push(row(ad(`AD${i}`, null, `s${i}`), n === 0 ? "scheduled" : "open"));
+    rows.push(row(null, "scheduled"), row(null));
+    const s = summarizeCampaigns(rows, NOW);
+    const { bars, restCount, restLeads, restScheduled } = campaignBars(s);
+    expect(bars.reduce((n, b) => n + b.leads, 0)).toBe(s.leads);
+    expect(bars).toHaveLength(12);
+    expect(bars[10]).toMatchObject({ label: "Outros 2 anúncios", leads: 3, scheduled: 2 });
+    expect(restCount).toBe(2); expect(restLeads).toBe(3); expect(restScheduled).toBe(2);
+    expect(bars.at(-1)).toMatchObject({ label: "Sem anúncio identificado", leads: 2, scheduled: 1, kind: "none" });
+  });
+  it("sem sobra não cria Outros, sem lead sem anúncio não cria a barra e zero leads dá zero barras", () => {
+    const s = summarizeCampaigns([row(ad("AD1", null))], NOW);
+    expect(campaignBars(s).bars.map((b) => b.label)).toEqual(["AD1"]);
+    expect(campaignBars(summarizeCampaigns([], NOW)).bars).toEqual([]);
   });
 });

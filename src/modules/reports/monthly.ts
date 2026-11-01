@@ -25,6 +25,7 @@ import { parsePreviousActions, reviewPreviousActions, type PreviousAction } from
 import { parseAgentChanges, type ReportedAgentChange } from "./monthly-agent-changes";
 import { buildMonthlyReportData, monthlyComparison, type MonthlyReportData } from "./monthly-data";
 import { loadMonthlySurveys } from "./monthly-satisfaction";
+import { loadCampaignRows, loadCampaignTrackedSince, type CampaignLeadRow } from "@/modules/campaign-reports/queries";
 import { getServiceArea } from "@/modules/lead-insights/service-area-store";
 import type { ServiceArea } from "@/modules/lead-insights/service-area";
 
@@ -177,6 +178,8 @@ export type MonthlyInput = {
   gaps?: MonthlyGap[];
   /** Pesquisa de satisfação do mês. Ausente = sem leitura (testes, fixtures antigas): o bloco some. */
   surveys?: MonthlySurvey[];
+  /** Leads novos do mês com o anúncio de origem. Ausente = sem leitura: o bloco some. */
+  campaigns?: { rows: CampaignLeadRow[]; trackedSince: Date | null };
   /** Quedas registradas do WhatsApp e desde quando são medidas. Ausente = sem leitura (testes, fixtures antigas). */
   uptime?: { trackedSince: Date | null; incidents: UptimeIncident[] };
   clinicorp: ClinicorpReportData;
@@ -439,7 +442,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
   const previousWindow = monthlyWindow(window.previousMonth, previousAssumptions.timezone);
   const start = new Date(Math.min(window.start.getTime(), previousWindow.start.getTime()));
   const end = new Date(Math.max(window.end.getTime(), previousWindow.end.getTime()));
-  const [rawConversations, appointments, events, clinicorp, gaps, lead, incidents, area, surveys] = await Promise.all([
+  const [rawConversations, appointments, events, clinicorp, gaps, lead, incidents, area, surveys, campaigns] = await Promise.all([
     prisma.conversation.findMany({ where: { tenantId, isTest: false, lead: { isTest: false }, OR: [
       { messages: { some: { createdAt: { gte: start, lt: end } } } },
       { appointments: { some: { OR: [{ startsAt: { gte: start, lt: end } }, { createdAt: { gte: start, lt: end } }] } } },
@@ -476,6 +479,13 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
     // booleano aqui, no limite da consulta — nunca segue adiante.
     loadMonthlySurveys(tenantId, window.start, window.end)
       .catch((error) => { console.error("[monthly] pesquisa de satisfação indisponível", error); return undefined; }),
+    // Leads novos do mês por anúncio, no escopo de agentes e com agendamentos
+    // contados até o fim do mês. Complemento: sem a leitura o bloco some.
+    Promise.all([
+      loadCampaignRows(tenantId, { from: window.start, to: window.end }, { agentIds: assumptions.agentIds, scheduledBefore: window.end }),
+      loadCampaignTrackedSince(tenantId),
+    ]).then(([rows, trackedSince]) => ({ rows, trackedSince }))
+      .catch((error) => { console.error("[monthly] leads por anúncio indisponíveis", error); return undefined; }),
   ]);
   const uptime = incidents ? { trackedSince: tenant.uptimeTrackedSince ?? null, incidents } : undefined;
   const conversationIds = rawConversations.map((c) => c.id);
@@ -505,7 +515,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
       audio: audioUrl || audioSeconds != null || unheardIds.has(m.id) ? { seconds: audioSeconds, heard: !unheardIds.has(m.id) } : null })) }));
   const now = new Date();
   const trackingSince = new Date(Math.max(tenant.createdAt.getTime(), tenant.reportTrackingStartedAt.getTime()));
-  const { metrics: automaticCurrent, evidence, data } = evaluateMonthlyMetrics({ start: window.start, end: window.end, now, trackingSince, accountCreatedAt: tenant.createdAt, config: assumptions, conversations, appointments, events, gaps, surveys, uptime, clinicorp, area });
+  const { metrics: automaticCurrent, evidence, data } = evaluateMonthlyMetrics({ start: window.start, end: window.end, now, trackingSince, accountCreatedAt: tenant.createdAt, config: assumptions, conversations, appointments, events, gaps, surveys, campaigns, uptime, clinicorp, area });
   if (lead) { evidence.leads = lead.leads; evidence.leadPopulation = "attended"; }
   capEvidence(evidence);
   const previousSnapshot = previousSaved?.status === "ready" && previousSaved.snapshot ? previousSaved.snapshot as unknown as MonthlyReport : null;

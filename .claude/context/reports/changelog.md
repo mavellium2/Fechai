@@ -2,6 +2,18 @@
 
 **Instrução:** Atualize aqui cada vez que mexer neste módulo.
 
+### [2026-11-01] — Leads por anúncio no relatório mensal v2 (parte 04)
+
+**Arquivos:**
+- `monthly-campaigns.ts` (novo): `buildCampaigns`, bloco opcional `MonthlyReportData.campaigns`
+- `monthly-data.ts`, `monthly-evidence.ts` (`evidence.campaigns`, só ids), `monthly.ts` (`MonthlyInput.campaigns` lido na mesma passada), `monthly-validate.ts` (`campaigns_sum`, `campaigns_scheduled`), `monthly-limitations.ts` (limitação `campaigns` com captura no meio do mês)
+- `campaign-reports/queries.ts` e `summary.ts` (leitura e barras compartilhadas com a aba)
+- `monthly-v2/MonthlyReportDocument.tsx` (parte 04) e a aba Campanhas
+
+**Razão:** o relatório mensal não dizia de qual anúncio vinham os leads do mês. Mesmo recorte e regra da aba Campanhas, sem nova consulta.
+
+**Impacto:** sem mudança de schema. Some quando não há captura ou lead de anúncio; snapshots anteriores não mudam. Não entra em receita, economia nem ROI.
+
 ### [2026-10-01] — Corrigir valor do lead versus criar nova vigência
 
 **Motivo:** “Alterar valor” sempre criava uma vigência nova, deixando R$ 10,00

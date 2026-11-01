@@ -2,6 +2,18 @@
 
 **Instrução:** Atualize aqui cada vez que mexer neste módulo.
 
+### [2026-11-01] — Gráfico de leads por anúncio na aba e bloco no relatório mensal
+
+**Arquivos:**
+- `summary.ts`: `campaignBars` (10 maiores + "Outros N" + "Sem anúncio identificado" por último), `campaignKey`, `NO_AD_LABEL`
+- `queries.ts`: `loadCampaignRows` (uma linha por lead, com `leadId`), `loadCampaignTrackedSince`; `loadCampaignSummary`/`loadCampaignReport` passam por elas
+- `../reports/monthly-campaigns.ts` (novo), `monthly-data.ts` (`MonthlyReportData.campaigns?`), `monthly-evidence.ts` (`evidence.campaigns`), `monthly.ts` (leitura no escopo de agentes, agendamentos até o fim do mês), `monthly-validate.ts`, `monthly-limitations.ts`
+- `relatorios/CampaignView.tsx` (gráfico em largura cheia e tabela com Total; saem as colunas equipe/perdeu/em andamento), `monthly-v2/MonthlyReportDocument.tsx` (parte 04), `components/charts/HorizontalBars.tsx` (`colorClass` por ponto)
+
+**Razão:** a aba mostrava barras cortadas em 12 e duas tabelas; o cliente quer ver de uma vez o volume por anúncio e o total. O mesmo recorte entrou no relatório mensal, que não mostrava de qual anúncio vinham os leads.
+
+**Impacto:** sem mudança de schema. O bloco do mensal é opcional e congelado no snapshot: meses fechados antes não o têm e o documento não muda. Validador bloqueia soma que não fecha. Não entra em receita, economia nem ROI.
+
 ### [2026-10-29] — Relatório semanal em PDF, com prévia na aba
 
 **Arquivos:**
