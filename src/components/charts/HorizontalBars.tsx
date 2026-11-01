@@ -4,7 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChartTooltip } from "./ChartTooltip";
 
-export type HorizontalBarPoint = { key: string; label: string; value: number; secondaryLabel?: string };
+export type HorizontalBarPoint = { key: string; label: string; value: number; secondaryLabel?: string; colorClass?: string };
 
 /**
  * Barras horizontais para uma lista rankeada (magnitude, uma série): tempo até
@@ -53,7 +53,7 @@ export function HorizontalBars({
             onFocus={() => setActive(i)}
             onBlur={() => setActive(null)}
           >
-            <div className={cn("h-full rounded-full transition-[width]", colorClass)} style={{ width: `${Math.max(2, (p.value / max) * 100)}%` }} />
+            <div className={cn("h-full rounded-full transition-[width]", p.colorClass ?? colorClass)} style={{ width: `${Math.max(2, (p.value / max) * 100)}%` }} />
           </button>
           {active === i && (
             <ChartTooltip

@@ -101,3 +101,37 @@ export function summarizeCampaigns(rows: CampaignRow[], now: Date): CampaignSumm
 
   return { leads: rows.length, adLeads, otherLeads: rows.length - adLeads, adScheduled, otherScheduled, lines };
 }
+
+export const NO_AD_LABEL = "Sem anúncio identificado";
+export const NO_AD_KEY = "__sem_anuncio__";
+export const REST_KEY = "__outros__";
+
+export type CampaignBar = {
+  key: string;
+  label: string;
+  leads: number;
+  scheduled: number;
+  kind: "ad" | "rest" | "none";
+};
+
+/**
+ * Barras do gráfico: os `top` maiores anúncios, "Outros N anúncios" (soma do
+ * resto) e "Sem anúncio identificado" sempre por último. A soma das barras é
+ * sempre o total de leads do período.
+ */
+export type CampaignBarsSource = {
+  lines: Pick<CampaignLine, "key" | "label" | "leads" | "scheduled">[];
+  otherLeads: number;
+  otherScheduled: number;
+};
+
+export function campaignBars(summary: CampaignBarsSource, top = 10): { bars: CampaignBar[]; restCount: number; restLeads: number; restScheduled: number } {
+  const shown = summary.lines.slice(0, top);
+  const rest = summary.lines.slice(top);
+  const restLeads = rest.reduce((n, l) => n + l.leads, 0);
+  const restScheduled = rest.reduce((n, l) => n + l.scheduled, 0);
+  const bars: CampaignBar[] = shown.map((l) => ({ key: l.key, label: l.label, leads: l.leads, scheduled: l.scheduled, kind: "ad" }));
+  if (rest.length) bars.push({ key: REST_KEY, label: `Outros ${rest.length} anúncios`, leads: restLeads, scheduled: restScheduled, kind: "rest" });
+  if (summary.otherLeads > 0) bars.push({ key: NO_AD_KEY, label: NO_AD_LABEL, leads: summary.otherLeads, scheduled: summary.otherScheduled, kind: "none" });
+  return { bars, restCount: rest.length, restLeads, restScheduled };
+}

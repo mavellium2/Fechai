@@ -14,7 +14,7 @@ import {
   type CampaignSettings,
 } from "@/modules/campaign-reports/settings";
 import { rangeLabel } from "@/modules/campaign-reports/message";
-import { percent } from "@/modules/campaign-reports/summary";
+import { NO_AD_KEY, NO_AD_LABEL, campaignBars, percent } from "@/modules/campaign-reports/summary";
 import type { CampaignReport } from "@/modules/campaign-reports/queries";
 import { formatInZone } from "@/modules/scheduling/time";
 import { CampaignHistoryImport, CampaignSendNowForm, CampaignSettingsForm } from "./CampaignSettingsForm";
@@ -50,6 +50,7 @@ export function CampaignView({ report, settings, questionsGroup, period }: {
   period: string;
 }) {
   const { current: c, trackedSince } = report;
+  const chart = campaignBars(c);
   const hasGroup = Boolean(settings.groupId ?? questionsGroup.id);
   const missingDestination = settings.destination === "phone"
     ? (settings.phone ? null : "Informe o número e salve para poder enviar.")
@@ -95,26 +96,31 @@ export function CampaignView({ report, settings, questionsGroup, period }: {
               about="Leads de anúncio com algum agendamento não cancelado, até agora." />
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Card>
-              <CardTitle hint="Quantos leads cada anúncio trouxe no período.">Leads por anúncio</CardTitle>
-              <HorizontalBars
-                empty="Nenhum lead de anúncio neste período."
-                points={c.lines.slice(0, 12).map((l) => ({ key: l.key, label: l.label, value: l.leads, secondaryLabel: `${l.scheduled} agendaram` }))}
-              />
-            </Card>
-            <Card>
-              <CardTitle hint="O que aconteceu com os leads de anúncio. Volume sozinho não diz qual anúncio funciona: olhe também os agendamentos.">Resultado por anúncio</CardTitle>
-              <DataTable
-                caption="Resultado dos leads por anúncio"
-                head={["Anúncio", "Leads", "Agendaram", "Taxa", "Equipe", "Perderam", "Em andamento"]}
-                rows={c.lines.map((l) => ({
-                  id: l.key,
-                  cells: [l.label, String(l.leads), String(l.scheduled), pct(l.scheduled, l.leads), String(l.handoff), String(l.lost), String(l.open)],
-                }))}
-              />
-            </Card>
-          </div>
+          <Card>
+            <CardTitle hint="Quantos leads cada anúncio trouxe no período. A soma das barras é o total de leads do período.">Leads por anúncio</CardTitle>
+            <HorizontalBars
+              empty="Nenhum lead neste período."
+              points={chart.bars.map((b) => ({
+                key: b.key,
+                label: b.label,
+                value: b.leads,
+                secondaryLabel: `${b.scheduled} agendaram`,
+                ...(b.kind === "none" ? { colorClass: "bg-neutral/50" } : {}),
+              }))}
+            />
+          </Card>
+          <Card>
+            <CardTitle hint="Agendou = algum agendamento não cancelado, até agora. Volume sozinho não diz qual anúncio funciona: olhe também a taxa.">Resultado por anúncio</CardTitle>
+            <DataTable
+              caption="Leads, agendamentos e taxa por anúncio"
+              head={["Anúncio", "Leads", "Agendaram", "Taxa"]}
+              rows={[
+                ...c.lines.map((l) => ({ id: l.key, cells: [l.label, String(l.leads), String(l.scheduled), pct(l.scheduled, l.leads)] })),
+                { id: NO_AD_KEY, cells: [NO_AD_LABEL, String(c.otherLeads), String(c.otherScheduled), pct(c.otherScheduled, c.otherLeads)] },
+                { id: "total", cells: ["Total", String(c.leads), String(c.adScheduled + c.otherScheduled), pct(c.adScheduled + c.otherScheduled, c.leads)] },
+              ]}
+            />
+          </Card>
 
           <p className="text-xs leading-relaxed text-neutral panel:text-white/55">
             Conta os leads criados no período, com o anúncio da primeira mensagem (o primeiro anúncio de cada contato vale; clicar em outro depois não muda). Resultado é calculado agora: agendou = algum agendamento não cancelado; perdeu = motivo registrado, triagem, follow-up recusado ou 72 horas sem resposta.
