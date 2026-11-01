@@ -11,6 +11,7 @@ import type { Bucket, CohortStatus, MonthlyEvidence } from "./monthly-evidence";
 import type { MonthlyTimeMetrics } from "./monthly-time";
 import type { AvailabilityIncident, AvailabilityMetrics } from "./monthly-operations";
 import { buildSatisfaction } from "./monthly-satisfaction";
+import { buildCampaigns } from "./monthly-campaigns";
 
 /*
  * Relatório mensal v2: o contrato único de números.
@@ -87,6 +88,22 @@ export type MonthlySatisfaction = {
   withComment: number;
   smallSample: boolean;
 };
+/**
+ * Leads novos do mês por anúncio de origem. Opcional: some quando a conta não
+ * tinha captura de anúncio até o fim do mês ou nenhum lead veio de anúncio.
+ * "Sem anúncio identificado" não é orgânico: a mensagem não trazia anúncio.
+ * Agendaram = algum agendamento não cancelado criado até o fim do mês.
+ */
+export type MonthlyCampaigns = {
+  /** Leads criados no mês (no escopo de agentes). Soma de `adLeads` e `withoutAd`. */
+  leads: number;
+  adLeads: number;
+  withoutAd: number;
+  withoutAdScheduled: number;
+  /** A captura começou no meio do mês: antes disso "sem anúncio" é falta de registro. */
+  partialCapture: boolean;
+  lines: { key: string; label: string; leads: number; scheduled: number }[];
+};
 export type MonthlyComparison = {
   contacts: number; scheduled: number; agentFirstResponseSeconds: number | null;
   unanswered: number; noShowRatePercent: number | null;
@@ -134,6 +151,8 @@ export type MonthlyReportData = {
   };
   /** Pesquisa de satisfação (nota dada pelos contatos). Opcional e congelada no snapshot. */
   satisfaction?: MonthlySatisfaction;
+  /** Leads por anúncio de origem; ausente em snapshot anterior ou sem captura no mês. */
+  campaigns?: MonthlyCampaigns;
   /** Quedas da conexão no mês, como o monitor registrou (`whatsapp/incidents.ts`). */
   incidents: AvailabilityIncident[];
   /** Só o que os dados comprovam. Vazio = "nenhum incidente relevante". */
@@ -427,6 +446,7 @@ export function buildMonthlyReportData(input: MonthlyInput, time: MonthlyTimeMet
     bookings: evidence.cohort.filter((a) => !a.earlier).map((a) => ({ id: a.appointmentId, conversationId: a.conversationId, createdAt: new Date(a.createdAt) })) });
   evidence.contexts = contexts.records;
   const satisfaction = buildSatisfaction(input, evidence);
+  const campaigns = buildCampaigns(input, evidence);
   return {
     version: 2,
     meta: { timezone: config.timezone, hoursConfigured, secondsPerMessage, secondsPerMessageDefault: config.secondsPerMessage == null },
@@ -484,6 +504,7 @@ export function buildMonthlyReportData(input: MonthlyInput, time: MonthlyTimeMet
       firstDoubts, reasons: reasonList, suggestions: [],
     },
     ...(satisfaction ? { satisfaction } : {}),
+    ...(campaigns ? { campaigns } : {}),
     incidents,
     problems,
     estimatedReturn, financialSummary, estimatedReturnMissing: financialEnabled(config) ? missing : [],

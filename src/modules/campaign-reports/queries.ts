@@ -5,24 +5,33 @@ import { summarizeCampaigns, type CampaignRow, type CampaignSummary } from "./su
  * Lê os leads criados em [from, to) e agrega por anúncio. Só metadados: nenhum
  * nome, telefone ou texto de conversa sai daqui. Conversa de teste fica fora.
  */
-export async function loadCampaignSummary(
+export type CampaignLeadRow = CampaignRow & { leadId: string };
+
+/**
+ * As linhas dos leads criados em [from, to), uma por lead, com o id para a
+ * evidência. `agentIds` restringe aos leads das conversas desses agentes;
+ * `scheduledBefore` ignora agendamentos criados a partir desse instante (o
+ * relatório mensal conta só até o fim do mês).
+ */
+export async function loadCampaignRows(
   tenantId: string,
   range: { from: Date; to: Date },
-  now = new Date(),
-): Promise<CampaignSummary> {
+  options: { agentIds?: string[] | null; scheduledBefore?: Date } = {},
+): Promise<CampaignLeadRow[]> {
   const leads = await prisma.lead.findMany({
     where: {
       tenantId,
       isTest: false,
       createdAt: { gte: range.from, lt: range.to },
-      conversation: { isTest: false },
+      conversation: { isTest: false, ...(options.agentIds?.length ? { agentId: { in: options.agentIds } } : {}) },
     },
     select: {
+      id: true,
       createdAt: true,
       status: true,
       disqualifiedAt: true,
       disqualifiedReason: true,
-      appointments: { select: { status: true } },
+      appointments: { select: { status: true, createdAt: true } },
       adOrigin: { select: { sourceId: true, code: true, name: true } },
       conversation: {
         select: {
@@ -36,12 +45,16 @@ export async function loadCampaignSummary(
     },
   });
 
-  const rows: CampaignRow[] = leads.map((lead) => ({
+  const before = options.scheduledBefore;
+  return leads.map((lead) => ({
+    leadId: lead.id,
     createdAt: lead.createdAt,
     status: lead.status,
     disqualified: lead.disqualifiedAt !== null,
     disqualifiedReason: lead.disqualifiedReason,
-    appointments: lead.appointments,
+    appointments: lead.appointments
+      .filter((a) => !before || a.createdAt < before)
+      .map((a) => ({ status: a.status })),
     conversation: lead.conversation && {
       needsHuman: lead.conversation.needsHuman,
       lastInboundAt: lead.conversation.lastInboundAt,
@@ -51,7 +64,20 @@ export async function loadCampaignSummary(
     insight: lead.conversation?.insight ?? null,
     origin: lead.adOrigin,
   }));
-  return summarizeCampaigns(rows, now);
+}
+
+/** Desde quando existe captura de anúncio na conta; null = nunca registrou nenhum. */
+export async function loadCampaignTrackedSince(tenantId: string): Promise<Date | null> {
+  const first = await prisma.leadAdOrigin.aggregate({ where: { tenantId }, _min: { firstAdAt: true } });
+  return first._min.firstAdAt;
+}
+
+export async function loadCampaignSummary(
+  tenantId: string,
+  range: { from: Date; to: Date },
+  now = new Date(),
+): Promise<CampaignSummary> {
+  return summarizeCampaigns(await loadCampaignRows(tenantId, range), now);
 }
 
 export type CampaignReport = {

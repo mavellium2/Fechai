@@ -54,6 +54,8 @@ export function monthlyLimitations(r: Source): MonthlyLimitation[] {
     text: "A conexão do WhatsApp ainda não era monitorada com registro de queda neste mês: a disponibilidade não foi medida." });
   else if (a.availability?.partial) found.push({ key: "uptime", affects: ["Disponibilidade do agente"],
     text: `A disponibilidade foi medida só a partir de ${new Intl.DateTimeFormat("pt-BR", { timeZone: c.timezone, day: "2-digit", month: "2-digit" }).format(new Date(a.availability.measuredFrom))}, quando o registro de quedas começou.` });
+  if (r.data?.campaigns?.partialCapture) found.push({ key: "campaigns", affects: ["Leads por anúncio"],
+    text: "O registro do anúncio de origem começou no meio deste mês: contatos anteriores ao registro aparecem em \"sem anúncio identificado\"." });
   return found;
 }
 

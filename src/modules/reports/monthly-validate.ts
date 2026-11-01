@@ -80,6 +80,15 @@ export function validateMonthlyReport(data: MonthlyReportData, texts: Texts): Mo
       add("blocking", "satisfaction_topics", "Pontos de melhoria", "Os pontos de melhoria citados não vêm das chaves contadas nas respostas.", "Reimporte os dados; se persistir, avise o desenvolvimento.");
     }
   }
+  const camp = data.campaigns;
+  if (camp) {
+    const lineLeads = camp.lines.reduce((n, l) => n + l.leads, 0);
+    if (lineLeads !== camp.adLeads || camp.adLeads + camp.withoutAd !== camp.leads) {
+      add("blocking", "campaigns_sum", "Leads por anúncio", `Os anúncios somam ${lineLeads + camp.withoutAd} leads, mas o mês tem ${camp.leads}.`, "Reimporte os dados; se persistir, avise o desenvolvimento.");
+    } else if (camp.withoutAdScheduled > camp.withoutAd || camp.lines.some((l) => l.scheduled > l.leads)) {
+      add("blocking", "campaigns_scheduled", "Leads por anúncio", "Há anúncio com mais agendamentos do que leads.", "Reimporte os dados; se persistir, avise o desenvolvimento.");
+    }
+  }
   const decisionMaker = texts.decisionMaker.trim(), operational = (texts.operationalContact ?? "").trim();
   if (!decisionMaker) {
     add("blocking", "decision_maker", "Decisor", "Decisor não informado.", "Informe o dono ou sócio que recebe o relatório.");

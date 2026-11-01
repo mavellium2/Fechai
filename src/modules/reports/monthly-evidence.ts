@@ -83,6 +83,8 @@ export type ContactEvidence = {
  * conversa, a nota e as chaves de motivo. O texto do comentário NUNCA vem para
  * cá — nem para o snapshot, nem para o painel, nem para a IA.
  */
+/** Um lead novo do mês e o anúncio de onde veio (`key` nulo = sem anúncio identificado). Só ids. */
+export type CampaignEvidence = { leadId: string; key: string | null; scheduled: boolean };
 export type SurveyEvidence = { surveyId: string; conversationId: string; rating: number; topics: string[] };
 export type CohortStatus = "attended" | "no_show" | "upcoming" | "unverified";
 /** Avaliação do agente na coorte do mês (criada no mês) ou vinda de mês anterior (`earlier`). */
@@ -111,8 +113,10 @@ export type MonthlyEvidence = {
   cohort?: CohortEvidence[];
   /** Respostas da pesquisa de satisfação do mês; ausente em snapshot anterior a ela. */
   surveys?: SurveyEvidence[];
+  /** Leads novos do mês por anúncio; ausente em snapshot anterior. */
+  campaigns?: CampaignEvidence[];
   /** Listas cortadas em `EVIDENCE_LIMIT`, com o total real. */
-  truncated: Partial<Record<"conversations" | "responses" | "appointments" | "events" | "messages" | "leads" | "contacts" | "contexts" | "cohort" | "surveys", number>>;
+  truncated: Partial<Record<"conversations" | "responses" | "appointments" | "events" | "messages" | "leads" | "contacts" | "contexts" | "cohort" | "surveys" | "campaigns", number>>;
 };
 
 /**
@@ -129,7 +133,7 @@ export const emptyEvidence = (): MonthlyEvidence => ({
 
 /** Corta as listas longas no teto e anota o total. Muta e devolve o mesmo objeto. */
 export function capEvidence(evidence: MonthlyEvidence): MonthlyEvidence {
-  for (const key of ["conversations", "responses", "appointments", "events", "messages", "leads", "contacts", "contexts", "cohort", "surveys"] as const) {
+  for (const key of ["conversations", "responses", "appointments", "events", "messages", "leads", "contacts", "contexts", "cohort", "surveys", "campaigns"] as const) {
     const list = evidence[key];
     if (list && list.length > EVIDENCE_LIMIT) {
       evidence.truncated[key] = list.length;
