@@ -1,10 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { summarizeCampaigns, type CampaignRow, type CampaignSummary } from "./summary";
 
-/**
- * Lê os leads criados em [from, to) e agrega por anúncio. Só metadados: nenhum
- * nome, telefone ou texto de conversa sai daqui. Conversa de teste fica fora.
- */
 export type CampaignLeadRow = CampaignRow & { leadId: string };
 
 /**
@@ -72,6 +68,10 @@ export async function loadCampaignTrackedSince(tenantId: string): Promise<Date |
   return first._min.firstAdAt;
 }
 
+/**
+ * Lê os leads criados em [from, to) e agrega por anúncio. Só metadados: nenhum
+ * nome, telefone ou texto de conversa sai daqui. Conversa de teste fica fora.
+ */
 export async function loadCampaignSummary(
   tenantId: string,
   range: { from: Date; to: Date },
@@ -101,7 +101,7 @@ export async function loadCampaignReport(
   const [current, previous, first] = await Promise.all([
     loadCampaignSummary(tenantId, range, now),
     options.previousFrom ? loadCampaignSummary(tenantId, { from: options.previousFrom, to: range.from }, now) : null,
-    prisma.leadAdOrigin.aggregate({ where: { tenantId }, _min: { firstAdAt: true } }),
+    loadCampaignTrackedSince(tenantId),
   ]);
-  return { current, previous, trackedSince: first._min.firstAdAt };
+  return { current, previous, trackedSince: first };
 }

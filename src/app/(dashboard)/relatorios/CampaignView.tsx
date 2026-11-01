@@ -123,7 +123,7 @@ export function CampaignView({ report, settings, questionsGroup, period }: {
           </Card>
 
           <p className="text-xs leading-relaxed text-neutral panel:text-white/55">
-            Conta os leads criados no período, com o anúncio da primeira mensagem (o primeiro anúncio de cada contato vale; clicar em outro depois não muda). Resultado é calculado agora: agendou = algum agendamento não cancelado; perdeu = motivo registrado, triagem, follow-up recusado ou 72 horas sem resposta.
+            Conta os leads criados no período, com o anúncio da primeira mensagem (o primeiro anúncio de cada contato vale; clicar em outro depois não muda). Agendou = algum agendamento não cancelado, calculado agora.
             {trackedSince ? ` Há registro de anúncio desde ${dateLabel(trackedSince)}; antes disso, "sem anúncio identificado" é falta de registro.` : ""}
           </p>
         </>

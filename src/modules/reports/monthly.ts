@@ -443,7 +443,6 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
   const start = new Date(Math.min(window.start.getTime(), previousWindow.start.getTime()));
   const end = new Date(Math.max(window.end.getTime(), previousWindow.end.getTime()));
   const [rawConversations, appointments, events, clinicorp, gaps, lead, incidents, area, surveys, campaigns] = await Promise.all([
-
     prisma.conversation.findMany({ where: { tenantId, isTest: false, lead: { isTest: false }, OR: [
       { messages: { some: { createdAt: { gte: start, lt: end } } } },
       { appointments: { some: { OR: [{ startsAt: { gte: start, lt: end } }, { createdAt: { gte: start, lt: end } }] } } },

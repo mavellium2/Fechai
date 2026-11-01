@@ -1,5 +1,5 @@
 import { leadOutcome } from "@/modules/lead-insights/summary";
-import { summarizeCampaigns } from "@/modules/campaign-reports/summary";
+import { campaignKey, summarizeCampaigns } from "@/modules/campaign-reports/summary";
 import type { MonthlyInput } from "./monthly";
 import type { MonthlyEvidence } from "./monthly-evidence";
 import type { MonthlyCampaigns } from "./monthly-data";
@@ -19,7 +19,7 @@ export function buildCampaigns(input: MonthlyInput, evidence: MonthlyEvidence): 
 
   evidence.campaigns = source.rows.map((row) => ({
     leadId: row.leadId,
-    key: row.origin ? (row.origin.code ?? (row.origin.sourceId ? `id:${row.origin.sourceId}` : "sem-id")) : null,
+    key: row.origin ? campaignKey(row.origin) : null,
     scheduled: leadOutcome(row, input.now).outcome === "scheduled",
   }));
   return {

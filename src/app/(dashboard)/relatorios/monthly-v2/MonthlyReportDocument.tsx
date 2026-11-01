@@ -106,7 +106,7 @@ function CampaignLeads({ data }: { data: MonthlyReportData }) {
       [NO_AD_LABEL, formatCount(c.withoutAd), formatCount(c.withoutAdScheduled), rate(c.withoutAdScheduled, c.withoutAd)],
       ["Total", formatCount(c.leads), formatCount(scheduledTotal), rate(scheduledTotal, c.leads)],
     ]} />
-    <p className="text-xs text-neutral">Como contamos: leads novos são os contatos criados no mês, com o anúncio da primeira mensagem; por isso o total difere dos contatos atendidos, que incluem retornos e abordagens. Agendaram conta quem tem avaliação não cancelada criada até o fim do mês. “{NO_AD_LABEL}” quer dizer que a mensagem não trazia anúncio, não que o contato seja orgânico.</p>
+    <p className="text-xs text-neutral">Como contamos: leads novos são os contatos criados no mês, com o anúncio da primeira mensagem; por isso o total difere dos contatos atendidos, que incluem retornos e abordagens. Agendaram conta quem tem algum agendamento não cancelado, criado até o fim do mês. “{NO_AD_LABEL}” quer dizer que a mensagem não trazia anúncio, não que o contato seja orgânico.</p>
   </figure>;
 }
 

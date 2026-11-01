@@ -57,6 +57,11 @@ export function percent(part: number, whole: number): number | null {
   return whole > 0 ? Math.round((part / whole) * 100) : null;
 }
 
+/** Chave de agrupamento de um anúncio: o código, ou o id quando não há código. */
+export function campaignKey(origin: { sourceId: string | null; code: string | null }): string {
+  return origin.code ?? (origin.sourceId ? `id:${origin.sourceId}` : "sem-id");
+}
+
 export function summarizeCampaigns(rows: CampaignRow[], now: Date): CampaignSummary {
   const groups = new Map<string, {
     code: string | null; sourceId: string | null; names: Map<string, number>; outcomes: OutcomeCounts; leads: number;
@@ -72,7 +77,7 @@ export function summarizeCampaigns(rows: CampaignRow[], now: Date): CampaignSumm
     adLeads++;
     if (outcome === "scheduled") adScheduled++;
     const { code, sourceId, name } = row.origin;
-    const key = code ?? (sourceId ? `id:${sourceId}` : "sem-id");
+    const key = campaignKey(row.origin);
     const group = groups.get(key) ?? { code, sourceId, names: new Map(), outcomes: emptyOutcomes(), leads: 0 };
     group.leads++;
     group.outcomes[outcome]++;
