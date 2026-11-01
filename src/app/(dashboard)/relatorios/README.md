@@ -14,6 +14,17 @@ sugeridas para o tráfego. Os números vêm de `loadLeadQuality`
 [`lead-insights/README.md`](../../../modules/lead-insights/README.md). O mesmo
 resumo entra no relatório mensal (bloco + 2ª página do PDF).
 
+### Campanhas (`?visao=campanhas`, rótulo "Campanhas")
+
+`CampaignView` mostra, por anúncio de origem, os leads novos do período e quantos
+agendaram: um gráfico de barras em largura cheia (10 maiores anúncios, "Outros N
+anúncios" e "Sem anúncio identificado" por último; a soma é o total de leads) e a
+tabela abaixo (Anúncio, Leads, Agendaram, Taxa, com linha Total). Depois vêm o
+histórico de anúncios, a prévia do PDF semanal e a configuração do envio. Captura, regras de agrupamento,
+envio ao grupo ou número e importação do histórico em
+[`campaign-reports/README.md`](../../../modules/campaign-reports/README.md). O mesmo
+recorte entra no relatório mensal como bloco opcional da parte 04.
+
 ### Satisfação (`?visao=satisfacao`, rótulo "Satisfação")
 
 Visão da pesquisa de satisfação pós-conversa (`SatisfactionView`): a
@@ -500,10 +511,16 @@ A abertura e o topo do painel (`MonthlyRoiSummary`) leem o mesmo
   os contatos chegaram, conversas passadas para a recepção) · 02 Agenda (funil,
   consultas do mês, por procedimento) · 03 O que ajustamos no agente (ações do
   mês anterior, ajustes, perguntas sem resposta, caso do mês) · 04 Qualidade
-  dos leads (primeira dúvida, motivo principal de não agendar, cidades,
+  dos leads (leads por anúncio quando há, primeira dúvida, motivo principal de não agendar, cidades,
   sugestões de tráfego) · 05 O que não saiu como planejado · 06 Próximo mês.
   Com o retorno estimado ligado e calculado, o bloco **+ Retorno estimado** com
   a conta por procedimento.
+- **Leads por anúncio** (parte 04, opcional): `MonthlyReportData.campaigns`
+  (`monthly-campaigns.ts`) traz leads novos do mês por anúncio, com agendaram por linha.
+  O documento mostra as mesmas barras da aba Campanhas e uma tabela com Total, antes da
+  grade de dúvidas e motivos. Some sem captura no mês ou sem lead de anúncio; não entra em
+  receita nem ROI. Regras e validador em
+  [`campaign-reports/README.md`](../../../modules/campaign-reports/README.md).
 - **Como contamos** (sempre em página nova): comparativo com o mês anterior,
   premissas, "Estimativas e avisos de cobertura" (só os indicadores com selo) e
   metodologia.
@@ -662,7 +679,7 @@ trabalho da recepção assumido pelo agente. Regras que não se quebram:
   o caso do mês fica em "03 O que ajustamos no agente"; a duração dos
   atendimentos por resultado só aparece no painel.
 
-`/relatorios` tem **cinco visões**, trocadas por um toggle no topo (querystring `?visao=`): Operacional, Financeiro, Qualidade dos leads (`leads`), Relatório mensal (`mensal`, só com mês publicado) e Afiliados (só para quem está no programa). As três do produto com regra própria:
+`/relatorios` tem **sete visões**, trocadas por um toggle no topo (querystring `?visao=`): Operacional, Financeiro, Qualidade dos leads (`leads`), Campanhas (`campanhas`), Satisfação (`satisfacao`), Relatório mensal (`mensal`, só com mês publicado) e Afiliados (só para quem está no programa). As três do produto com regra própria:
 
 - **Operacional** (padrão): KPIs com delta vs. período anterior, gráficos (fluxo, resultados, atendimento IA×humano, leads fechados IA×humano, donut por agente, leads por status, funil de conversão, resolução autônoma, recuperação por follow-up, horários de pico, tempo até a primeira resposta, comparecimento/no-show — compareceu × faltou pelo horário da consulta, com "não verificado" na tabela; cancelada não entra) e exportação CSV.
 - **Financeiro**: retorno financeiro **estimado** do investimento no projeto — KPIs (Retorno, Investido, ROI, Ponto de equilíbrio), gráfico de retorno acumulado × investido, retorno por agente, retorno mês a mês e custo por lead fechado. O valor por lead é definido manualmente pelo dono da conta; sem ele, os gráficos que dependem desse valor mostram um estado vazio com a chamada para definir, nunca uma série de zeros. No fim da visão fica **"O que o agente filtrou"** (triagem): contatos que o agente encerrou por não serem clientes em potencial, e o tempo/dinheiro que isso poupou.
@@ -767,7 +784,7 @@ recontados localmente.
 | `FunnelChart.tsx` | Barras horizontais em ordem — funil de conversão. |
 | `MeterChart.tsx` | Medidor de razão 0–100% — resolução autônoma. |
 | `DivergingBars.tsx` | Barras acima/abaixo do zero — retorno mês a mês. |
-| `HorizontalBars.tsx` | Lista rankeada de barras horizontais — tempo até resposta, retorno por agente. |
+| `HorizontalBars.tsx` | Lista rankeada de barras horizontais — tempo até resposta, retorno por agente, leads por anúncio. Cada ponto aceita `colorClass` próprio (a barra "Sem anúncio identificado" usa cor neutra). |
 | `src/components/ui/currency-input.tsx` | Campo de preço com máscara pt-BR (client). |
 | `src/components/ui/filter-tabs.tsx` | Toggle por links (`aria-current="page"`). |
 | `src/components/ui/month-picker.tsx` | Competência via `SelectMenu` e setas; lista restrita de publicações no tenant e proteção de dados não salvos. |

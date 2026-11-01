@@ -29,8 +29,9 @@ LeadAdOrigin + Lead + leadOutcome ─► summarizeCampaigns ─► /relatorios?v
 
 - `../whatsapp/ad-origin.ts` — puro. `parseAdCode`, `extractEvolutionAdOrigin`, `extractMetaAdOrigin` (nunca lançam; o que não é anúncio vira `null`).
 - `record.ts` — `recordLeadAdOrigin` (**nunca lança**; primeiro anúncio vence).
-- `summary.ts` — puro. `summarizeCampaigns`, `percent`.
-- `queries.ts` — `loadCampaignSummary`, `loadCampaignReport` (com semana anterior e `trackedSince`). Só metadados.
+- `summary.ts` — puro. `summarizeCampaigns`, `percent`, `campaignKey` (a chave do agrupamento), `campaignBars` (barras do gráfico da aba) e `NO_AD_LABEL`.
+- `queries.ts` — `loadCampaignRows` (uma linha por lead, com `leadId`; aceita escopo de agentes e agendamentos até uma data), `loadCampaignTrackedSince`, `loadCampaignSummary` e `loadCampaignReport` (com semana anterior e `trackedSince`). Só metadados.
+- `../reports/monthly-campaigns.ts` — `buildCampaigns`: o bloco "Leads por anúncio" do relatório mensal v2 (ver a seção própria abaixo).
 - `settings.ts` / `settings-store.ts` — destino (grupo ou número), dia, hora e fuso do envio (`CampaignReportSettings`); `currentSlot`, `weekWindow`, `destinationProblem`, estado da importação do histórico.
 - `message.ts` — puro. `formatCampaignMessage`, `rangeLabel`.
 - `document.ts` — `buildCampaignDocument`: a **única** montagem do relatório (PDF, nome do arquivo, legenda, texto de reserva). O envio e a prévia da tela chamam esta função.
@@ -140,6 +141,46 @@ tenta de novo até a tolerância acabar. Conta que nunca registrou anúncio não
 "0 leads" toda sexta. "Enviar agora" pode repetir o que o horário marcado manda
 depois, no mesmo dia.
 
+## A aba Campanhas: gráfico e tabela
+
+- **Gráfico em largura cheia** (`HorizontalBars`, `campaignBars`): os **10 maiores**
+  anúncios por leads, depois "Outros N anúncios" (soma do resto, só quando sobra
+  algum) e **"Sem anúncio identificado" sempre por último**, em cor neutra. A soma
+  das barras é o total de leads do período; a legenda de cada barra traz "N agendaram".
+- **Tabela abaixo**: uma linha por anúncio (todos, não só os 10), a linha "Sem anúncio
+  identificado" e a linha **Total**. Colunas: Anúncio, Leads, Agendaram, Taxa. Equipe,
+  perdeu e em andamento saíram da aba (o PDF semanal não mudou). Os 10 e o "Outros"
+  são só do gráfico; a tabela não corta anúncio.
+- `HorizontalBars` aceita `colorClass` por ponto (usado pela barra "Sem anúncio"); sem
+  ele, a cor é a da lista.
+
+## Leads por anúncio no relatório mensal v2
+
+Bloco opcional `MonthlyReportData.campaigns` (`reports/monthly-campaigns.ts`, `buildCampaigns`),
+montado na mesma passada de `evaluateMonthlyMetrics`. Não é uma segunda consulta: a
+entrada `MonthlyInput.campaigns` vem de `computeMonthlyReport` com `loadCampaignRows`
+(escopo de agentes da revisão; agendamentos criados **até o fim do mês**) e
+`loadCampaignTrackedSince`. Se a leitura falhar, o log registra e o bloco some.
+
+- **Unidade e contagens**: leads novos do mês (`Lead.createdAt`, sem teste). `leads` =
+  `adLeads` + `withoutAd`; `lines` (anúncios, com leads e agendaram) somam `adLeads`;
+  `withoutAdScheduled` é a conta de "Sem anúncio". "Agendaram" = algum agendamento não
+  cancelado criado até o fim do mês, nunca o status de hoje.
+- **Quando some**: sem leitura; sem captura até o fim do mês (`trackedSince` nulo ou
+  depois do fim); ou nenhum lead de anúncio no mês. Snapshot anterior à v2 não tem o campo.
+- **Captura no meio do mês**: `partialCapture` vira a limitação `campaigns` (parte 05 do
+  PDF, "O que não saiu como planejado"): antes do registro, "sem anúncio" é falta de registro.
+- **Evidência**: `evidence.campaigns` = `{ leadId, key, scheduled }`, só ids e
+  classificação, cortada em `EVIDENCE_LIMIT` com `truncated.campaigns`. Sem nome, telefone
+  nem texto.
+- **Validador** (`validateMonthlyReport`, bloqueante): `campaigns_sum` quando as linhas
+  não somam `adLeads` ou `adLeads + withoutAd` não dá `leads`; `campaigns_scheduled` quando
+  há mais agendamentos que leads (no total sem anúncio ou em uma linha).
+- **Documento**: `CampaignLeads` na parte **04 Qualidade dos leads**, antes da grade de
+  dúvidas e motivos. Barras na mesma ordem da aba e tabela com Total. A parte 01 troca a
+  nota "origem não registrada" por um aviso que aponta para a 04 quando o bloco existe.
+- **Sem retorno estimado**: o bloco não entra em receita, economia nem ROI.
+
 ## Schema
 
 `LeadAdOrigin` (uma por lead, cascata) e `CampaignReportSettings` (uma por
@@ -174,7 +215,7 @@ A saída só tem contagens. Antes de gravar, confira "sem telefone identificado"
 
 ## O que NÃO faz
 
-- Não entra no relatório mensal em PDF (ver card "Relatórios: gráfico de leads por anúncio de origem").
+- Não mede custo por lead nem retorno da campanha: o bloco mensal mostra volume e agendamento por anúncio, sem verba, e não entra no retorno estimado.
 - Não mede custo por lead nem investimento: o Fechai não conhece a verba da campanha.
 - Não atribui por palpite: sem anúncio no dado do WhatsApp, o lead fica "sem anúncio identificado".
 - Não recupera o passado de contas pela Meta oficial.
