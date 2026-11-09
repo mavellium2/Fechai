@@ -6,6 +6,8 @@ estados, deploy e testes em
 
 - `layout.tsx` e `page.tsx`: guarda de acesso e estado da conexão.
 - `DisparosClient.tsx`: importação, associação de colunas e atualização periódica.
+- `ManualContacts.tsx`: tabela para digitar contatos (telefone, nome, variáveis);
+  só edita, a validação é do servidor (`prepareBroadcastManual`).
 - `BroadcastReview.tsx`: revisão, teste explícito, faixa/data/fuso, consentimento
   e aviso de contatos recentes.
 - `BroadcastHistory.tsx`: busca, filtros, paginação, pausa/retomada, CSV, saúde e

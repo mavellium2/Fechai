@@ -28,10 +28,14 @@ O arquivo original não é armazenado. O envio usa templates aprovados da Meta.
 1. Abra **Disparos**, dê um nome à campanha e clique em **Carregar templates**.
 2. Escolha um template aprovado. Se necessário, baixe o modelo Excel ou JSON;
    ele inclui as variáveis esperadas pelo template escolhido.
-3. Selecione seu arquivo e clique em **Ler colunas do arquivo**. Associe a coluna
-   do telefone, o nome opcional e cada variável `{{1}}`, `{{2}}` etc.
-4. Clique em **Importar e revisar**. Corrija as linhas inválidas e importe de
-   novo: um arquivo inválido não gera campanha parcial. Duplicados são removidos.
+3. **Digitar contatos** (padrão): preencha a tabela, uma linha por contato, com
+   telefone, nome opcional e uma coluna por variável do template. Enter na última
+   linha cria outra; linha em branco é ignorada. Ou **Enviar arquivo**: selecione
+   o arquivo e clique em **Ler colunas do arquivo**, associando a coluna do
+   telefone, o nome opcional e cada variável `{{1}}`, `{{2}}` etc.
+4. Clique em **Importar e revisar**. Corrija as linhas inválidas (na digitação o
+   erro aparece embaixo da própria linha) e importe de novo: uma lista inválida
+   não gera campanha parcial. Duplicados são removidos.
 5. Confira os contatos e o texto preenchido. **Enviar teste** envia a mensagem
    do primeiro contato para o número informado, sem iniciar a campanha.
    Use número próprio/autorizado. Cada rascunho permite cinco números de teste,
@@ -55,6 +59,18 @@ O histórico tem busca por nome, filtro de situação, páginas de 20 campanhas 
 **Exportar CSV** de todos os contatos da campanha, com status, datas UTC e autor
 da confirmação. O CSV inclui BOM, separador `;`, aspas escapadas e neutralização
 de fórmulas para abertura no Excel.
+
+## Contatos digitados
+
+`prepareBroadcastManual` (`disparos/actions.ts`) recebe as linhas da tabela
+(`ManualContacts.tsx`) e as passa por `parseBroadcastRows`, **as mesmas regras do
+arquivo**: o cliente só monta as linhas, o servidor decide o que entra. Até 200
+contatos por digitação (acima disso, arquivo); `row` é a posição na tabela, para o
+erro apontar a linha certa. O erro de variável fala "a variável {{N}}", não
+`var_N`, que só existe no arquivo. Na digitação, número brasileiro **sem `+55`** é
+recusado ("Falta o DDI"): sem isso `(11) 98765-4321` passaria como número dos EUA
+(+1). Estrangeiro exige `+` explícito. O arquivo mantém a regra antiga. O rascunho nasce em `createBroadcastDraft`,
+compartilhado com a importação por arquivo.
 
 ## Arquivos e templates
 
@@ -172,7 +188,10 @@ conexão e estado da campanha. Falha ao ler bloqueios interrompe o processamento
 Aceitos entram na conversa como `assistant` / `sentBy: human`, sem LLM nem cota
 de respostas da IA. A resposta futura do contato segue o atendimento normal.
 Testes são mensagens reais e entram no histórico, mas seus destinatários não
-entram nos totais da campanha nem na seleção da fila.
+entram nos totais da campanha nem na seleção da fila. Teste `skipped` (barrado
+por bloqueio ou pedido de parar, sem chamada à Meta) é **reavaliado** ao pedir de
+novo: desbloquear o número destrava o teste. `sent`, `unknown` e `failed`
+seguem devolvendo o resultado anterior, para não duplicar envio.
 
 ## Entrega, lote de eventos e resultados
 

@@ -10,7 +10,9 @@ import { getBroadcastConnection } from "@/modules/broadcasts/connection";
 import {
   inspectBroadcastFile,
   parseBroadcastFile,
+  parseBroadcastRows,
   type ColumnMapping,
+  type ImportResult,
 } from "@/modules/broadcasts/import";
 import {
   listBroadcastPage,
@@ -100,6 +102,17 @@ export async function prepareBroadcast(form: FormData) {
           : "Não foi possível ler o arquivo.",
     };
   }
+  return createBroadcastDraft(tenantId, connection, name, template, parsed);
+}
+
+/** Rascunho a partir de uma lista já validada — arquivo e digitação passam aqui. */
+async function createBroadcastDraft(
+  tenantId: string,
+  connection: NonNullable<Awaited<ReturnType<typeof getBroadcastConnection>>>,
+  name: string,
+  template: BroadcastTemplate,
+  parsed: ImportResult,
+) {
   // Nunca descarta erros silenciosamente nem envia só parte de uma lista inválida.
   if (parsed.issues.length)
     return {
@@ -134,6 +147,118 @@ export async function prepareBroadcast(form: FormData) {
       campaign.id,
     ),
   };
+}
+
+/** Teto da digitação: lista maior que isso é trabalho para o arquivo. */
+const MAX_MANUAL_CONTACTS = 200;
+
+/**
+ * Contatos digitados na tela. Mesmas regras do arquivo (`parseBroadcastRows`:
+ * DDI+DDD obrigatórios, variáveis preenchidas, duplicados únicos) — o cliente
+ * só monta as linhas, quem decide o que entra é o servidor. `row` é a posição
+ * na tabela da tela, para o erro apontar a linha certa.
+ */
+export async function prepareBroadcastManual(input: {
+  name: string;
+  templateId: string;
+  contacts: { row: number; phone: string; name: string; parameters: string[] }[];
+}) {
+  const tenantId = await requireBroadcastAccess();
+  const name = String(input?.name ?? "").trim();
+  if (!name || name.length > 100)
+    return {
+      ok: false as const,
+      error: "Dê um nome ao disparo (até 100 caracteres).",
+    };
+  const contacts = input?.contacts;
+  if (!Array.isArray(contacts) || !contacts.length)
+    return { ok: false as const, error: "Adicione ao menos um contato." };
+  if (contacts.length > MAX_MANUAL_CONTACTS)
+    return {
+      ok: false as const,
+      error: `Digite até ${MAX_MANUAL_CONTACTS} contatos. Para listas maiores, use um arquivo.`,
+    };
+  const wellFormed = contacts.every(
+    (c) =>
+      c &&
+      Number.isInteger(c.row) &&
+      c.row > 0 &&
+      typeof c.phone === "string" &&
+      typeof c.name === "string" &&
+      Array.isArray(c.parameters) &&
+      c.parameters.every((p) => typeof p === "string"),
+  );
+  if (!wellFormed)
+    return { ok: false as const, error: "Contatos em formato inválido." };
+  const connection = await getBroadcastConnection(tenantId);
+  if (!connection)
+    return {
+      ok: false as const,
+      error: "Conecte a API oficial da Meta em Integrações.",
+    };
+  let template: BroadcastTemplate | undefined;
+  let parsed: ImportResult;
+  try {
+    template = (await connection.provider.listBroadcastTemplates()).find(
+      (t) => t.id === input.templateId,
+    );
+    if (!template)
+      return {
+        ok: false as const,
+        error: "Selecione um template aprovado e compatível. Atualize a lista.",
+      };
+    parsed = parseBroadcastRows(
+      contacts.map((c) => ({
+        row: c.row,
+        value: {
+          telefone: c.phone,
+          nome: c.name,
+          ...Object.fromEntries(
+            c.parameters.map((p, i) => [`var_${i + 1}`, p]),
+          ),
+        },
+      })),
+      template,
+    );
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível validar os contatos.",
+    };
+  }
+  // Na tela não existe coluna `var_1`: o erro fala da variável da mensagem.
+  parsed.issues = parsed.issues.map((i) => ({
+    ...i,
+    error: i.error.replace(/var_(\d+)/g, "a variável {{$1}}"),
+  }));
+  // Quem digita "(11) 98765-4321" esquece o DDI, e sem o 55 o número passaria
+  // como estrangeiro (11 dígitos começando em 1 = EUA). Número brasileiro sem
+  // 55 e sem "+" é barrado; estrangeiro exige "+" explícito.
+  const missingCountry = contacts
+    .filter((c) => {
+      const text = c.phone.trim();
+      const digits = text.replace(/\D/g, "");
+      return (
+        !text.startsWith("+") &&
+        !digits.startsWith("55") &&
+        /^[1-9]\d(?:9\d{8}|[2-9]\d{7})$/.test(digits)
+      );
+    })
+    .map((c) => ({
+      row: c.row,
+      error: "Falta o DDI. Para o Brasil, comece com +55 (ex.: +55 11 98765-4321).",
+    }));
+  if (missingCountry.length) {
+    const flagged = new Set(missingCountry.map((i) => i.row));
+    parsed.issues = [
+      ...missingCountry,
+      ...parsed.issues.filter((i) => !flagged.has(i.row)),
+    ].sort((a, b) => a.row - b.row);
+  }
+  return createBroadcastDraft(tenantId, connection, name, template, parsed);
 }
 
 export async function startBroadcast(
@@ -440,7 +565,11 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
   const existing = await prisma.broadcastRecipient.findUnique({
     where: { campaignId_phone_isTest: { campaignId: id, phone, isTest: true } },
   });
-  if (existing)
+  // `skipped` = barrado por bloqueio/pedido de parar ANTES de qualquer chamada à
+  // Meta. Nada saiu, então o teste é reavaliado: quem desbloqueou o número não
+  // pode continuar vendo o veredito antigo. Os demais estados continuam
+  // valendo (`sent`, `unknown`, `failed`: reenviar poderia duplicar).
+  if (existing && existing.status !== "skipped")
     return {
       ok: existing.status === "sent",
       error:
@@ -487,6 +616,11 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
       })) >= 5
     )
       return null;
+    if (existing)
+      await tx.broadcastRecipient.updateMany({
+        where: { id: existing.id, status: "skipped" },
+        data: { status: "pending", error: null, attemptedAt: null },
+      });
     return tx.broadcastRecipient.upsert({
       where: {
         campaignId_phone_isTest: { campaignId: id, phone, isTest: true },
