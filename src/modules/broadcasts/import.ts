@@ -3,13 +3,16 @@ import { normalizeBroadcastPhone, broadcastPhoneVariants } from "./phone";
 import { renderBroadcast, type BroadcastTemplate } from "./template";
 
 export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
-export const MAX_RECIPIENTS = 1000;
+import { MAX_RECIPIENTS } from "./contacts";
+export { MAX_RECIPIENTS };
 export type ImportedRecipient = {
   row: number;
   phone: string;
   name: string | null;
   parameters: string[];
   content: string;
+  /** "nameless" = recebe a versão sem nome do disparo. Ausente = "main". */
+  variant?: "main" | "nameless";
 };
 export type ColumnMapping = {
   phone: string;

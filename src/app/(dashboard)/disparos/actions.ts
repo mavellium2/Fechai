@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   requireBroadcastActor,
@@ -15,11 +16,25 @@ import {
   type ImportResult,
 } from "@/modules/broadcasts/import";
 import {
+  listRows,
+  namelessValues,
+  validateListInput,
+  type ListContact,
+  type NamelessMode,
+  type VariableSource,
+} from "@/modules/broadcasts/contacts";
+import {
+  searchBroadcastContacts,
+  type LeadStatusFilter,
+} from "@/modules/broadcasts/contact-search";
+import {
+  getBroadcastSummary,
   listBroadcastPage,
   type BroadcastFilter,
 } from "@/modules/broadcasts/queries";
 import {
-  sameBroadcastTemplate,
+  campaignTemplates,
+  templatesStillApproved,
   type BroadcastTemplate,
 } from "@/modules/broadcasts/template";
 import ExcelJS from "exceljs";
@@ -28,7 +43,7 @@ import {
   nextBroadcastTime,
   type ScheduleInput,
 } from "@/modules/broadcasts/schedule";
-import { normalizeBroadcastPhone } from "@/modules/broadcasts/phone";
+import { broadcastPhoneVariants, normalizeBroadcastPhone } from "@/modules/broadcasts/phone";
 import { sendBroadcastRecipient } from "@/modules/broadcasts/send";
 import { recentlyContacted } from "@/modules/broadcasts/recent";
 import { broadcastCsv } from "@/modules/broadcasts/csv";
@@ -63,6 +78,7 @@ export async function prepareBroadcast(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
   const templateId = String(form.get("templateId") ?? "");
   const file = form.get("file");
+  const draftId = String(form.get("draftId") ?? "") || undefined;
   if (!name || name.length > 100)
     return {
       ok: false as const,
@@ -102,22 +118,29 @@ export async function prepareBroadcast(form: FormData) {
           : "Não foi possível ler o arquivo.",
     };
   }
-  return createBroadcastDraft(tenantId, connection, name, template, parsed);
+  return saveDraft(tenantId, name, connection.phoneNumberId, template, parsed, draftId);
 }
 
-/** Rascunho a partir de uma lista já validada — arquivo e digitação passam aqui. */
-async function createBroadcastDraft(
+/**
+ * Rascunho a partir do resultado validado — o mesmo para arquivo e lista.
+ * Com `draftId`, atualiza o mesmo rascunho (voltar e ajustar não cria outro);
+ * os testes já enviados ficam, porque são mensagens reais.
+ */
+async function saveDraft(
   tenantId: string,
-  connection: NonNullable<Awaited<ReturnType<typeof getBroadcastConnection>>>,
   name: string,
+  phoneNumberId: string,
   template: BroadcastTemplate,
   parsed: ImportResult,
+  draftId?: string,
+  namelessTemplate: BroadcastTemplate | null = null,
+  skippedNameless = 0,
 ) {
   // Nunca descarta erros silenciosamente nem envia só parte de uma lista inválida.
   if (parsed.issues.length)
     return {
       ok: false as const,
-      error: `Corrija as ${parsed.issues.length} linhas inválidas antes de continuar.`,
+      error: `Corrija ${parsed.issues.length === 1 ? "o contato inválido" : `os ${parsed.issues.length} contatos inválidos`} antes de continuar.`,
       issues: parsed.issues,
     };
   if (!parsed.recipients.length)
@@ -125,14 +148,38 @@ async function createBroadcastDraft(
       ok: false as const,
       error: "Nenhum destinatário válido encontrado.",
     };
-  const campaign = await prisma.broadcastCampaign.create({
-    data: {
-      tenantId,
-      name,
-      phoneNumberId: connection.phoneNumberId,
-      template,
-      recipients: { createMany: { data: parsed.recipients } },
-    },
+  const campaign = await prisma.$transaction(async (tx) => {
+    if (draftId) {
+      const updated = await tx.broadcastCampaign.updateMany({
+        where: { id: draftId, tenantId, status: "draft" },
+        data: {
+          name,
+          phoneNumberId,
+          template,
+          namelessTemplate: namelessTemplate ?? Prisma.DbNull,
+        },
+      });
+      if (updated.count) {
+        await tx.broadcastRecipient.deleteMany({
+          where: { campaignId: draftId, isTest: false },
+        });
+        await tx.broadcastRecipient.createMany({
+          data: parsed.recipients.map((r) => ({ ...r, campaignId: draftId })),
+        });
+        return { id: draftId };
+      }
+    }
+    return tx.broadcastCampaign.create({
+      data: {
+        tenantId,
+        name,
+        phoneNumberId,
+        template,
+        namelessTemplate: namelessTemplate ?? Prisma.DbNull,
+        recipients: { createMany: { data: parsed.recipients } },
+      },
+      select: { id: true },
+    });
   });
   revalidatePath("/disparos");
   return {
@@ -140,6 +187,8 @@ async function createBroadcastDraft(
     id: campaign.id,
     name,
     template,
+    namelessTemplate,
+    skippedNameless,
     ...parsed,
     recentPhones: await recentlyContacted(
       tenantId,
@@ -149,47 +198,26 @@ async function createBroadcastDraft(
   };
 }
 
-/** Teto da digitação: lista maior que isso é trabalho para o arquivo. */
-const MAX_MANUAL_CONTACTS = 200;
-
 /**
- * Contatos digitados na tela. Mesmas regras do arquivo (`parseBroadcastRows`:
- * DDI+DDD obrigatórios, variáveis preenchidas, duplicados únicos) — o cliente
- * só monta as linhas, quem decide o que entra é o servidor. `row` é a posição
- * na tabela da tela, para o erro apontar a linha certa.
+ * Rascunho com contatos escolhidos na conta ou digitados. Passa pela mesma
+ * validação do arquivo (`parseBroadcastRows`); o template é relido na Meta.
  */
-export async function prepareBroadcastManual(input: {
+export async function prepareBroadcastFromList(input: {
   name: string;
   templateId: string;
-  contacts: { row: number; phone: string; name: string; parameters: string[] }[];
+  draftId?: string;
+  contacts: ListContact[];
+  variables: VariableSource[];
+  /** Quem não tem nome: outra mensagem aprovada, texto no lugar ou fica de fora. */
+  nameless?: { mode: NamelessMode; templateId?: string };
 }) {
   const tenantId = await requireBroadcastAccess();
-  const name = String(input?.name ?? "").trim();
+  const name = typeof input?.name === "string" ? input.name.trim() : "";
   if (!name || name.length > 100)
     return {
       ok: false as const,
       error: "Dê um nome ao disparo (até 100 caracteres).",
     };
-  const contacts = input?.contacts;
-  if (!Array.isArray(contacts) || !contacts.length)
-    return { ok: false as const, error: "Adicione ao menos um contato." };
-  if (contacts.length > MAX_MANUAL_CONTACTS)
-    return {
-      ok: false as const,
-      error: `Digite até ${MAX_MANUAL_CONTACTS} contatos. Para listas maiores, use um arquivo.`,
-    };
-  const wellFormed = contacts.every(
-    (c) =>
-      c &&
-      Number.isInteger(c.row) &&
-      c.row > 0 &&
-      typeof c.phone === "string" &&
-      typeof c.name === "string" &&
-      Array.isArray(c.parameters) &&
-      c.parameters.every((p) => typeof p === "string"),
-  );
-  if (!wellFormed)
-    return { ok: false as const, error: "Contatos em formato inválido." };
   const connection = await getBroadcastConnection(tenantId);
   if (!connection)
     return {
@@ -197,75 +225,105 @@ export async function prepareBroadcastManual(input: {
       error: "Conecte a API oficial da Meta em Integrações.",
     };
   let template: BroadcastTemplate | undefined;
+  let namelessTemplate: BroadcastTemplate | null = null;
+  let skipped = 0;
   let parsed: ImportResult;
   try {
-    template = (await connection.provider.listBroadcastTemplates()).find(
-      (t) => t.id === input.templateId,
-    );
+    const approved = await connection.provider.listBroadcastTemplates();
+    template = approved.find((t) => t.id === input.templateId);
     if (!template)
       return {
         ok: false as const,
         error: "Selecione um template aprovado e compatível. Atualize a lista.",
       };
-    parsed = parseBroadcastRows(
-      contacts.map((c) => ({
-        row: c.row,
-        value: {
-          telefone: c.phone,
-          nome: c.name,
-          ...Object.fromEntries(
-            c.parameters.map((p, i) => [`var_${i + 1}`, p]),
-          ),
-        },
-      })),
-      template,
+    const { contacts, variables, nameless } = validateListInput(
+      input.contacts,
+      input.variables,
+      template.parameterCount,
+      input.nameless,
     );
+    const { main, nameless: namelessRows, skipped: left, issues } = listRows(
+      contacts,
+      variables,
+      nameless.mode,
+    );
+    skipped = left;
+    if (namelessRows.length) {
+      namelessTemplate = approved.find((t) => t.id === nameless.templateId) ?? null;
+      const expected = namelessValues(variables).length;
+      if (!namelessTemplate)
+        return {
+          ok: false as const,
+          error: "A mensagem para quem não tem nome não está mais aprovada. Escolha outra.",
+        };
+      if (namelessTemplate.parameterCount !== expected)
+        return {
+          ok: false as const,
+          error: `A mensagem para quem não tem nome precisa ter ${expected === 0 ? "nenhum espaço" : expected === 1 ? "1 espaço" : `${expected} espaços`} (os que não são o nome).`,
+        };
+    }
+    const empty: ImportResult = { recipients: [], issues: [], duplicates: 0, total: 0 };
+    const withName = main.length ? parseBroadcastRows(main, template) : empty;
+    const withoutName =
+      namelessRows.length && namelessTemplate
+        ? parseBroadcastRows(namelessRows, namelessTemplate)
+        : empty;
+    // O mesmo número colado com e sem nome recebe uma vez só: vale a versão com nome.
+    const taken = new Set(withName.recipients.flatMap((r) => broadcastPhoneVariants(r.phone)));
+    const extra = withoutName.recipients.filter((r) => !taken.has(r.phone));
+    parsed = {
+      recipients: [
+        ...withName.recipients,
+        ...extra.map((r) => ({ ...r, variant: "nameless" as const })),
+      ].sort((a, b) => a.row - b.row),
+      issues: [...issues, ...withName.issues, ...withoutName.issues].sort((a, b) => a.row - b.row),
+      duplicates:
+        withName.duplicates + withoutName.duplicates + (withoutName.recipients.length - extra.length),
+      total: contacts.length,
+    };
   } catch (error) {
     return {
       ok: false as const,
       error:
         error instanceof Error
           ? error.message
-          : "Não foi possível validar os contatos.",
+          : "Não foi possível preparar os contatos.",
     };
   }
-  // Na tela não existe coluna `var_1`: o erro fala da variável da mensagem.
-  parsed.issues = parsed.issues.map((i) => ({
-    ...i,
-    error: i.error.replace(/var_(\d+)/g, "a variável {{$1}}"),
-  }));
-  // Quem digita "(11) 98765-4321" esquece o DDI, e sem o 55 o número passaria
-  // como estrangeiro (11 dígitos começando em 1 = EUA). Número brasileiro sem
-  // 55 e sem "+" é barrado; estrangeiro exige "+" explícito.
-  const missingCountry = contacts
-    .filter((c) => {
-      const text = c.phone.trim();
-      const digits = text.replace(/\D/g, "");
-      return (
-        !text.startsWith("+") &&
-        !digits.startsWith("55") &&
-        /^[1-9]\d(?:9\d{8}|[2-9]\d{7})$/.test(digits)
-      );
-    })
-    .map((c) => ({
-      row: c.row,
-      error: "Falta o DDI. Para o Brasil, comece com +55 (ex.: +55 11 98765-4321).",
-    }));
-  if (missingCountry.length) {
-    const flagged = new Set(missingCountry.map((i) => i.row));
-    parsed.issues = [
-      ...missingCountry,
-      ...parsed.issues.filter((i) => !flagged.has(i.row)),
-    ].sort((a, b) => a.row - b.row);
-  }
-  return createBroadcastDraft(tenantId, connection, name, template, parsed);
+  return saveDraft(
+    tenantId,
+    name,
+    connection.phoneNumberId,
+    template,
+    parsed,
+    typeof input.draftId === "string" ? input.draftId : undefined,
+    namelessTemplate,
+    skipped,
+  );
 }
+
+export async function listBroadcastContacts(
+  q: string,
+  status: LeadStatusFilter,
+  page = 1,
+) {
+  const tenantId = await requireBroadcastAccess();
+  return searchBroadcastContacts(
+    tenantId,
+    typeof q === "string" ? q : "",
+    status,
+    page,
+  );
+}
+
 
 export async function startBroadcast(
   id: string,
   consent: boolean,
   input: ScheduleInput = {},
   acknowledgeRecent = false,
+  /** Nome editado na última etapa; vazio mantém o do rascunho. */
+  rename?: string,
 ) {
   const { tenantId, userId, label } = await requireBroadcastActor();
   if (consent !== true)
@@ -291,11 +349,8 @@ export async function startBroadcast(
       error: "A conexão Meta mudou. Prepare um novo disparo.",
     };
   try {
-    const saved = campaign.template as BroadcastTemplate;
-    const current = (await connection.provider.listBroadcastTemplates()).find(
-      (t) => t.id === saved.id,
-    );
-    if (!current || !sameBroadcastTemplate(current, saved))
+    const approved = await connection.provider.listBroadcastTemplates();
+    if (!templatesStillApproved(campaignTemplates(campaign), approved))
       return {
         ok: false,
         error:
@@ -334,6 +389,9 @@ export async function startBroadcast(
   const started = await prisma.broadcastCampaign.updateMany({
     where: { id, tenantId, status: "draft" },
     data: {
+      ...(typeof rename === "string" && rename.trim() && rename.trim().length <= 100
+        ? { name: rename.trim() }
+        : {}),
       status: "queued",
       confirmedAt: new Date(),
       confirmedBy: userId,
@@ -355,7 +413,10 @@ export async function startBroadcast(
       };
   }
   revalidatePath("/disparos");
-  return { ok: true };
+  return {
+    ok: true,
+    info: "Disparo confirmado. Os envios seguem em segundo plano, dentro do horário escolhido.",
+  };
 }
 
 export async function cancelBroadcast(id: string) {
@@ -375,7 +436,41 @@ export async function cancelBroadcast(id: string) {
     });
   });
   revalidatePath("/disparos");
-  return { ok: true };
+  return {
+    ok: true,
+    info: "Disparo cancelado. Quem ainda não tinha recebido não vai receber.",
+  };
+}
+
+/**
+ * Descarta um rascunho. Sem teste enviado, apaga; com teste, cancela — o teste
+ * foi uma mensagem real e continua no histórico (atribuição de resposta).
+ */
+export async function discardBroadcastDraft(id: string) {
+  const tenantId = await requireBroadcastAccess();
+  const tests = await prisma.broadcastRecipient.count({
+    where: { campaignId: id, isTest: true, campaign: { tenantId } },
+  });
+  if (tests)
+    await prisma.broadcastCampaign.updateMany({
+      where: { id, tenantId, status: "draft" },
+      data: { status: "cancelled", finishedAt: new Date() },
+    });
+  else
+    await prisma.broadcastCampaign.deleteMany({
+      where: { id, tenantId, status: "draft" },
+    });
+  revalidatePath("/disparos");
+  return { ok: true, info: "Rascunho descartado." };
+}
+
+export async function getBroadcastCampaign(id: string) {
+  const tenantId = await requireBroadcastAccess();
+  const [summary, rows] = await Promise.all([
+    getBroadcastSummary(tenantId, id),
+    getBroadcastDetails(id),
+  ]);
+  return summary ? { summary, rows } : null;
 }
 
 export async function refreshBroadcasts(filter: BroadcastFilter = {}) {
@@ -397,6 +492,7 @@ export async function getBroadcastDetails(id: string) {
       status: true,
       error: true,
       isTest: true,
+      variant: true,
       deliveryStatus: true,
       deliveryError: true,
       sentAt: true,
@@ -422,6 +518,8 @@ export async function getBroadcastReview(id: string) {
     id: campaign.id,
     name: campaign.name,
     template: campaign.template as BroadcastTemplate,
+    namelessTemplate: (campaign.namelessTemplate as BroadcastTemplate | null) ?? null,
+    skippedNameless: 0,
     duplicates: 0,
     recentPhones: await recentlyContacted(
       tenantId,
@@ -434,6 +532,7 @@ export async function getBroadcastReview(id: string) {
       name: r.name,
       parameters: r.parameters as string[],
       content: r.content,
+      variant: r.variant === "nameless" ? ("nameless" as const) : ("main" as const),
     })),
   };
 }
@@ -500,7 +599,10 @@ export async function pauseBroadcast(id: string) {
     },
   });
   revalidatePath("/disparos");
-  return { ok: true };
+  return {
+    ok: true,
+    info: "Disparo pausado. Quem ainda não recebeu fica aguardando você retomar.",
+  };
 }
 
 export async function resumeBroadcast(id: string) {
@@ -516,11 +618,8 @@ export async function resumeBroadcast(id: string) {
       error: "Reconecte o mesmo número da Meta usado neste disparo.",
     };
   try {
-    const saved = campaign.template as BroadcastTemplate;
-    const current = (await connection.provider.listBroadcastTemplates()).find(
-      (t) => t.id === saved.id,
-    );
-    if (!current || !sameBroadcastTemplate(saved, current))
+    const approved = await connection.provider.listBroadcastTemplates();
+    if (!templatesStillApproved(campaignTemplates(campaign), approved))
       return {
         ok: false,
         error: "O template original precisa estar aprovado e sem alterações.",
@@ -542,7 +641,7 @@ export async function resumeBroadcast(id: string) {
     },
   });
   revalidatePath("/disparos");
-  return { ok: true };
+  return { ok: true, info: "Disparo retomado." };
 }
 
 export async function sendBroadcastTest(id: string, rawPhone: string) {
@@ -555,7 +654,8 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
     include: {
       recipients: {
         where: { isTest: false },
-        orderBy: { row: "asc" },
+        // "main" vem antes de "nameless": o teste usa um contato com nome se houver.
+        orderBy: [{ variant: "asc" }, { row: "asc" }],
         take: 1,
       },
     },
@@ -565,10 +665,8 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
   const existing = await prisma.broadcastRecipient.findUnique({
     where: { campaignId_phone_isTest: { campaignId: id, phone, isTest: true } },
   });
-  // `skipped` = barrado por bloqueio/pedido de parar ANTES de qualquer chamada à
-  // Meta. Nada saiu, então o teste é reavaliado: quem desbloqueou o número não
-  // pode continuar vendo o veredito antigo. Os demais estados continuam
-  // valendo (`sent`, `unknown`, `failed`: reenviar poderia duplicar).
+  // "Ignorado" (bloqueado ou pediu para parar) nunca chegou à Meta: o motivo é
+  // conferido de novo, senão desbloquear o número não mudaria nada na tela.
   if (existing && existing.status !== "skipped")
     return {
       ok: existing.status === "sent",
@@ -586,11 +684,8 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
       error: "Reconecte o número da Meta usado neste rascunho.",
     };
   try {
-    const template = campaign.template as BroadcastTemplate;
-    const current = (await connection.provider.listBroadcastTemplates()).find(
-      (t) => t.id === template.id,
-    );
-    if (!current || !sameBroadcastTemplate(template, current))
+    const approved = await connection.provider.listBroadcastTemplates();
+    if (!templatesStillApproved(campaignTemplates(campaign), approved))
       return { ok: false, error: "O template mudou. Prepare outro rascunho." };
   } catch {
     return { ok: false, error: "Não foi possível validar o template na Meta." };
@@ -609,18 +704,22 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
       },
       data: { lastTestAt: new Date() },
     });
+    if (!locked.count) return null;
+    if (existing) {
+      const reopened = await tx.broadcastRecipient.updateMany({
+        where: { id: existing.id, status: "skipped" },
+        data: { status: "pending", error: null },
+      });
+      return reopened.count
+        ? tx.broadcastRecipient.findUnique({ where: { id: existing.id } })
+        : null;
+    }
     if (
-      !locked.count ||
       (await tx.broadcastRecipient.count({
         where: { campaignId: id, isTest: true },
       })) >= 5
     )
       return null;
-    if (existing)
-      await tx.broadcastRecipient.updateMany({
-        where: { id: existing.id, status: "skipped" },
-        data: { status: "pending", error: null, attemptedAt: null },
-      });
     return tx.broadcastRecipient.upsert({
       where: {
         campaignId_phone_isTest: { campaignId: id, phone, isTest: true },
@@ -634,6 +733,7 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
         name: "Teste",
         parameters: sample.parameters!,
         content: sample.content,
+        variant: sample.variant,
       },
     });
   });

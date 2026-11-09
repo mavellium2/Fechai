@@ -8,7 +8,8 @@ import { setConversationChannel } from "@/modules/whatsapp/instances";
 import { getBroadcastConnection } from "./connection";
 import { broadcastPhoneVariants } from "./phone";
 import { reconcileBroadcastReceipts } from "./receipts";
-import type { BroadcastTemplate } from "./template";
+import { BLOCKED_SKIP_ERROR } from "./unblock";
+import { recipientTemplate } from "./template";
 
 /** O mesmo caminho protegido atende o worker e o botão explícito de teste. */
 export async function sendBroadcastRecipient(
@@ -48,7 +49,7 @@ export async function sendBroadcastRecipient(
       data: {
         status: "skipped",
         error: blocked
-          ? "Número bloqueado na conta."
+          ? BLOCKED_SKIP_ERROR
           : "Contato pediu para não receber mensagens.",
       },
     });
@@ -100,7 +101,7 @@ export async function sendBroadcastRecipient(
     requestStarted = true;
     const messageId = await fresh.provider.sendBroadcastTemplate(
       recipient.phone,
-      campaign.template as BroadcastTemplate,
+      recipientTemplate(campaign, recipient),
       recipient.parameters as string[],
     );
     const saved = await prisma.$transaction([

@@ -4,7 +4,7 @@ import { nextBroadcastTime } from "./schedule";
 import { sendBroadcastRecipient } from "./send";
 import { reconcileBroadcastReceipts } from "./receipts";
 import { dueBroadcastCampaigns } from "./queue";
-import { sameBroadcastTemplate, type BroadcastTemplate } from "./template";
+import { campaignTemplates, templatesStillApproved } from "./template";
 
 async function pauseUnavailable(id: string, tenantId: string, error: string) {
   await prisma.broadcastCampaign.updateMany({
@@ -60,11 +60,8 @@ export async function scanBroadcasts() {
         );
         continue;
       }
-      const template = campaign.template as BroadcastTemplate;
-      const current = (await connection.provider.listBroadcastTemplates()).find(
-        (t) => t.id === template.id,
-      );
-      if (!current || !sameBroadcastTemplate(current, template)) {
+      const approved = await connection.provider.listBroadcastTemplates();
+      if (!templatesStillApproved(campaignTemplates(campaign), approved)) {
         await pauseUnavailable(
           campaign.id,
           campaign.tenantId,

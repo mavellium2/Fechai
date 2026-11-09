@@ -1,16 +1,111 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getBroadcastWorkerHealth } from "./health";
+import type { BroadcastTemplate } from "./template";
+import { parseLocalDateTime } from "@/modules/scheduling/time";
 
 export type BroadcastFilter = {
   query?: string;
   status?: string;
+  /** Período de criação, dias `YYYY-MM-DD` no horário de Brasília (inclusive). */
+  from?: string;
+  to?: string;
   page?: number;
 };
+
+const ZONE = "America/Sao_Paulo";
+
+/** Intervalo `[gte, lt)` em UTC; dia inválido é ignorado, nunca lança. */
+export function periodRange(from?: string, to?: string) {
+  const day = (value?: string) =>
+    value && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? parseLocalDateTime(value, "00:00", ZONE)
+      : null;
+  const start = day(from);
+  const endDay = day(to);
+  const end = endDay ? new Date(endDay.getTime() + 24 * 60 * 60 * 1000) : null;
+  if (!start && !end) return undefined;
+  return { ...(start ? { gte: start } : {}), ...(end ? { lt: end } : {}) };
+}
+
+const CAMPAIGN_STATUSES = ["draft", "queued", "paused", "completed", "cancelled"];
+
+const summarySelect = {
+  id: true,
+  name: true,
+  status: true,
+  createdAt: true,
+  error: true,
+  scheduledAt: true,
+  timezone: true,
+  windowStart: true,
+  windowEnd: true,
+  nextAttemptAt: true,
+  confirmedByLabel: true,
+  confirmedAt: true,
+  finishedAt: true,
+  template: true,
+  recipients: {
+    where: { isTest: false },
+    select: {
+      status: true,
+      deliveryStatus: true,
+      repliedAt: true,
+      qualifiedAt: true,
+      appointmentId: true,
+    },
+  },
+} satisfies Prisma.BroadcastCampaignSelect;
+
+type CampaignRow = Prisma.BroadcastCampaignGetPayload<{
+  select: typeof summarySelect;
+}>;
+
+/** Contagens de um disparo, sem testes. A mesma conta para a lista e o detalhe. */
+function summarize({
+  recipients,
+  createdAt,
+  scheduledAt,
+  nextAttemptAt,
+  confirmedAt,
+  finishedAt,
+  template,
+  ...campaign
+}: CampaignRow) {
+  const count = (test: (r: (typeof recipients)[number]) => boolean) =>
+    recipients.filter(test).length;
+  return {
+    ...campaign,
+    templateName: (template as BroadcastTemplate | null)?.name ?? "",
+    createdAt: createdAt.toISOString(),
+    scheduledAt: scheduledAt?.toISOString() ?? null,
+    nextAttemptAt: nextAttemptAt.toISOString(),
+    confirmedAt: confirmedAt?.toISOString() ?? null,
+    finishedAt: finishedAt?.toISOString() ?? null,
+    total: recipients.length,
+    pending: count((r) => r.status === "pending" || r.status === "sending"),
+    sent: count((r) => r.status === "sent"),
+    failed: count((r) => r.status === "failed"),
+    unknown: count((r) => r.status === "unknown"),
+    skipped: count((r) => r.status === "skipped" || r.status === "cancelled"),
+    delivered: count((r) =>
+      ["delivered", "read"].includes(r.deliveryStatus ?? ""),
+    ),
+    read: count((r) => r.deliveryStatus === "read"),
+    deliveryFailed: count((r) => r.deliveryStatus === "failed"),
+    replies: count((r) => Boolean(r.repliedAt)),
+    opportunities: count((r) => Boolean(r.qualifiedAt)),
+    appointments: count((r) => Boolean(r.appointmentId)),
+  };
+}
+
 export async function listBroadcastPage(
   tenantId: string,
   filter: BroadcastFilter = {},
 ) {
+  const status = CAMPAIGN_STATUSES.includes(filter.status ?? "")
+    ? filter.status
+    : undefined;
   const where: Prisma.BroadcastCampaignWhereInput = {
     tenantId,
     ...(filter.query
@@ -21,11 +116,14 @@ export async function listBroadcastPage(
           },
         }
       : {}),
-    ...(["draft", "queued", "paused", "completed", "cancelled"].includes(
-      filter.status ?? "",
-    )
-      ? { status: filter.status }
+    ...(periodRange(filter.from, filter.to)
+      ? { createdAt: periodRange(filter.from, filter.to) }
       : {}),
+    // Rascunho descartado (cancelado sem nunca ter sido confirmado) só aparece
+    // quando a pessoa filtra por cancelados.
+    ...(status
+      ? { status }
+      : { NOT: { status: "cancelled", confirmedAt: null } }),
   };
   const total = await prisma.broadcastCampaign.count({ where });
   const pages = Math.max(1, Math.ceil(total / 20));
@@ -33,73 +131,29 @@ export async function listBroadcastPage(
     pages,
     Math.max(1, Number.isInteger(filter.page) ? filter.page! : 1),
   );
-  const [campaigns, health] = await Promise.all([
+  const [campaigns, health, active] = await Promise.all([
     prisma.broadcastCampaign.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 20,
       skip: (page - 1) * 20,
-      select: {
-        id: true,
-        name: true,
-        status: true,
-        createdAt: true,
-        error: true,
-        scheduledAt: true,
-        timezone: true,
-        windowStart: true,
-        windowEnd: true,
-        nextAttemptAt: true,
-        confirmedByLabel: true,
-        confirmedAt: true,
-        recipients: {
-          where: { isTest: false },
-          select: {
-            status: true,
-            deliveryStatus: true,
-            repliedAt: true,
-            qualifiedAt: true,
-            appointmentId: true,
-          },
-        },
-      },
+      select: summarySelect,
     }),
     getBroadcastWorkerHealth(),
+    prisma.broadcastCampaign.count({ where: { tenantId, status: "queued" } }),
   ]);
-  const items = campaigns.map(
-    ({
-      recipients,
-      createdAt,
-      scheduledAt,
-      nextAttemptAt,
-      confirmedAt,
-      ...campaign
-    }) => ({
-      ...campaign,
-      createdAt: createdAt.toISOString(),
-      scheduledAt: scheduledAt?.toISOString() ?? null,
-      nextAttemptAt: nextAttemptAt.toISOString(),
-      confirmedAt: confirmedAt?.toISOString() ?? null,
-      total: recipients.length,
-      sent: recipients.filter((r) => r.status === "sent").length,
-      failed: recipients.filter((r) => r.status === "failed").length,
-      unknown: recipients.filter((r) => r.status === "unknown").length,
-      skipped: recipients.filter(
-        (r) => r.status === "skipped" || r.status === "cancelled",
-      ).length,
-      delivered: recipients.filter((r) =>
-        ["delivered", "read"].includes(r.deliveryStatus ?? ""),
-      ).length,
-      read: recipients.filter((r) => r.deliveryStatus === "read").length,
-      deliveryFailed: recipients.filter((r) => r.deliveryStatus === "failed")
-        .length,
-      replies: recipients.filter((r) => r.repliedAt).length,
-      opportunities: recipients.filter((r) => r.qualifiedAt).length,
-      appointments: recipients.filter((r) => r.appointmentId).length,
-    }),
-  );
-  return { items, page, pages, total, health };
+  return { items: campaigns.map(summarize), page, pages, total, health, active };
 }
+
+/** Um disparo da conta, com as mesmas contagens da lista. */
+export async function getBroadcastSummary(tenantId: string, id: string) {
+  const campaign = await prisma.broadcastCampaign.findFirst({
+    where: { id, tenantId },
+    select: summarySelect,
+  });
+  return campaign ? summarize(campaign) : null;
+}
+
 export async function listBroadcasts(tenantId: string) {
   return (await listBroadcastPage(tenantId)).items;
 }
