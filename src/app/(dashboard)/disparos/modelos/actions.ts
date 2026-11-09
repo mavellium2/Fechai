@@ -10,6 +10,7 @@ import {
   type TemplateDraftErrors,
 } from "@/modules/broadcasts/template-draft";
 import { MetaTemplateRejected } from "@/modules/whatsapp/meta";
+import { recordTemplateCreated, withCreatedAt } from "@/modules/broadcasts/template-log";
 
 const NOT_CONNECTED =
   "Conecte a API oficial da Meta em Integrações para criar modelos.";
@@ -22,7 +23,10 @@ export async function listMessageTemplates(): Promise<
   const connection = await getBroadcastConnection(tenantId);
   if (!connection) return { ok: false, error: NOT_CONNECTED };
   try {
-    return { ok: true, templates: await connection.provider.listManagedTemplates() };
+    return {
+      ok: true,
+      templates: await withCreatedAt(tenantId, await connection.provider.listManagedTemplates()),
+    };
   } catch (error) {
     console.error("[modelos] falha ao listar modelos da Meta", error);
     return {
@@ -74,6 +78,7 @@ export async function createMessageTemplate(
     const created = await connection.provider.createMessageTemplate(
       templatePayload(checked.draft),
     );
+    await recordTemplateCreated(tenantId, created.id, checked.draft.name);
     revalidatePath("/disparos/modelos");
     return {
       ok: true,

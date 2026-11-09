@@ -1,8 +1,34 @@
 # Disparos · WhatsApp pela Meta
 
-A página `/disparos` importa contatos de Excel/JSON, cria um rascunho com o
-conteúdo de cada mensagem e envia somente depois da confirmação do responsável.
-O arquivo original não é armazenado. O envio usa templates aprovados da Meta.
+A página `/disparos` recebe contatos de três origens — **Meus contatos** (leads
+da conta, com busca, filtro por estágio e "Selecionar esta página"),
+**Digitar ou colar** (um por linha, telefone e nome; colar duas colunas do
+Excel funciona) e **Arquivo** (Excel/JSON) —, cria um rascunho com o conteúdo de
+cada mensagem e envia somente depois da confirmação do responsável. O arquivo
+original não é armazenado. O envio usa templates aprovados da Meta.
+
+Sem arquivo não há colunas: cada espaço `{{n}}` vem do **primeiro nome**
+(padrão), do **nome completo** ou de um **texto fixo** igual para todos
+(`contacts.ts`).
+
+**Quem não tem nome** (só quando a mensagem usa o nome) tem três saídas,
+escolhidas por disparo: **a versão sem o nome** (outro modelo aprovado, com os
+mesmos espaços menos o nome), **um texto no lugar do nome** ou **não enviar**.
+Se existe uma versão aprovada (`findNamelessVersion`: nome
+`<original>_sem_nome` ou o mesmo texto sem o nome), ela vem escolhida. Sem
+versão, a tela oferece "Criar versão sem o nome", que abre o editor com
+`removeVariables` (tira o espaço e arruma a pontuação) para a pessoa revisar e
+mandar aprovar. O disparo guarda a versão em `BroadcastCampaign.namelessTemplate`
+e cada contato diz qual recebe em `BroadcastRecipient.variant`
+(`main`/`nameless`). Envio usa `recipientTemplate`, e confirmar, retomar,
+testar e cada ciclo do worker conferem **todas** as mensagens do disparo
+(`templatesStillApproved`). O teste usa um contato com nome quando houver.
+Schema novo: `db push` + `generate` nos dois processos. A lista passa pela mesma `parseBroadcastRows` do arquivo, então
+valem as mesmas regras de telefone, variável e duplicado. No campo de colar,
+número com formato brasileiro sem DDI e sem `+` é **apontado**, nunca aceito
+(`11 98765-4321` passaria como DDI 1); o botão "Adicionar +55" corrige por
+clique. Na lista da conta, bloqueados e quem pediu para parar aparecem marcados
+e não podem ser escolhidos (`contact-search.ts`, sempre com `tenantId`).
 
 ## Acesso e configuração
 
@@ -23,19 +49,47 @@ O arquivo original não é armazenado. O envio usa templates aprovados da Meta.
   fala pelo QR continua nele até responder pela Meta.
 - Sem conexão, a página mantém o histórico e orienta a configuração.
 
+## Telas
+
+- **`/disparos`** — lista: busca enquanto digita, filtro por situação, quatro
+  números por disparo (enviados, entregues, lidos, responderam) e só a ação
+  principal no cartão (Continuar/Descartar rascunho, Pausar, Retomar). Atualiza
+  sozinha a cada 5 s **só** quando há disparo enviando e a aba está visível. O
+  aviso do serviço de envios aparece só com problema **e** disparo na fila.
+  Rascunho descartado (cancelado sem confirmação) some do filtro "Todos".
+- **`/disparos/novo`** — passo a passo em 4 etapas (mensagem, para quem,
+  revisar e testar, quando enviar), rodapé fixo dizendo o que falta. **Um
+  rascunho só**: voltar e revisar de novo atualiza o mesmo (`draftId`), não cria
+  outro. `?rascunho=id` retoma na revisão. O teste vem preenchido com o telefone
+  do usuário e lembra o último número usado (localStorage).
+- **`/disparos/[id]`** — acompanhamento: números, contatos com filtro por
+  resultado e busca, exportar planilha, Pausar/Retomar e Cancelar (sempre com
+  confirmação). Rascunho redireciona para o passo a passo.
+
+Retornos de ação vão pelo toast (`useSaveFeedback`), nunca por aviso no topo.
+Descartar rascunho apaga se nenhum teste saiu; com teste, cancela (o teste foi
+mensagem real e conta na atribuição).
+
+## Testar no computador (Meta simulada)
+
+Com `BROADCASTS_SIMULATE_META=1` no `.env` e `NODE_ENV` diferente de
+`production`, `getBroadcastConnection` devolve uma Meta falsa
+(`simulation.ts`): três templates de exemplo e envio que só devolve um id —
+nada sai para a internet. No servidor de produção nunca liga. Para ter
+contatos: `npx tsx --env-file=.env scripts/demo-disparos.ts` (só banco local;
+30 contatos por conta, 2 bloqueados, 1 pediu para parar). O worker
+(`npm run worker`) precisa de Redis para a fila andar.
+
 ## Passo a passo para usar
 
-1. Abra **Disparos**, dê um nome à campanha e clique em **Carregar templates**.
-2. Escolha um template aprovado. Se necessário, baixe o modelo Excel ou JSON;
-   ele inclui as variáveis esperadas pelo template escolhido.
-3. **Digitar contatos** (padrão): preencha a tabela, uma linha por contato, com
-   telefone, nome opcional e uma coluna por variável do template. Enter na última
-   linha cria outra; linha em branco é ignorada. Ou **Enviar arquivo**: selecione
-   o arquivo e clique em **Ler colunas do arquivo**, associando a coluna do
-   telefone, o nome opcional e cada variável `{{1}}`, `{{2}}` etc.
-4. Clique em **Importar e revisar**. Corrija as linhas inválidas (na digitação o
-   erro aparece embaixo da própria linha) e importe de novo: uma lista inválida
-   não gera campanha parcial. Duplicados são removidos.
+1. Em **Disparos**, clique em **Novo disparo**.
+2. Escolha uma mensagem aprovada (escolher já avança). Para planilha, o modelo
+   Excel ou JSON baixado já traz as colunas da mensagem escolhida.
+3. Em **Para quem**, escolha **Meus contatos** (lista da conta), **Digitar ou
+   colar** (um por linha) ou **Planilha** (Excel/JSON, associando as colunas).
+   Sem planilha, diga o que vai em cada espaço e o que fazer com quem não tem nome.
+4. Clique em **Revisar**. Contatos inválidos são apontados e nada é criado até
+   corrigir: uma lista inválida não gera campanha parcial. Duplicados são removidos.
 5. Confira os contatos e o texto preenchido. **Enviar teste** envia a mensagem
    do primeiro contato para o número informado, sem iniciar a campanha.
    Use número próprio/autorizado. Cada rascunho permite cinco números de teste,
@@ -59,18 +113,6 @@ O histórico tem busca por nome, filtro de situação, páginas de 20 campanhas 
 **Exportar CSV** de todos os contatos da campanha, com status, datas UTC e autor
 da confirmação. O CSV inclui BOM, separador `;`, aspas escapadas e neutralização
 de fórmulas para abertura no Excel.
-
-## Contatos digitados
-
-`prepareBroadcastManual` (`disparos/actions.ts`) recebe as linhas da tabela
-(`ManualContacts.tsx`) e as passa por `parseBroadcastRows`, **as mesmas regras do
-arquivo**: o cliente só monta as linhas, o servidor decide o que entra. Até 200
-contatos por digitação (acima disso, arquivo); `row` é a posição na tabela, para o
-erro apontar a linha certa. O erro de variável fala "a variável {{N}}", não
-`var_N`, que só existe no arquivo. Na digitação, número brasileiro **sem `+55`** é
-recusado ("Falta o DDI"): sem isso `(11) 98765-4321` passaria como número dos EUA
-(+1). Estrangeiro exige `+` explícito. O arquivo mantém a regra antiga. O rascunho nasce em `createBroadcastDraft`,
-compartilhado com a importação por arquivo.
 
 ## Arquivos e templates
 
@@ -105,7 +147,29 @@ Templates compatíveis: aprovados, texto, cabeçalho/rodapé fixos e até 20 var
 posicionais no corpo. Mídia, botões, variáveis nomeadas e cabeçalho variável ficam
 fora desta versão.
 
-**Criar modelo pelo fechai** (`/disparos/modelos`, mesmo guarda dos Disparos):
+**Telas de modelos** (aba "Modelos de mensagem"): `/disparos/modelos` é a
+lista — filtro por situação com contagem, busca, texto com as variáveis
+destacadas e a ação de cada situação (aprovado → "Usar em disparo", que abre
+`/disparos/novo?modelo=id` já escolhido; recusado → "Corrigir"; todos →
+"Duplicar"). Enquanto houver modelo em análise, a lista se atualiza sozinha.
+`/disparos/modelos/novo` é o editor: propósito em dois cartões (aviso ×
+promoção), texto com etiquetas de variável (nome, data, horário, outro) que já
+trazem o exemplo, título e rodapé recolhidos, nome sugerido pelo texto
+(`suggestTemplateName`) e prévia em balão. Os avisos rodam enquanto digita com
+a **mesma** `validateTemplateDraft` do servidor, mais `variablesOutOfOrder`
+(com "Corrigir numeração") e `looksPromotional` (texto de promoção marcado como
+aviso). `?de=id` abre preenchido para corrigir/duplicar com nome `_v2`, `_v3`…
+— a Meta não edita modelo recusado. A Meta não informa a data de criação:
+`MessageTemplateLog` guarda a dos modelos criados pelo fechai
+(`template-log.ts`, nunca lança) e o filtro "Criado em" usa só ela — modelo
+criado direto na Meta fica sem data e fora do filtro de período, nunca com data
+inventada. Schema novo: `db push` + `generate` nos dois processos.
+
+**Filtros das listas** usam `FilterPopover` (`components/ui/filter-popover.tsx`):
+a tela declara os campos (`select` e `period`) e o componente cuida do botão,
+do cartão, de abrir/fechar, Limpar/Aplicar e das etiquetas removíveis.
+
+**Criar modelo pelo fechai** (`/disparos/modelos/novo`, mesmo guarda dos Disparos):
 o formulário monta exatamente esse formato — `template-draft.ts` valida (nome
 `a-z0-9_`, Utilidade ou Marketing, `pt_BR`, variáveis em sequência, corpo que
 não começa nem termina em variável, um exemplo por variável) e
@@ -131,6 +195,16 @@ para enviar e `renderBroadcast` para o texto que entra na conversa. Mudar o
 formato aceito ou o envio muda também esses lembretes — ver
 `src/modules/scheduling/meta-reminder.ts` e
 `workers/follow-up-worker/clinicorp-reminders.ts`.
+
+**Tempo estimado** (`estimate.ts`, tela "Revisar e enviar"): começo, duração
+e término aproximados, com a mesma faixa diária da fila e o ritmo de
+`BROADCAST_PER_MINUTE` (~60/min, tirado do worker: lotes de 25, 250 ms entre
+envios, ~10 s entre lotes). **Agendar** pede data, "começa às" e "último envio
+às": o horário de início vira também o início da faixa diária, então o que não
+couber até o último envio continua no dia seguinte **no mesmo horário de
+início** (nunca à noite). "Assim que possível" mantém a faixa explícita
+(padrão 09:00–18:00). Mudou o
+ritmo do worker, atualize a constante.
 
 ## Fila, pausa e proteção contra duplicação
 
@@ -184,7 +258,11 @@ atômica entre a Meta e nosso banco nem promessa de exatamente uma entrega.
 Falhas e incertos exigem revisão antes de criar outro disparo.
 
 Antes de cada envio, inclusive teste, são checados bloqueio, pedido para parar,
-conexão e estado da campanha. Falha ao ler bloqueios interrompe o processamento.
+conexão e estado da campanha. **Ignorado não é definitivo enquanto nada saiu**:
+testar de novo um número de teste ignorado reconfere o motivo, e desbloquear um
+número em Integrações devolve à fila os destinatários pulados por bloqueio em
+disparos na fila ou pausados (`unblock.ts`, nunca lança). Disparo concluído ou
+cancelado fica como estava. Falha ao ler bloqueios interrompe o processamento.
 Aceitos entram na conversa como `assistant` / `sentBy: human`, sem LLM nem cota
 de respostas da IA. A resposta futura do contato segue o atendimento normal.
 Testes são mensagens reais e entram no histórico, mas seus destinatários não

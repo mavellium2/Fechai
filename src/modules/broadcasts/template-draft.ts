@@ -157,8 +157,12 @@ export type ManagedTemplate = {
   language: string;
   status: string;
   category: string;
+  header: string;
   body: string;
+  footer: string;
   rejectedReason: string | null;
+  /** Quando foi criado pelo fechai (a Meta não informa); `null` = desconhecido. */
+  createdAt?: string | null;
 };
 
 export type MetaManagedTemplateRecord = {
@@ -180,7 +184,9 @@ export function managedTemplate(raw: MetaManagedTemplateRecord): ManagedTemplate
     language: raw.language ?? "",
     status: raw.status ?? "",
     category: raw.category ?? "",
+    header: raw.components?.find((c) => c.type === "HEADER")?.text ?? "",
     body: raw.components?.find((c) => c.type === "BODY")?.text ?? "",
+    footer: raw.components?.find((c) => c.type === "FOOTER")?.text ?? "",
     rejectedReason: reason,
   };
 }
@@ -205,6 +211,73 @@ export function templateStatusLabel(status: string): {
     default:
       return { label: status ? status.toLowerCase() : "sem status", tone: "neutral" };
   }
+}
+
+/**
+ * Renumera as variáveis pela ordem em que aparecem (`{{3}} … {{1}}` vira
+ * `{{1}} … {{2}}`). A mesma variável repetida continua com o mesmo número.
+ * Devolve também o mapa novo → antigo, para a tela mover os exemplos junto.
+ */
+export function renumberVariables(body: string): { body: string; order: number[] } {
+  const order: number[] = [];
+  const next = body.replace(/{{(\d+)}}/g, (_, n) => {
+    const old = Number(n);
+    let index = order.indexOf(old);
+    if (index < 0) index = order.push(old) - 1;
+    return `{{${index + 1}}}`;
+  });
+  return { body: next, order };
+}
+
+/**
+ * Tira variáveis do texto e arruma a pontuação em volta, para a "versão sem o
+ * nome": `Oi {{1}}! Aqui…` → `Oi! Aqui…`; `Olá, {{1}}, tudo bem?` → `Olá, tudo
+ * bem?`. As que sobram são renumeradas. É um ponto de partida: a pessoa revisa
+ * no editor antes de mandar para a Meta.
+ */
+export function removeVariables(body: string, slots: number[]): string {
+  let text = body;
+  for (const n of slots) text = text.replace(new RegExp(`[ \\t]*\\{\\{${n}\\}\\}`, "g"), "");
+  text = text
+    .replace(/[ \t]+([,!?.;:])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/,\s*([!?.])/g, "$1")
+    .replace(/([!?.])[ \t]*,/g, "$1")
+    .split("\n")
+    .map((line) => line.replace(/^[ \t]*,[ \t]*/, "").replace(/,[ \t]*$/, "").replace(/[ \t]{2,}/g, " ").trim())
+    .join("\n")
+    .trim();
+  text = text.charAt(0).toUpperCase() + text.slice(1);
+  return renumberVariables(text).body;
+}
+
+/** Variáveis fora de sequência (ex.: `{{1}}` e `{{3}}`) — dá para corrigir com um clique. */
+export function variablesOutOfOrder(body: string): boolean {
+  const seen = [...body.matchAll(/{{(\d+)}}/g)].map((m) => Number(m[1]));
+  const firstSeen = [...new Set(seen)];
+  return firstSeen.some((n, i) => n !== i + 1);
+}
+
+/** Nome sugerido a partir das primeiras palavras do texto, sem as variáveis. */
+export function suggestTemplateName(body: string): string {
+  const words = body
+    .replace(/{{\d+}}/g, " ")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .match(/[a-z0-9]{3,}/g);
+  return templateName((words ?? []).slice(0, 4).join("_"));
+}
+
+const PROMOTIONAL =
+  /\b(desconto|promo[cç][aã]o|promocional|oferta|gr[aá]tis|cupom|imperd[ií]vel|black friday|liquida[cç][aã]o|aproveite|\d+\s?%)/i;
+
+/**
+ * Texto com cara de promoção numa categoria Utilidade: a Meta costuma recusar
+ * ou trocar para Marketing. Só aviso — quem decide é a Meta.
+ */
+export function looksPromotional(text: string): boolean {
+  return PROMOTIONAL.test(text);
 }
 
 export function templateCategoryLabel(category: string): string {

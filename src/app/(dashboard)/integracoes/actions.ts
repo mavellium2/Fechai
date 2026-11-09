@@ -46,6 +46,7 @@ import {
 } from "@/modules/scheduling/icloud";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/crypto";
 import { recordAudit, recordChange } from "@/modules/audit/log";
+import { reopenUnblockedRecipients } from "@/modules/broadcasts/unblock";
 
 type ConnectResult = {
   ok: boolean;
@@ -590,13 +591,25 @@ export async function blockWhatsappNumber(
 export async function unblockWhatsappNumber(id: string): Promise<WhatsappControlResult> {
   const { tenantId } = await requireTenant();
 
+  const row = await prisma.whatsappBlockedNumber.findFirst({
+    where: { id, tenantId },
+    select: { phone: true },
+  });
   // deleteMany com o tenantId no where: um id de outra conta apaga 0 linhas em
   // vez de apagar a linha alheia.
   const { count } = await prisma.whatsappBlockedNumber.deleteMany({ where: { id, tenantId } });
-  if (!count) return { ok: false, error: "Esse número não está na lista." };
+  if (!count || !row) return { ok: false, error: "Esse número não está na lista." };
 
+  const reopened = await reopenUnblockedRecipients(tenantId, row.phone);
   revalidatePath("/integracoes");
-  return { ok: true, info: "Número desbloqueado. O agente volta a responder." };
+  revalidatePath("/disparos");
+  return {
+    ok: true,
+    info:
+      reopened > 0
+        ? `Número desbloqueado. O agente volta a responder e ${reopened === 1 ? "1 envio pendente voltou" : `${reopened} envios pendentes voltaram`} para a fila de Disparos.`
+        : "Número desbloqueado. O agente volta a responder.",
+  };
 }
 
 // --------------------------------------------------------- widget do site
