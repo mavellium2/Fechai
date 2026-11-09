@@ -15,12 +15,19 @@ import type {
 import type { ColumnMapping } from "@/modules/broadcasts/import";
 import { BroadcastReview, type Review } from "./BroadcastReview";
 import { BroadcastHistory } from "./BroadcastHistory";
+import {
+  ManualContacts,
+  isBlankRow,
+  newManualRow,
+  type ManualRow,
+} from "./ManualContacts";
 import { downloadBase64 } from "./download";
 import {
   downloadBroadcastExample,
   inspectBroadcastImport,
   loadBroadcastTemplates,
   prepareBroadcast,
+  prepareBroadcastManual,
   refreshBroadcasts,
 } from "./actions";
 
@@ -44,6 +51,8 @@ export function DisparosClient({
     name: "",
     parameters: [],
   });
+  const [mode, setMode] = useState<"file" | "manual">("manual");
+  const [rows, setRows] = useState<ManualRow[]>(() => [newManualRow()]);
   const [review, setReview] = useState<Review | null>(null);
   const [data, setData] = useState(initialCampaigns);
   const [filter, setFilter] = useState<BroadcastFilter>({ page: 1 });
@@ -55,6 +64,19 @@ export function DisparosClient({
   const reviewPanel = useRef<HTMLDivElement>(null);
   const requestVersion = useRef(0);
   const template = templates.find((t) => t.id === templateId);
+  // Linhas que o servidor recusou na digitação, pelo número na tabela.
+  const rowErrors = new Map(issues.map((i) => [i.row, i.error]));
+  const filledRows = rows.filter((r) => !isBlankRow(r));
+  const manualReady =
+    !!template &&
+    filledRows.length > 0 &&
+    filledRows.every(
+      (r) =>
+        r.phone.trim() &&
+        Array.from({ length: template.parameterCount }).every((_, i) =>
+          (r.parameters[i] ?? "").trim(),
+        ),
+    );
 
   useEffect(() => {
     if (review) {
@@ -128,7 +150,7 @@ export function DisparosClient({
     <div className="space-y-6">
       {error && <Alert tone="danger">{error}</Alert>}
       {info && <Alert tone="success">{info}</Alert>}
-      {issues.length > 0 && (
+      {issues.length > 0 && mode === "file" && (
         <Card>
           <h2 className="font-semibold text-white">
             Corrija as linhas e importe novamente
@@ -162,6 +184,7 @@ export function DisparosClient({
               setName("");
               setFile(null);
               setColumns([]);
+              setRows([newManualRow()]);
               if (fileInput.current) fileInput.current.value = "";
               notify(
                 "Disparo confirmado. Os envios continuarão em segundo plano, dentro do horário escolhido.",
@@ -261,6 +284,38 @@ export function DisparosClient({
                   </Alert>
                 )}
               </div>
+              <div
+                role="group"
+                aria-label="Como adicionar os contatos"
+                className="flex gap-2"
+              >
+                {(
+                  [
+                    ["manual", "Digitar contatos"],
+                    ["file", "Enviar arquivo"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    size="sm"
+                    variant={mode === value ? "default" : "outline"}
+                    aria-pressed={mode === value}
+                    disabled={pending}
+                    onClick={() => {
+                      setMode(value);
+                      setIssues([]);
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              {mode === "manual" ? (
+                <p className="text-sm text-white/60">
+                  Digite os contatos na tabela abaixo, um por linha. Escolha o
+                  template antes para ver as colunas das variáveis.
+                </p>
+              ) : (
               <div>
                 <label
                   htmlFor="broadcast-file"
@@ -308,17 +363,20 @@ export function DisparosClient({
                   Ler colunas do arquivo
                 </Button>
               </div>
+              )}
             </div>
             <div className="space-y-4 rounded-control bg-black/15 p-5">
               <h3 className="text-sm font-semibold text-white">
                 Prepare sua lista
               </h3>
               <p className="text-sm leading-relaxed text-white/65">
-                Inclua DDI e DDD no telefone (ex.: 5511987654321). Depois de ler
-                o arquivo, associe suas colunas ao telefone, ao nome e às
-                variáveis da mensagem. No Excel, guarde telefones como texto.
+                {mode === "manual"
+                  ? "Inclua DDI e DDD no telefone (ex.: +55 11 98765-4321). Cada variável da mensagem precisa ser preenchida em todos os contatos; o nome é opcional."
+                  : "Inclua DDI e DDD no telefone (ex.: 5511987654321). Depois de ler o arquivo, associe suas colunas ao telefone, ao nome e às variáveis da mensagem. No Excel, guarde telefones como texto."}
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div
+                className={mode === "manual" ? "hidden" : "flex flex-wrap gap-2"}
+              >
                 {(["xlsx", "json"] as const).map((format) => (
                   <Button
                     key={format}
@@ -358,7 +416,24 @@ export function DisparosClient({
               )}
             </div>
           </div>
-          {columns.length > 0 && (
+          {mode === "manual" &&
+            (template ? (
+              <div className="space-y-3 border-t border-white/10 pt-5">
+                <h3 className="font-medium text-white">Contatos</h3>
+                <ManualContacts
+                  rows={rows}
+                  onChange={setRows}
+                  parameterCount={template.parameterCount}
+                  errors={rowErrors}
+                  disabled={!connected || pending}
+                />
+              </div>
+            ) : (
+              <p className="border-t border-white/10 pt-5 text-sm text-white/60">
+                Carregue e escolha um template para digitar os contatos.
+              </p>
+            ))}
+          {mode === "file" && columns.length > 0 && (
             <div className="space-y-3 border-t border-white/10 pt-5">
               <h3 className="font-medium text-white">Associe as colunas</h3>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -418,15 +493,50 @@ export function DisparosClient({
               loading={pending}
               disabled={
                 !connected ||
-                !file ||
                 !template ||
                 !name.trim() ||
-                !columns.length ||
-                !mapping.phone ||
-                mapping.parameters.some((p) => !p)
+                (mode === "manual"
+                  ? !manualReady
+                  : !file ||
+                    !columns.length ||
+                    !mapping.phone ||
+                    mapping.parameters.some((p) => !p))
               }
               onClick={() =>
                 run(async () => {
+                  if (mode === "manual") {
+                    if (!template) return;
+                    setIssues([]);
+                    const result = await prepareBroadcastManual({
+                      name,
+                      templateId,
+                      // `row` = posição na tabela, para o erro apontar a linha
+                      // certa mesmo com linhas em branco no meio.
+                      contacts: rows.flatMap((r, i) =>
+                        isBlankRow(r)
+                          ? []
+                          : [
+                              {
+                                row: i + 1,
+                                phone: r.phone,
+                                name: r.name,
+                                parameters: Array.from(
+                                  { length: template.parameterCount },
+                                  (_, p) => r.parameters[p] ?? "",
+                                ),
+                              },
+                            ],
+                      ),
+                    });
+                    if (!result.ok) {
+                      notify(result.error, true);
+                      setIssues(("issues" in result && result.issues) || []);
+                      return;
+                    }
+                    setReview(result);
+                    await refresh();
+                    return;
+                  }
                   if (!file) return;
                   setIssues([]);
                   const form = new FormData();
@@ -437,7 +547,7 @@ export function DisparosClient({
                   const result = await prepareBroadcast(form);
                   if (!result.ok) {
                     notify(result.error, true);
-                    setIssues(result.issues ?? []);
+                    setIssues(("issues" in result && result.issues) || []);
                     return;
                   }
                   setReview(result);
