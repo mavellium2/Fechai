@@ -6,13 +6,12 @@
  * Nada sai para a internet: o "envio" devolve um id falso. Mensagens, contatos
  * e campanhas são gravados no banco local como no fluxo real.
  *
- * Modelos criados ficam num arquivo temporário (o app e o worker são processos
+ * Modelos criados ficam num arquivo em `node_modules/.cache` (o app e o worker são processos
  * diferentes e precisam ver a mesma lista): "em análise" por 20 s, depois
  * aprovados — ou recusados quando o nome contém "recusar", para testar a
  * correção.
  */
-import { readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MetaTemplateRejected, type MetaCloudProvider } from "@/modules/whatsapp/meta";
 import { supportedTemplate, type MetaTemplateRecord } from "./template";
@@ -35,7 +34,10 @@ type StoredTemplate = MetaManagedTemplateRecord & {
 };
 
 const REVIEW_MS = 20_000;
-const STORE = join(tmpdir(), "fechai-meta-simulada.json");
+// Dentro do projeto, não na pasta temporária do sistema (outro usuário da
+// máquina poderia criar o arquivo antes). App e worker rodam da mesma raiz.
+const STORE_DIR = join(process.cwd(), "node_modules", ".cache", "fechai");
+const STORE = join(STORE_DIR, "meta-simulada.json");
 
 const SEED: StoredTemplate[] = [
   {
@@ -124,7 +126,8 @@ const fake = {
       createdAt: Date.now(),
       components: payload.components,
     });
-    writeFileSync(STORE, JSON.stringify(all));
+    mkdirSync(STORE_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(STORE, JSON.stringify(all), { mode: 0o600 });
     return { id, status: "PENDING", category: payload.category };
   },
   async sendBroadcastTemplate(toPhone: string) {
