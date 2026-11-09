@@ -39,8 +39,39 @@ type MetaErrorBody = {
     error_subcode?: number;
     error_user_title?: string;
     error_user_msg?: string;
+    error_data?: { details?: string };
   };
 };
+
+/** Devolve a orientação que a Meta preparou para a pessoa, sem persistir o JSON bruto. */
+function broadcastErrorMessage(status: number, body: MetaErrorBody): string {
+  const error = body.error;
+  const code = error?.code;
+  const subcode = error?.error_subcode;
+  const metaMessage = error?.error_user_msg?.replace(/\s+/g, " ").trim();
+  const metaTitle = error?.error_user_title?.replace(/\s+/g, " ").trim();
+  const metaDetails = error?.error_data?.details?.replace(/\s+/g, " ").trim();
+
+  if (code === 10) {
+    const guidance =
+      "Confira em Integrações se o token tem acesso à conta do WhatsApp e ao número remetente, com a permissão whatsapp_business_messaging.";
+    const exactReason = metaMessage ?? metaDetails;
+    const detail = exactReason && exactReason.length <= 240 ? ` ${exactReason}` : "";
+    return `A Meta negou a permissão para enviar. ${guidance}${detail}${subcode ? ` (código 10, detalhe ${subcode})` : " (código 10)"}`;
+  }
+
+  if (code === 190)
+    return "O token da Meta expirou ou foi revogado. Atualize as credenciais em Integrações.";
+
+  const exactReason = metaMessage ?? metaDetails;
+  if (exactReason && exactReason.length <= 300)
+    return `${metaTitle && metaTitle.length <= 100 ? `${metaTitle}: ` : ""}${exactReason}`;
+
+  const reference = [code ? `código ${code}` : null, subcode ? `detalhe ${subcode}` : null]
+    .filter(Boolean)
+    .join(", ");
+  return `A Meta recusou o envio (${status}${reference ? `, ${reference}` : ""}). A resposta não trouxe uma orientação específica.`;
+}
 
 function graphVersion(): string {
   const configured = (
@@ -214,9 +245,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         throw new Error("A Meta não confirmou o resultado do envio.");
       const data = (await response.json().catch(() => ({}))) as MetaErrorBody;
       // Não persistir corpo bruto: pode conter telefone, credencial ou conteúdo.
-      throw new MetaBroadcastRejected(
-        `A Meta recusou o envio (${response.status}${data.error?.code ? `, código ${data.error.code}` : ""}).`,
-      );
+      throw new MetaBroadcastRejected(broadcastErrorMessage(response.status, data));
     }
     const data = (await response.json()) as { messages?: { id?: string }[] };
     const id = data.messages?.[0]?.id;
