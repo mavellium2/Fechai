@@ -106,11 +106,16 @@ Giunco Junior**, conta **Thalita – Instituto do Sorriso**, número terminado e
   revalida a liberação antes de gravar e antes de ativar. Locks distribuídos e
   transação serializável protegem concorrência; outra conta não pode vincular
   a mesma WABA/número por esse fluxo. A Evolution não é modificada.
-- Sincronização de contatos e histórico é solicitada uma vez. A coluna JSON
-  guarda o estado e o `request_id` de cada pedido, sem conteúdo pessoal. Se
-  houver timeout ou falha de persistência depois da chamada, fica `unknown`:
-  **não reenviar automaticamente**. A equipe precisa conferir os retornos com
-  a Meta antes de mexer nesse registro. Não apagar o JSON para forçar retry.
+- Sincronização de contatos e histórico é solicitada **uma vez** por
+  integração. A coluna JSON guarda o estado de cada pedido, sem conteúdo
+  pessoal: `requested` (aceito, com `request_id`), `refused` (a Meta respondeu
+  com erro — comum ao **refazer** a conexão de um número já sincronizado, porque
+  a Meta só aceita o pedido logo após a primeira conexão) ou `unknown` (timeout,
+  sem confirmação). Nenhum dos três é pedido de novo, e **nenhum impede a
+  conexão de ser concluída**: o Fechai não importa esse histórico, então a
+  sincronização não pode prender a conta como desconectada (foi o que
+  acontecia: a falha deixava a linha `disconnected` e travava também a chave
+  manual e o "Reconectar"). Não apagar o JSON para forçar outro pedido.
 - O Fechai reconhece os webhooks de histórico/contatos sem importar seu
   conteúdo. Eles nunca entram no agente, nas campanhas ou nos relatórios.
   Não existe promessa de importação do histórico neste recurso.

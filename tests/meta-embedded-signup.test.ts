@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decryptSecret } from "@/lib/crypto";
+import { SignupError } from "@/modules/whatsapp/embedded-signup-graph";
 import {
   hasPendingCoexistence,
   isRepeatedCoexistenceRemoval,
@@ -236,9 +237,16 @@ describe("Conclusão segura e sincronizações únicas", () => {
     expect(isRepeatedCoexistenceRemoval(next, 1792000001)).toBe(false);
     expect(hasPendingCoexistence(existing, assets.phoneNumberId)).toBe(false);
     expect(hasPendingCoexistence(removed, assets.phoneNumberId)).toBe(true);
+    // Etapa já tentada (incerta ou recusada) não prende a conta.
     expect(
       hasPendingCoexistence(
         { ...existing, contacts: { status: "unknown" } },
+        assets.phoneNumberId,
+      ),
+    ).toBe(false);
+    expect(
+      hasPendingCoexistence(
+        { phoneNumberId: assets.phoneNumberId, contacts: { status: "requested", requestId: "x" } },
         assets.phoneNumberId,
       ),
     ).toBe(true);
@@ -338,24 +346,43 @@ describe("Conclusão segura e sincronizações únicas", () => {
     expect(mocks.upsert).not.toHaveBeenCalled();
     expect(mocks.updateMany).not.toHaveBeenCalled();
   });
-  it("resultado incerto fica no banco e não é reenviado ao tentar concluir de novo", async () => {
+  it("resultado incerto fica no banco, não é reenviado e não impede a conexão", async () => {
     const id = await authorized();
     mocks.graph.mockImplementation(async (path: string) => {
       if (path.endsWith("smb_app_data"))
         throw new Error("timeout-after-accept");
       return { success: true };
     });
-    await expect(finishEmbeddedSignup(actor, id, assets)).rejects.toThrow();
+    await finishEmbeddedSignup(actor, id, assets);
     expect(mocks.row?.metaCoexistenceSync).toMatchObject({
       contacts: { status: "unknown" },
+      history: { status: "unknown" },
     });
-    await expect(finishEmbeddedSignup(actor, id, assets)).rejects.toThrow(
-      "antes de repetir",
+    expect(mocks.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "connected" } }),
     );
+    // Outra conclusão (reautorização) nunca pede de novo.
+    const again = await authorized();
+    await finishEmbeddedSignup(actor, again, assets).catch(() => {});
     expect(
       mocks.graph.mock.calls.filter((c) => c[0].endsWith("smb_app_data")),
-    ).toHaveLength(1);
-    expect(mocks.updateMany).not.toHaveBeenCalled();
+    ).toHaveLength(2);
+  });
+  it("recusa da Meta (já sincronizado antes) vira 'recusado' e a conexão é concluída", async () => {
+    const id = await authorized();
+    mocks.graph.mockImplementation(async (path: string) => {
+      if (path.endsWith("smb_app_data"))
+        throw new SignupError("recusado", 502, true);
+      return { success: true };
+    });
+    await finishEmbeddedSignup(actor, id, assets);
+    expect(mocks.row?.metaCoexistenceSync).toMatchObject({
+      contacts: { status: "refused" },
+      history: { status: "refused" },
+    });
+    expect(mocks.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "connected" } }),
+    );
   });
   it("desconexão durante a chamada da Meta vence a ativação e preserva o checkpoint incerto", async () => {
     const id = await authorized();

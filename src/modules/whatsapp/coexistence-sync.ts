@@ -1,4 +1,10 @@
-export type SyncStep = { status: "unknown" | "requested"; requestId?: string };
+/**
+ * `requested`: a Meta aceitou (tem `requestId`). `refused`: a Meta respondeu com
+ * erro — em geral porque a sincronização só é aceita uma vez, logo após a
+ * primeira conexão. `unknown`: sem confirmação (timeout). Nenhum dos três é
+ * pedido de novo, e nenhum impede a conexão de ser concluída.
+ */
+export type SyncStep = { status: "unknown" | "requested" | "refused"; requestId?: string };
 export type CoexistenceSync = {
   phoneNumberId: string;
   contacts?: SyncStep;
@@ -20,11 +26,14 @@ function object(value: unknown): Record<string, unknown> | null {
 function step(value: unknown): SyncStep | undefined {
   if (value === undefined) return;
   const record = object(value);
-  return record?.status === "requested" &&
+  if (
+    record?.status === "requested" &&
     typeof record.requestId === "string" &&
     record.requestId
-    ? { status: "requested", requestId: record.requestId }
-    : { status: "unknown" }; // Registro incompleto nunca autoriza outro pedido.
+  )
+    return { status: "requested", requestId: record.requestId };
+  if (record?.status === "refused") return { status: "refused" };
+  return { status: "unknown" }; // Registro incompleto nunca autoriza outro pedido.
 }
 
 function parse(value: unknown, phoneNumberId: string): CoexistenceSync {
@@ -77,11 +86,9 @@ export function hasPendingCoexistence(
 ): boolean {
   if (object(value)?.phoneNumberId !== phoneNumberId) return false;
   const sync = parse(value, phoneNumberId);
-  return (
-    Boolean(sync.offboardedAt) ||
-    sync.contacts?.status !== "requested" ||
-    sync.history?.status !== "requested"
-  );
+  // Pendente = a conexão pelo botão ainda não tentou as duas etapas. Etapa
+  // recusada ou incerta já foi tentada: não prende a conta.
+  return Boolean(sync.offboardedAt) || !sync.contacts || !sync.history;
 }
 
 export function isRepeatedCoexistenceRemoval(

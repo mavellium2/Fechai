@@ -171,29 +171,36 @@ async function initiateSync(
   sync: CoexistenceSync,
   step: "contacts" | "history",
 ) {
-  if (sync[step]?.status === "requested") return;
-  if (sync[step]?.status === "unknown")
-    throw new SignupError(
-      "A confirmação da sincronização está pendente. A equipe do Fechai precisa conferir o retorno da Meta antes de repetir essa etapa.",
-      409,
-    );
-  // Esta API aceita uma solicitação por integração. Nunca repetir resultado incerto.
+  // Esta API aceita uma solicitação por integração: o que já foi tentado
+  // (aceito, recusado ou incerto) nunca é pedido de novo.
+  if (sync[step]) return;
   sync[step] = { status: "unknown" };
   await saveSyncCheckpoint(row, sync);
-  const result = await signupGraph(
-    `${sync.phoneNumberId}/smb_app_data`,
-    token,
-    {
-      messaging_product: "whatsapp",
-      sync_type: step === "contacts" ? "smb_app_state_sync" : "history",
-    },
-  );
-  if (typeof result.request_id !== "string" || !result.request_id)
-    throw new SignupError(
-      "A Meta não confirmou a solicitação de sincronização. Peça à equipe do Fechai para conferir a conexão.",
-      502,
+  // A sincronização traz histórico do celular que o Fechai não importa: falhar
+  // aqui não pode impedir a conexão (antes prendia a conta como desconectada).
+  let result: { request_id?: unknown };
+  try {
+    result = await signupGraph(
+      `${sync.phoneNumberId}/smb_app_data`,
+      token,
+      {
+        messaging_product: "whatsapp",
+        sync_type: step === "contacts" ? "smb_app_state_sync" : "history",
+      },
     );
-  sync[step] = { status: "requested", requestId: result.request_id };
+  } catch (error) {
+    const refused = error instanceof SignupError && error.refusedByMeta;
+    console.error(`[meta signup] sincronização "${step}" ${refused ? "recusada" : "sem confirmação"}`);
+    if (refused) {
+      sync[step] = { status: "refused" };
+      await saveSyncCheckpoint(row, sync);
+    }
+    return;
+  }
+  sync[step] =
+    typeof result.request_id === "string" && result.request_id
+      ? { status: "requested", requestId: result.request_id }
+      : { status: "unknown" };
   await saveSyncCheckpoint(row, sync);
 }
 
