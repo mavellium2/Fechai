@@ -389,3 +389,37 @@ function bunnyPathFromUrl(url: string | null): string | null {
     return null;
   }
 }
+
+export type AdminSetPasswordResult =
+  | { ok: true; email: string; tenantId: string; tempPassword?: string }
+  | { ok: false; error: string };
+
+/**
+ * Troca a senha de um usuário comum (papel OWNER) pelo admin.
+ *
+ * `password` vazio gera uma senha provisória que já nasce dentro da política e
+ * a devolve **uma única vez** (`tempPassword`); com senha digitada, ela segue a
+ * mesma regra de todo mundo (validada na action). Contas de admin
+ * (SUPERADMIN) ficam de fora: uma conta de plataforma não pode ter a senha
+ * trocada por outra — quem quiser trocar a própria usa `/configuracoes`.
+ *
+ * Só grava o hash. Sessões já abertas (JWT) seguem valendo até expirar; o
+ * usuário usa a nova senha no próximo login.
+ */
+export async function adminSetUserPassword(
+  userId: string,
+  password: string,
+): Promise<AdminSetPasswordResult> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, role: true, tenantId: true },
+  });
+  if (!user) return { ok: false, error: "Usuário não encontrado." };
+  if (user.role === "SUPERADMIN")
+    return { ok: false, error: "Não é permitido trocar a senha de uma conta do admin." };
+
+  const tempPassword = password ? undefined : generatePassword();
+  const passwordHash = await bcrypt.hash(password || tempPassword!, BCRYPT_COST);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  return { ok: true, email: user.email, tenantId: user.tenantId, tempPassword };
+}

@@ -183,6 +183,7 @@ export default async function ContasPage({
                   planIsTrial={planOf(t.planKey).trialDays != null}
                   isAdminAccount={t.users.some((u) => u.role === "SUPERADMIN")}
                   ownerUserId={t.users.find((u) => u.role === "OWNER")?.id ?? t.users[0]?.id}
+                  users={t.users}
                   createdAt={t.createdAt.toLocaleDateString("pt-BR")}
                   counts={{
                     users: t._count.users,

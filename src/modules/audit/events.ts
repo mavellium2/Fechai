@@ -281,6 +281,11 @@ export const AUDIT_EVENTS = {
     group: "admin",
   },
   "admin.account_created": { label: "Criou uma conta pelo painel", kind: "create", group: "admin" },
+  "admin.user_password_changed": {
+    label: "Trocou a senha de um usuário pelo painel",
+    kind: "update",
+    group: "admin",
+  },
   "admin.gap_responders_changed": { label: "Definiu quem responde a fila de perguntas", kind: "update", group: "admin" },
   "admin.tenant_export_requested": { label: "Solicitou download dos dados da conta", kind: "access", group: "admin" },
   "admin.tenant_deleted": {

@@ -12,6 +12,7 @@ import { SidePanel } from "@/components/ui/side-panel";
 import { Switch } from "@/components/ui/switch";
 import { FormFeedback } from "@/components/ui/alert";
 import { TenantDownloadButton } from "./TenantDownloadButton";
+import { UserPasswords, type TenantUser } from "./UserPasswords";
 import {
   suspendTenant,
   changePlan,
@@ -45,6 +46,8 @@ type Props = {
   isAdminAccount?: boolean;
   /** Usuário usado ao clicar em "Ver como" (dono da conta). */
   ownerUserId?: string;
+  /** Usuários da conta, para o admin trocar a senha dos comuns. */
+  users?: TenantUser[];
   createdAt: string;
   counts: { users: number; leads: number; conversations: number };
 };
@@ -653,6 +656,8 @@ export function TenantRow(t: Props) {
                 </div>
               </section>
             )}
+
+            <UserPasswords users={t.users ?? []} />
 
             <section className="border-t border-white/10 pt-5">
               <p className="text-sm font-medium text-white/85">WhatsApp</p>

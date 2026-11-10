@@ -15,6 +15,7 @@ import {
   adminSetPriceOverride,
   adminSetTrialEndsAt,
   adminCreateAccount,
+  adminSetUserPassword,
   deleteTenant,
 } from "@/modules/admin/service";
 import { strongPassword } from "@/lib/password-schema";
@@ -523,6 +524,43 @@ export async function createAccount(
   revalidatePath("/admin/contas");
   revalidatePath("/admin/logs");
   return { ok: true, email: parsed.data.email, tempPassword: result.tempPassword };
+}
+
+export type AdminPasswordResult = { ok: boolean; error?: string; email?: string; tempPassword?: string };
+
+/**
+ * Admin troca a senha de um usuário comum. Vazio gera uma provisória, mostrada
+ * uma vez; digitada, segue a política de senha forte. A senha nunca vai para a
+ * trilha — só o fato de ter sido trocada, por quem e para quem.
+ */
+export async function adminChangeUserPassword(
+  userId: string,
+  password: string,
+): Promise<AdminPasswordResult> {
+  await requireSuperadmin();
+
+  const parsed = z
+    .object({
+      userId: z.string().min(1),
+      password: z.union([z.literal(""), strongPassword()]),
+    })
+    .safeParse({ userId, password: typeof password === "string" ? password : "" });
+  if (!parsed.success)
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const result = await adminSetUserPassword(parsed.data.userId, parsed.data.password);
+  if (!result.ok) return result;
+
+  await recordAudit({
+    event: "admin.user_password_changed",
+    target: { type: "User", id: parsed.data.userId, label: result.email },
+    meta: { email: result.email, senhaGerada: Boolean(result.tempPassword) },
+    tenantId: result.tenantId,
+  });
+
+  revalidatePath("/admin/contas");
+  revalidatePath("/admin/logs");
+  return { ok: true, email: result.email, tempPassword: result.tempPassword };
 }
 
 /** Troca o modelo de IA da plataforma. Vale para o próximo turno do agente. */
