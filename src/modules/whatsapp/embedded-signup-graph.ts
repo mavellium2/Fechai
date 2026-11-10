@@ -6,6 +6,11 @@ export class SignupError extends Error {
   constructor(
     message: string,
     public status = 422,
+    /**
+     * A Meta respondeu com erro (pedido não aceito). `false` = timeout, rede
+     * ou resposta ilegível: não dá para saber se a Meta aceitou.
+     */
+    public refusedByMeta = false,
   ) {
     super(message);
   }
@@ -39,6 +44,7 @@ export async function signupGraph(
     "appsecret_proof",
     createHmac("sha256", config.appSecret).update(token).digest("hex"),
   );
+  let refused = false;
   try {
     const response = await fetch(url, {
       method: body ? "POST" : "GET",
@@ -51,12 +57,17 @@ export async function signupGraph(
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     const data = await response.json();
-    if (!response.ok || data.error) throw new Error("graph");
+    if (!response.ok || data.error) {
+      // Resposta da Meta com erro explícito: o pedido não foi aceito.
+      refused = Boolean(data?.error) || (response.status >= 400 && response.status < 500);
+      throw new Error("graph");
+    }
     return data;
   } catch {
     throw new SignupError(
       "Não foi possível concluir a verificação com a Meta. Tente novamente.",
       502,
+      refused,
     );
   }
 }
