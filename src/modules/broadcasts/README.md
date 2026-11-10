@@ -143,9 +143,49 @@ de fórmulas para abertura no Excel.
 ]
 ```
 
-Templates compatíveis: aprovados, texto, cabeçalho/rodapé fixos e até 20 variáveis
-posicionais no corpo. Mídia, botões, variáveis nomeadas e cabeçalho variável ficam
-fora desta versão.
+Templates compatíveis: aprovados, cabeçalho de texto fixo **ou de mídia**,
+rodapé fixo e até 20 variáveis posicionais no corpo. Botões, variáveis nomeadas,
+cabeçalho de texto com variável e cabeçalho de localização ficam fora.
+
+## Imagem, vídeo e documento (`media.ts`, `media-storage.ts`)
+
+A Meta só aceita mídia em disparo **no topo de um modelo aprovado**, em três
+formatos: imagem (JPG/PNG, 5 MB), vídeo (MP4/3GP, 16 MB) e documento (PDF,
+Word, Excel, PowerPoint, TXT; aqui limitado a 30 MB). **Áudio não existe em
+modelo** — só dentro das 24h abertas pelo contato —, por isso não é oferecido.
+
+- `supportedTemplate(raw, { media: true })` aceita o cabeçalho de mídia e marca
+  `mediaFormat`. **Só os Disparos pedem `media: true`** (`listBroadcastTemplates({ media: true })`
+  nas actions e no worker); os lembretes do Clinicorp/consulta continuam vendo só
+  modelos de texto, porque não têm de onde tirar o arquivo.
+- `sameBroadcastTemplate` compara também `mediaFormat` (ausente = texto, para
+  rascunhos antigos continuarem iguais). A versão sem nome precisa do mesmo tipo.
+- **De onde vem o arquivo** (`BroadcastCampaign.media`, `CampaignMedia`):
+  - **Mesmo para todos** (`mode: "file"`, vale para as três origens de contato):
+    sobe na hora por `uploadBroadcastMedia` para a CDN (Bunny), num caminho
+    aleatório `disparos/<tenantId>/<uuid>.<ext>`. Link público e durável — o id
+    de mídia da Meta vence em 30 dias e quebraria disparo agendado ou pausado.
+    `checkBroadcastMedia` só aceita link com o prefixo da própria conta.
+  - **Link na planilha** (`mode: "column"`, só com planilha): coluna escolhida em
+    "Link do arquivo" (`ColumnMapping.media`; o modelo baixado traz
+    `link_arquivo`). `https`, uma linha, sem usuário/senha; linha sem link
+    válido é apontada como os outros erros. Quem baixa é a Meta, não o servidor.
+- Cada destinatário guarda o próprio `mediaUrl`/`mediaFilename` (o teste copia
+  do contato de exemplo). `send.ts` recusa **antes do claim** mensagem de mídia
+  sem arquivo (`failed`, nada sai). Na Meta o link vai em
+  `components[type=header]` (`document` leva `filename`).
+- Na conversa, `Message.content` leva `[Imagem]`/`[Vídeo]`/`[Documento]` no lugar
+  do topo (`renderBroadcast`). Link que a Meta não conseguir baixar volta como
+  falha de entrega no recibo, nunca como reenvio.
+- **Criar modelo com mídia** (`/disparos/modelos/novo`, "Topo da mensagem"): o
+  exemplo vai direto para a Meta pela Resumable Upload API do app
+  (`uploadTemplateExample`, exige `META_APP_ID` e token do mesmo app) e o modelo
+  leva `example.header_handle`. Sem isso a tela orienta criar no Gerenciador do
+  WhatsApp. Duplicar um modelo de mídia pede o exemplo de novo.
+- Simulação: `folheto_campanha` (imagem) e `orcamento_pdf` (documento); sem CDN
+  configurada, o arquivo vira um link falso (`simulado.invalid`), que nada baixa.
+- Schema novo (`BroadcastCampaign.media`, `BroadcastRecipient.mediaUrl`/`mediaFilename`,
+  todos opcionais): `db push` + `generate` nos dois processos.
 
 **Telas de modelos** (aba "Modelos de mensagem"): `/disparos/modelos` é a
 lista — filtro por situação com contagem, busca, texto com as variáveis

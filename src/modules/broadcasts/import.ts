@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { normalizeBroadcastPhone, broadcastPhoneVariants } from "./phone";
 import { renderBroadcast, type BroadcastTemplate } from "./template";
+import { mediaFilenameFromUrl, mediaLinkProblem } from "./media";
 
 export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 import { MAX_RECIPIENTS } from "./contacts";
@@ -13,11 +14,16 @@ export type ImportedRecipient = {
   content: string;
   /** "nameless" = recebe a versão sem nome do disparo. Ausente = "main". */
   variant?: "main" | "nameless";
+  /** Arquivo do topo (template com mídia). */
+  mediaUrl?: string | null;
+  mediaFilename?: string | null;
 };
 export type ColumnMapping = {
   phone: string;
   name?: string;
   parameters: string[];
+  /** Coluna com o link do arquivo de cada contato (template com mídia). */
+  media?: string;
 };
 export type ImportResult = {
   recipients: ImportedRecipient[];
@@ -60,14 +66,15 @@ export function parseBroadcastRows(
       (mapping.name !== undefined && typeof mapping.name !== "string") ||
       !Array.isArray(mapping.parameters) ||
       mapping.parameters.length !== template.parameterCount ||
-      mapping.parameters.some((p) => typeof p !== "string" || !p))
+      mapping.parameters.some((p) => typeof p !== "string" || !p) ||
+      (mapping.media !== undefined && typeof mapping.media !== "string"))
   )
     throw new Error(
       "Associe o telefone e todas as variáveis às colunas do arquivo.",
     );
   const selected = mapping
     ? new Set(
-        [mapping.phone, mapping.name ?? "", ...mapping.parameters].map(key),
+        [mapping.phone, mapping.name ?? "", mapping.media ?? "", ...mapping.parameters].map(key),
       )
     : null;
   const result: ImportResult = {
@@ -115,6 +122,14 @@ export function parseBroadcastRows(
           return param;
         },
       );
+      // Link por contato: só quando a mensagem tem mídia e a coluna foi escolhida.
+      let media: { mediaUrl: string; mediaFilename: string | null } | null = null;
+      if (template.mediaFormat && mapping?.media) {
+        const link = fields.get(key(mapping.media)) ?? "";
+        const problem = mediaLinkProblem(link);
+        if (problem) throw new Error(problem);
+        media = { mediaUrl: link, mediaFilename: mediaFilenameFromUrl(link) };
+      }
       const content = renderBroadcast(template, parameters);
       if (content.length > 4096)
         throw new Error("Mensagem preenchida acima de 4.096 caracteres.");
@@ -133,7 +148,7 @@ export function parseBroadcastRows(
         continue;
       }
       seen.add(duplicateKey);
-      result.recipients.push({ row, phone, name, parameters, content });
+      result.recipients.push({ row, phone, name, parameters, content, ...media });
     } catch (error) {
       result.issues.push({
         row,

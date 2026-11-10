@@ -26,6 +26,8 @@ import {
   type VariableSource,
 } from "@/modules/broadcasts/contacts";
 import { findNamelessVersion } from "@/modules/broadcasts/template";
+import type { CampaignMedia, UploadedMedia } from "@/modules/broadcasts/media";
+import { MediaPanel, type MediaMode } from "./MediaPanel";
 import { NamelessPanel } from "./NamelessPanel";
 import { ContactPicker, type PickedContacts } from "./ContactPicker";
 import { PasteContacts } from "./PasteContacts";
@@ -52,6 +54,8 @@ export type Review = {
   namelessTemplate?: BroadcastTemplate | null;
   /** Contatos sem nome que ficaram de fora ("não enviar"). */
   skippedNameless?: number;
+  /** Arquivo do topo, quando a mensagem tem mídia. */
+  media?: CampaignMedia | null;
   recipients: ImportedRecipient[];
   duplicates: number;
   recentPhones: string[];
@@ -126,9 +130,16 @@ export function NewBroadcastWizard({
   );
   const [namelessChoice, setNamelessChoice] = useState<NamelessMode | null>(null);
   const [namelessAlt, setNamelessAlt] = useState<string | null>(null);
+  const [media, setMedia] = useState<UploadedMedia | null>(
+    draft?.media?.mode === "file" ? draft.media : null,
+  );
+  const [mediaMode, setMediaMode] = useState<MediaMode>(
+    draft?.media?.mode === "column" ? "column" : "file",
+  );
+  const [mediaUploading, setMediaUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
-  const [mapping, setMapping] = useState<ColumnMapping>({ phone: "", name: "", parameters: [] });
+  const [mapping, setMapping] = useState<ColumnMapping>({ phone: "", name: "", parameters: [], media: "" });
   const [review, setReview] = useState<Review | null>(draft);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [preparing, setPreparing] = useState(false);
@@ -146,7 +157,7 @@ export function NewBroadcastWizard({
 
   const test = useSaveFeedback({ entity: "teste", action: "create" });
   const confirm = useSaveFeedback({ entity: "disparo", action: "create" });
-  const busy = preparing || test.saving || confirm.saving;
+  const busy = preparing || test.saving || confirm.saving || mediaUploading;
 
   async function fetchTemplates() {
     setLoadingTemplates(true);
@@ -196,6 +207,7 @@ export function NewBroadcastWizard({
   /** Escolher a mensagem é a decisão da etapa 1: já segue para a 2. */
   function chooseTemplate(t: BroadcastTemplate) {
     if (t.id !== template?.id) {
+      if (t.mediaFormat !== template?.mediaFormat) setMedia(null);
       setTemplate(t);
       setNamelessChoice(null);
       setNamelessAlt(null);
@@ -229,7 +241,10 @@ export function NewBroadcastWizard({
   const alternatives =
     template && templates && slots.length
       ? templates.filter(
-          (t) => t.id !== template.id && t.parameterCount === variables.length - slots.length,
+          (t) =>
+            t.id !== template.id &&
+            t.parameterCount === variables.length - slots.length &&
+            (t.mediaFormat ?? null) === (template.mediaFormat ?? null),
         )
       : [];
   const suggested =
@@ -245,10 +260,18 @@ export function NewBroadcastWizard({
   // que não couber até o "último envio" continua no dia seguinte no mesmo horário.
   const dailyStart = start === "scheduled" && time ? time : windowStart;
 
+  // Arquivo do topo: o mesmo para todos ou, só com planilha, o link de cada linha.
+  const mediaFromColumn = source === "file" && mediaMode === "column";
+
   // O que falta em cada etapa — o rodapé diz isso em vez de só desligar o botão.
   const missing: string[] = [];
   if (step === 1 && !template) missing.push("escolha a mensagem");
   if (step === 2 && template) {
+    if (template.mediaFormat) {
+      if (mediaFromColumn) {
+        if (columns.length && !mapping.media) missing.push("escolha a coluna com o link do arquivo");
+      } else if (!media) missing.push("escolha o arquivo do topo da mensagem");
+    }
     if (source === "file") {
       if (!file) missing.push("escolha o arquivo");
       else if (!columns.length) missing.push("aguarde a leitura do arquivo");
@@ -295,6 +318,7 @@ export function NewBroadcastWizard({
               contacts,
               variables,
               nameless: { mode: namelessMode, templateId: altId },
+              media: template.mediaFormat ? media : null,
             });
       if (r.ok) {
         // Sem toast de sucesso: a própria etapa seguinte é o retorno.
@@ -325,6 +349,15 @@ export function NewBroadcastWizard({
     form.set("templateId", t.id);
     form.set("file", file!);
     form.set("mapping", JSON.stringify(mapping));
+    if (t.mediaFormat)
+      form.set(
+        "media",
+        JSON.stringify(
+          mediaFromColumn
+            ? { format: t.mediaFormat, mode: "column", column: mapping.media ?? "" }
+            : media,
+        ),
+      );
     if (review) form.set("draftId", review.id);
     return form;
   }
@@ -336,6 +369,7 @@ export function NewBroadcastWizard({
       template: r.template,
       namelessTemplate: r.namelessTemplate ?? null,
       skippedNameless: r.skippedNameless ?? 0,
+      media: r.media ?? null,
       recipients: r.recipients,
       duplicates: r.duplicates,
       recentPhones: r.recentPhones,
@@ -466,7 +500,11 @@ export function NewBroadcastWizard({
                   Trocar
                 </Button>
               </div>
-              <MessagePreview template={template} values={previewValues} />
+              <MessagePreview
+                template={template}
+                values={previewValues}
+                media={mediaFromColumn ? null : media}
+              />
               {sample && source !== "file" && template.parameterCount > 0 && (
                 <p className="text-xs text-white/50">Exemplo para {sample.name || formatPhone(sample.phone)}</p>
               )}
@@ -474,6 +512,18 @@ export function NewBroadcastWizard({
                 <p className="text-xs text-white/55">Os espaços destacados vêm das colunas da planilha.</p>
               )}
             </section>
+            {template.mediaFormat && (
+              <MediaPanel
+                format={template.mediaFormat}
+                mode={mediaFromColumn ? "column" : "file"}
+                onMode={setMediaMode}
+                allowColumn={source === "file"}
+                media={media}
+                onMedia={setMedia}
+                onUploading={setMediaUploading}
+                disabled={busy}
+              />
+            )}
             {source !== "file" && template.parameterCount > 0 && (
               <VariableFields variables={variables} onChange={setVariables} disabled={busy} />
             )}
@@ -549,6 +599,7 @@ export function NewBroadcastWizard({
                 }}
                 mapping={mapping}
                 onMapping={setMapping}
+                mediaColumn={Boolean(template.mediaFormat) && mediaFromColumn}
                 disabled={busy}
               />
             )}
@@ -727,6 +778,10 @@ function autoMapping(available: string[], count: number): ColumnMapping {
     phone: ["telefone", "phone", "whatsapp", "celular"].find((c) => available.includes(c)) ?? "",
     name: ["nome", "name"].find((c) => available.includes(c)) ?? "",
     parameters: Array.from({ length: count }, (_, i) => (available.includes(`var_${i + 1}`) ? `var_${i + 1}` : "")),
+    media:
+      ["link_arquivo", "link", "arquivo", "midia", "url", "imagem", "video", "documento"].find((c) =>
+        available.includes(c),
+      ) ?? "",
   };
 }
 

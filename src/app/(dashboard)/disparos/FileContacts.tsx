@@ -21,6 +21,7 @@ export function FileContacts({
   onColumns,
   mapping,
   onMapping,
+  mediaColumn,
   disabled,
 }: {
   template: BroadcastTemplate;
@@ -30,6 +31,8 @@ export function FileContacts({
   onColumns: (columns: string[]) => void;
   mapping: ColumnMapping;
   onMapping: (mapping: ColumnMapping) => void;
+  /** Mensagem com mídia e "link na planilha": pede a coluna do link. */
+  mediaColumn?: boolean;
   disabled?: boolean;
 }) {
   const [reading, setReading] = useState(false);
@@ -59,7 +62,7 @@ export function FileContacts({
 
   async function example(format: "xlsx" | "json") {
     downloadBase64(
-      await downloadBroadcastExample(format, template.parameterCount),
+      await downloadBroadcastExample(format, template.parameterCount, Boolean(template.mediaFormat)),
       `modelo-disparos.${format}`,
       format === "json"
         ? "application/json"
@@ -108,6 +111,7 @@ export function FileContacts({
           <p className="text-sm text-white/65">
             Baixe o modelo com as colunas certas para esta mensagem. Telefone com
             DDI e DDD (ex.: 5511987654321), guardado como texto no Excel.
+            {template.mediaFormat && " A coluna link_arquivo é usada só no modo “Link na planilha”."}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" disabled={disabled} onClick={() => void example("xlsx")}>
@@ -145,6 +149,15 @@ export function FileContacts({
               disabled={disabled}
               onChange={(name) => onMapping({ ...mapping, name })}
             />
+            {mediaColumn && (
+              <MappingField
+                label="Link do arquivo"
+                value={mapping.media ?? ""}
+                options={options}
+                disabled={disabled}
+                onChange={(media) => onMapping({ ...mapping, media })}
+              />
+            )}
             {mapping.parameters.map((value, i) => (
               <MappingField
                 key={i}

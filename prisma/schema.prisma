@@ -589,6 +589,10 @@ model BroadcastCampaign {
   /// existe quando o disparo usa; os destinatários com `variant: "nameless"`
   /// recebem esta. Revalidada junto com `template` em cada etapa do envio.
   namelessTemplate Json?
+  /// Imagem/vídeo/documento no topo, quando o template tem mídia
+  /// (`modules/broadcasts/media.ts`, `CampaignMedia`): um arquivo para todos
+  /// (`mode: "file"`, guardado na CDN) ou o link de cada contato (`"column"`).
+  media            Json?
   createdAt        DateTime             @default(now())
   confirmedAt      DateTime?
   confirmedBy      String? // id do usuário que confirmou; snapshot preservado
@@ -623,6 +627,10 @@ model BroadcastRecipient {
   /// Qual mensagem este contato recebe: "main" (a do disparo) ou "nameless"
   /// (`BroadcastCampaign.namelessTemplate`, para quem não tem nome).
   variant             String            @default("main")
+  /// Link público do arquivo do topo que este contato recebe (a Meta baixa).
+  /// Null = mensagem sem mídia.
+  mediaUrl            String?
+  mediaFilename       String?
   content             String
   status              String            @default("pending") // pending | sending | sent | failed | unknown | skipped | cancelled
   error               String?

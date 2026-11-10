@@ -60,7 +60,7 @@ export async function scanBroadcasts() {
         );
         continue;
       }
-      const approved = await connection.provider.listBroadcastTemplates();
+      const approved = await connection.provider.listBroadcastTemplates({ media: true });
       if (!templatesStillApproved(campaignTemplates(campaign), approved)) {
         await pauseUnavailable(
           campaign.id,

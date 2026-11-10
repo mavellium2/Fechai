@@ -11,6 +11,12 @@ import {
 } from "@/modules/broadcasts/template-draft";
 import { MetaTemplateRejected } from "@/modules/whatsapp/meta";
 import { recordTemplateCreated, withCreatedAt } from "@/modules/broadcasts/template-log";
+import {
+  cleanFilename,
+  isMediaFormat,
+  mediaFileProblem,
+  mediaMime,
+} from "@/modules/broadcasts/media";
 
 const NOT_CONNECTED =
   "Conecte a API oficial da Meta em Integrações para criar modelos.";
@@ -36,6 +42,37 @@ export async function listMessageTemplates(): Promise<
   }
 }
 
+/**
+ * Arquivo de exemplo do topo (imagem/vídeo/documento). A Meta analisa o modelo
+ * com ele; no envio, cada disparo escolhe o próprio arquivo. Não fica guardado
+ * aqui: vai direto para a Meta, que devolve o identificador.
+ */
+export async function uploadTemplateExample(
+  form: FormData,
+): Promise<{ ok: true; handle: string } | { ok: false; error: string }> {
+  const tenantId = await requireBroadcastAccess();
+  const file = form.get("file");
+  const format = form.get("format");
+  if (!(file instanceof File) || !isMediaFormat(format))
+    return { ok: false, error: "Escolha o arquivo de exemplo." };
+  const problem = mediaFileProblem(format, file);
+  if (problem) return { ok: false, error: problem };
+  const connection = await getBroadcastConnection(tenantId);
+  if (!connection) return { ok: false, error: NOT_CONNECTED };
+  try {
+    const handle = await connection.provider.uploadTemplateExample({
+      bytes: Buffer.from(await file.arrayBuffer()),
+      mime: mediaMime(format, file)!,
+      name: cleanFilename(file.name),
+    });
+    return { ok: true, handle };
+  } catch (error) {
+    if (error instanceof MetaTemplateRejected) return { ok: false, error: error.message };
+    console.error("[modelos] falha ao enviar exemplo de mídia", error);
+    return { ok: false, error: "A Meta não recebeu o arquivo agora. Tente de novo em instantes." };
+  }
+}
+
 export type CreateTemplateState = {
   ok?: boolean;
   error?: string;
@@ -58,6 +95,8 @@ export async function createMessageTemplate(
     name: form.get("name"),
     category: form.get("category"),
     header: form.get("header"),
+    headerMedia: form.get("headerMedia"),
+    headerHandle: form.get("headerHandle"),
     body: form.get("body"),
     footer: form.get("footer"),
     examples: form.getAll("examples"),

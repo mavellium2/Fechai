@@ -55,6 +55,18 @@ export async function sendBroadcastRecipient(
     });
     return false;
   }
+  const template = recipientTemplate(campaign, recipient);
+  // Mensagem com mídia sem arquivo nunca chega à Meta: recusa antes do claim.
+  if (template.mediaFormat && !recipient.mediaUrl) {
+    await prisma.broadcastRecipient.updateMany({
+      where: scope,
+      data: {
+        status: "failed",
+        error: "Falta o arquivo do topo da mensagem. Nenhuma mensagem foi enviada.",
+      },
+    });
+    return false;
+  }
   const claim = await prisma.broadcastRecipient.updateMany({
     where: scope,
     data: { status: "sending", attemptedAt: new Date() },
@@ -101,8 +113,11 @@ export async function sendBroadcastRecipient(
     requestStarted = true;
     const messageId = await fresh.provider.sendBroadcastTemplate(
       recipient.phone,
-      recipientTemplate(campaign, recipient),
+      template,
       recipient.parameters as string[],
+      recipient.mediaUrl
+        ? { link: recipient.mediaUrl, filename: recipient.mediaFilename }
+        : null,
     );
     const saved = await prisma.$transaction([
       prisma.broadcastRecipient.update({

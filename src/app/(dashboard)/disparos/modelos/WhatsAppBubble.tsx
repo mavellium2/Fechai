@@ -1,5 +1,6 @@
 import { Fragment } from "react";
-import { CheckCheck } from "lucide-react";
+import { CheckCheck, FileText, Film, ImageIcon } from "lucide-react";
+import { MEDIA_RULES, type MediaFormat } from "@/modules/broadcasts/media";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,13 +41,18 @@ export function HighlightedText({
 }
 
 /** Como o contato vê no WhatsApp: balão, título em negrito, rodapé discreto. */
+const ICONS: Record<MediaFormat, typeof ImageIcon> = { IMAGE: ImageIcon, VIDEO: Film, DOCUMENT: FileText };
+
 export function WhatsAppBubble({
+  media,
   header,
   body,
   footer,
   values,
   labels,
 }: {
+  /** Topo com arquivo: mostra o espaço onde ele aparece. */
+  media?: MediaFormat | null;
   header: string;
   body: string;
   footer: string;
@@ -57,6 +63,7 @@ export function WhatsAppBubble({
     <div className="rounded-surface border border-white/10 bg-black/20 p-4">
       {body.trim() ? (
         <div className="relative ml-auto max-w-[90%] rounded-2xl rounded-tr-sm bg-white/10 px-3 pb-2 pt-2.5 text-sm leading-relaxed text-white/90 shadow-sm">
+          {media && <MediaPlaceholder format={media} />}
           {header.trim() && <p className="mb-1 font-semibold text-white">{header}</p>}
           <p className="whitespace-pre-wrap break-words">
             <HighlightedText text={body} values={values} labels={labels} />
@@ -72,5 +79,15 @@ export function WhatsAppBubble({
         </p>
       )}
     </div>
+  );
+}
+
+function MediaPlaceholder({ format }: { format: MediaFormat }) {
+  const Icon = ICONS[format];
+  return (
+    <span className="mb-2 flex h-24 items-center justify-center gap-2 rounded-xl bg-black/30 text-xs text-white/55">
+      <Icon size={18} aria-hidden />
+      {MEDIA_RULES[format].label} do disparo
+    </span>
   );
 }

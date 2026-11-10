@@ -21,7 +21,11 @@ Before touching lead-quality logic, read `src/modules/lead-insights/README.md`. 
 Before touching broadcasts, read `src/modules/broadcasts/README.md`. A página e
 todas as actions exigem produto + tenant ativo + `metaWhatsappEnabled`; esconder
 o menu não autoriza acesso. Disparos usam apenas Meta conectada e templates
-aprovados compatíveis. Importação cria **rascunho**, envio só após revisão e
+aprovados compatíveis. **Imagem, vídeo e documento** vão só no topo de modelo
+aprovado com cabeçalho de mídia (`media.ts`): arquivo único na CDN (link só da
+própria conta, `checkBroadcastMedia`) ou link por contato na planilha. Só os
+Disparos listam modelo de mídia (`listBroadcastTemplates({ media: true })`);
+lembretes não. **Áudio não existe em modelo da Meta** — não ofereça. Importação cria **rascunho**, envio só após revisão e
 confirmação. A fila está no banco (`BroadcastCampaign`/`BroadcastRecipient`) e
 roda no worker existente, com claim condicional por destinatário. **Nunca
 reenviar automaticamente resultado `unknown`**: a Meta pode ter aceitado antes

@@ -47,6 +47,46 @@ import { broadcastPhoneVariants, normalizeBroadcastPhone } from "@/modules/broad
 import { sendBroadcastRecipient } from "@/modules/broadcasts/send";
 import { recentlyContacted } from "@/modules/broadcasts/recent";
 import { broadcastCsv } from "@/modules/broadcasts/csv";
+import {
+  isMediaFormat,
+  parseCampaignMedia,
+  type CampaignMedia,
+} from "@/modules/broadcasts/media";
+import {
+  checkBroadcastMedia,
+  storeBroadcastMedia,
+} from "@/modules/broadcasts/media-storage";
+
+/**
+ * Guarda o arquivo do topo ("o mesmo para todos") assim que é escolhido. A
+ * tela devolve o resultado ao preparar o rascunho, e o servidor confere que o
+ * link é desta conta (`checkBroadcastMedia`).
+ */
+export async function uploadBroadcastMedia(form: FormData) {
+  const tenantId = await requireBroadcastAccess();
+  const file = form.get("file");
+  const format = form.get("format");
+  if (!(file instanceof File) || !isMediaFormat(format))
+    return { ok: false as const, error: "Escolha o arquivo." };
+  try {
+    return await storeBroadcastMedia(tenantId, format, file);
+  } catch {
+    return { ok: false as const, error: "Não foi possível guardar o arquivo agora. Tente de novo." };
+  }
+}
+
+/** O mesmo arquivo copiado em cada contato (modo "o mesmo para todos"). */
+function withMedia(parsed: ImportResult, media: CampaignMedia | null): ImportResult {
+  if (media?.mode !== "file") return parsed;
+  return {
+    ...parsed,
+    recipients: parsed.recipients.map((r) => ({
+      ...r,
+      mediaUrl: media.url,
+      mediaFilename: media.filename,
+    })),
+  };
+}
 
 export async function loadBroadcastTemplates() {
   const tenantId = await requireBroadcastAccess();
@@ -60,7 +100,7 @@ export async function loadBroadcastTemplates() {
   try {
     return {
       ok: true as const,
-      templates: await connection.provider.listBroadcastTemplates(),
+      templates: await connection.provider.listBroadcastTemplates({ media: true }),
     };
   } catch (error) {
     return {
@@ -94,8 +134,9 @@ export async function prepareBroadcast(form: FormData) {
     };
   let template: BroadcastTemplate | undefined;
   let parsed: Awaited<ReturnType<typeof parseBroadcastFile>>;
+  let media: CampaignMedia | null = null;
   try {
-    template = (await connection.provider.listBroadcastTemplates()).find(
+    template = (await connection.provider.listBroadcastTemplates({ media: true })).find(
       (t) => t.id === templateId,
     );
     if (!template)
@@ -103,12 +144,22 @@ export async function prepareBroadcast(form: FormData) {
         ok: false as const,
         error: "Selecione um template aprovado e compatível. Atualize a lista.",
       };
-    const mapping = form.get("mapping");
-    parsed = await parseBroadcastFile(
-      file,
-      template,
-      mapping ? (JSON.parse(String(mapping)) as ColumnMapping) : undefined,
-    );
+    const rawMapping = form.get("mapping");
+    const mapping = rawMapping ? (JSON.parse(String(rawMapping)) as ColumnMapping) : undefined;
+    if (template.mediaFormat) {
+      const rawMedia = form.get("media");
+      const checked = checkBroadcastMedia(
+        tenantId,
+        template.mediaFormat,
+        rawMedia ? JSON.parse(String(rawMedia)) : null,
+        { column: typeof mapping?.media === "string" ? mapping.media.trim() : undefined },
+      );
+      if (!checked.ok) return { ok: false as const, error: checked.error };
+      media = checked.media;
+    }
+    // A coluna do link só vale no modo "link por contato".
+    if (mapping && media?.mode !== "column") delete mapping.media;
+    parsed = withMedia(await parseBroadcastFile(file, template, mapping), media);
   } catch (error) {
     return {
       ok: false as const,
@@ -118,7 +169,7 @@ export async function prepareBroadcast(form: FormData) {
           : "Não foi possível ler o arquivo.",
     };
   }
-  return saveDraft(tenantId, name, connection.phoneNumberId, template, parsed, draftId);
+  return saveDraft(tenantId, name, connection.phoneNumberId, template, parsed, draftId, null, 0, media);
 }
 
 /**
@@ -135,6 +186,7 @@ async function saveDraft(
   draftId?: string,
   namelessTemplate: BroadcastTemplate | null = null,
   skippedNameless = 0,
+  media: CampaignMedia | null = null,
 ) {
   // Nunca descarta erros silenciosamente nem envia só parte de uma lista inválida.
   if (parsed.issues.length)
@@ -157,6 +209,7 @@ async function saveDraft(
           phoneNumberId,
           template,
           namelessTemplate: namelessTemplate ?? Prisma.DbNull,
+          media: media ?? Prisma.DbNull,
         },
       });
       if (updated.count) {
@@ -176,6 +229,7 @@ async function saveDraft(
         phoneNumberId,
         template,
         namelessTemplate: namelessTemplate ?? Prisma.DbNull,
+        media: media ?? Prisma.DbNull,
         recipients: { createMany: { data: parsed.recipients } },
       },
       select: { id: true },
@@ -189,6 +243,7 @@ async function saveDraft(
     template,
     namelessTemplate,
     skippedNameless,
+    media,
     ...parsed,
     recentPhones: await recentlyContacted(
       tenantId,
@@ -210,6 +265,8 @@ export async function prepareBroadcastFromList(input: {
   variables: VariableSource[];
   /** Quem não tem nome: outra mensagem aprovada, texto no lugar ou fica de fora. */
   nameless?: { mode: NamelessMode; templateId?: string };
+  /** Arquivo do topo, quando a mensagem tem mídia (`uploadBroadcastMedia`). */
+  media?: unknown;
 }) {
   const tenantId = await requireBroadcastAccess();
   const name = typeof input?.name === "string" ? input.name.trim() : "";
@@ -228,14 +285,21 @@ export async function prepareBroadcastFromList(input: {
   let namelessTemplate: BroadcastTemplate | null = null;
   let skipped = 0;
   let parsed: ImportResult;
+  let media: CampaignMedia | null = null;
   try {
-    const approved = await connection.provider.listBroadcastTemplates();
+    const approved = await connection.provider.listBroadcastTemplates({ media: true });
     template = approved.find((t) => t.id === input.templateId);
     if (!template)
       return {
         ok: false as const,
         error: "Selecione um template aprovado e compatível. Atualize a lista.",
       };
+    if (template.mediaFormat) {
+      // Sem planilha não há coluna: só o mesmo arquivo para todos.
+      const checked = checkBroadcastMedia(tenantId, template.mediaFormat, input.media);
+      if (!checked.ok) return { ok: false as const, error: checked.error };
+      media = checked.media;
+    }
     const { contacts, variables, nameless } = validateListInput(
       input.contacts,
       input.variables,
@@ -256,6 +320,13 @@ export async function prepareBroadcastFromList(input: {
           ok: false as const,
           error: "A mensagem para quem não tem nome não está mais aprovada. Escolha outra.",
         };
+      if ((namelessTemplate.mediaFormat ?? null) !== (template.mediaFormat ?? null))
+        return {
+          ok: false as const,
+          error: template.mediaFormat
+            ? "A mensagem para quem não tem nome precisa ter o mesmo tipo de arquivo no topo."
+            : "A mensagem para quem não tem nome não pode ter arquivo no topo.",
+        };
       if (namelessTemplate.parameterCount !== expected)
         return {
           ok: false as const,
@@ -271,7 +342,7 @@ export async function prepareBroadcastFromList(input: {
     // O mesmo número colado com e sem nome recebe uma vez só: vale a versão com nome.
     const taken = new Set(withName.recipients.flatMap((r) => broadcastPhoneVariants(r.phone)));
     const extra = withoutName.recipients.filter((r) => !taken.has(r.phone));
-    parsed = {
+    parsed = withMedia({
       recipients: [
         ...withName.recipients,
         ...extra.map((r) => ({ ...r, variant: "nameless" as const })),
@@ -280,7 +351,7 @@ export async function prepareBroadcastFromList(input: {
       duplicates:
         withName.duplicates + withoutName.duplicates + (withoutName.recipients.length - extra.length),
       total: contacts.length,
-    };
+    }, media);
   } catch (error) {
     return {
       ok: false as const,
@@ -299,6 +370,7 @@ export async function prepareBroadcastFromList(input: {
     typeof input.draftId === "string" ? input.draftId : undefined,
     namelessTemplate,
     skipped,
+    media,
   );
 }
 
@@ -349,7 +421,7 @@ export async function startBroadcast(
       error: "A conexão Meta mudou. Prepare um novo disparo.",
     };
   try {
-    const approved = await connection.provider.listBroadcastTemplates();
+    const approved = await connection.provider.listBroadcastTemplates({ media: true });
     if (!templatesStillApproved(campaignTemplates(campaign), approved))
       return {
         ok: false,
@@ -519,6 +591,7 @@ export async function getBroadcastReview(id: string) {
     name: campaign.name,
     template: campaign.template as BroadcastTemplate,
     namelessTemplate: (campaign.namelessTemplate as BroadcastTemplate | null) ?? null,
+    media: parseCampaignMedia(campaign.media),
     skippedNameless: 0,
     duplicates: 0,
     recentPhones: await recentlyContacted(
@@ -533,6 +606,8 @@ export async function getBroadcastReview(id: string) {
       parameters: r.parameters as string[],
       content: r.content,
       variant: r.variant === "nameless" ? ("nameless" as const) : ("main" as const),
+      mediaUrl: r.mediaUrl,
+      mediaFilename: r.mediaFilename,
     })),
   };
 }
@@ -540,6 +615,8 @@ export async function getBroadcastReview(id: string) {
 export async function downloadBroadcastExample(
   format: "xlsx" | "json",
   parameterCount: number,
+  /** Mensagem com mídia: inclui a coluna com o link de cada contato. */
+  withMediaColumn = false,
 ) {
   await requireBroadcastAccess();
   if (
@@ -557,6 +634,9 @@ export async function downloadBroadcastExample(
         i === 0 ? "Ana" : "Exemplo",
       ]),
     ),
+    ...(withMediaColumn === true
+      ? { link_arquivo: "https://seusite.com.br/arquivos/folheto.jpg" }
+      : {}),
   };
   if (format === "json")
     return Buffer.from(JSON.stringify([row], null, 2)).toString("base64");
@@ -618,7 +698,7 @@ export async function resumeBroadcast(id: string) {
       error: "Reconecte o mesmo número da Meta usado neste disparo.",
     };
   try {
-    const approved = await connection.provider.listBroadcastTemplates();
+    const approved = await connection.provider.listBroadcastTemplates({ media: true });
     if (!templatesStillApproved(campaignTemplates(campaign), approved))
       return {
         ok: false,
@@ -684,7 +764,7 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
       error: "Reconecte o número da Meta usado neste rascunho.",
     };
   try {
-    const approved = await connection.provider.listBroadcastTemplates();
+    const approved = await connection.provider.listBroadcastTemplates({ media: true });
     if (!templatesStillApproved(campaignTemplates(campaign), approved))
       return { ok: false, error: "O template mudou. Prepare outro rascunho." };
   } catch {
@@ -734,6 +814,8 @@ export async function sendBroadcastTest(id: string, rawPhone: string) {
         parameters: sample.parameters!,
         content: sample.content,
         variant: sample.variant,
+        mediaUrl: sample.mediaUrl,
+        mediaFilename: sample.mediaFilename,
       },
     });
   });

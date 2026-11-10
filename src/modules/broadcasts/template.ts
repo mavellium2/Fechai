@@ -1,5 +1,9 @@
 import { removeVariables } from "./template-draft";
-/** Formato inicial: template aprovado de texto, com variáveis posicionais no corpo. */
+import { isMediaFormat, MEDIA_RULES, type MediaFormat } from "./media";
+/**
+ * Template aprovado com variáveis posicionais no corpo. O topo é texto fixo ou,
+ * com `mediaFormat`, uma imagem/vídeo/documento escolhido a cada envio.
+ */
 export type BroadcastTemplate = {
   id: string;
   name: string;
@@ -8,6 +12,8 @@ export type BroadcastTemplate = {
   header: string;
   footer: string;
   parameterCount: number;
+  /** Mídia no topo. Ausente = topo de texto (ou sem topo). */
+  mediaFormat?: MediaFormat;
 };
 
 export type MetaTemplateRecord = {
@@ -34,11 +40,18 @@ export function sameBroadcastTemplate(
       "footer",
       "parameterCount",
     ] as const
-  ).every((field) => left[field] === right[field]);
+  ).every((field) => left[field] === right[field]) &&
+    (left.mediaFormat ?? null) === (right.mediaFormat ?? null);
 }
 
+/**
+ * O que os Disparos e os lembretes sabem enviar. `media: true` aceita também
+ * imagem/vídeo/documento no topo — só os Disparos pedem: o lembrete não tem de
+ * onde tirar o arquivo, e um modelo de mídia nele seria recusado no envio.
+ */
 export function supportedTemplate(
   raw: MetaTemplateRecord,
+  options: { media?: boolean } = {},
 ): BroadcastTemplate | null {
   if (
     raw.status !== "APPROVED" ||
@@ -53,7 +66,13 @@ export function supportedTemplate(
     return null;
   const header = components.find((c) => c.type === "HEADER");
   const footer = components.find((c) => c.type === "FOOTER")?.text ?? "";
-  if (header && (header.format !== "TEXT" || /{{/.test(header.text ?? "")))
+  const mediaFormat =
+    header && options.media && isMediaFormat(header.format) ? header.format : undefined;
+  if (
+    header &&
+    !mediaFormat &&
+    (header.format !== "TEXT" || /{{/.test(header.text ?? ""))
+  )
     return null;
   if (/{{/.test(footer)) return null;
   const body = components.find((c) => c.type === "BODY")?.text;
@@ -72,9 +91,10 @@ export function supportedTemplate(
     name: raw.name,
     language: raw.language,
     body,
-    header: header?.text ?? "",
+    header: mediaFormat ? "" : (header?.text ?? ""),
     footer,
     parameterCount: slots.length,
+    ...(mediaFormat ? { mediaFormat } : {}),
   };
 }
 
@@ -85,7 +105,7 @@ export function renderBroadcast(
   if (parameters.length !== template.parameterCount)
     throw new Error("Quantidade de variáveis diferente do template.");
   return [
-    template.header,
+    template.mediaFormat ? MEDIA_RULES[template.mediaFormat].tag : template.header,
     template.body.replace(
       /{{(\d+)}}/g,
       (_, index) => parameters[Number(index) - 1],
@@ -144,6 +164,7 @@ export function findNamelessVersion(
     (t) =>
       t.id !== main.id &&
       t.parameterCount === expected &&
+      (t.mediaFormat ?? null) === (main.mediaFormat ?? null) &&
       (t.name === `${main.name}_sem_nome` ||
         (t.body === body && t.header === main.header && t.footer === main.footer)),
   );

@@ -111,12 +111,71 @@ export class MetaCloudProvider implements WhatsAppProvider {
     );
   }
 
-  /** Templates aprovados no formato que Disparos e lembretes sabem enviar. */
-  async listBroadcastTemplates(): Promise<BroadcastTemplate[]> {
+  /**
+   * Templates aprovados no formato que Disparos e lembretes sabem enviar.
+   * `media: true` inclui os com imagem/vídeo/documento no topo (só Disparos).
+   */
+  async listBroadcastTemplates(
+    options: { media?: boolean } = {},
+  ): Promise<BroadcastTemplate[]> {
     return this.listTemplates<MetaTemplateRecord, BroadcastTemplate>(
       "id,name,language,status,parameter_format,components",
-      supportedTemplate,
+      (raw) => supportedTemplate(raw, options),
     );
+  }
+
+  /**
+   * Sobe o arquivo de exemplo de um modelo com mídia no topo e devolve o
+   * `header_handle` que a Meta exige para analisar. Usa a Resumable Upload API
+   * do app (`META_APP_ID`); o token precisa ser do mesmo app. Recusa vira
+   * `MetaTemplateRejected` com uma frase para a tela.
+   */
+  async uploadTemplateExample(file: {
+    bytes: Buffer;
+    mime: string;
+    name: string;
+  }): Promise<string> {
+    const appId = process.env.META_APP_ID?.trim();
+    if (!appId)
+      throw new MetaTemplateRejected(
+        "Falta configurar o app da Meta no servidor para enviar o arquivo de exemplo. Crie este modelo direto no Gerenciador do WhatsApp da Meta.",
+      );
+    const query = new URLSearchParams({
+      file_name: file.name,
+      file_length: String(file.bytes.length),
+      file_type: file.mime,
+    });
+    const session = await fetch(`${graphUrl(`${appId}/uploads`)}?${query}`, {
+      method: "POST",
+      headers: this.headers(false),
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!session.ok) {
+      const body = (await session.json().catch(() => ({}))) as MetaErrorBody;
+      throw new MetaTemplateRejected(exampleUploadError(session.status, body));
+    }
+    const { id } = (await session.json()) as { id?: string };
+    if (!id || !/^upload:/.test(id))
+      throw new Error("A Meta não abriu o envio do arquivo de exemplo.");
+    const upload = await fetch(graphUrl(id), {
+      method: "POST",
+      headers: {
+        Authorization: `OAuth ${this.credentials.accessToken}`,
+        file_offset: "0",
+        "Content-Type": file.mime,
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(60_000),
+      body: new Uint8Array(file.bytes),
+    });
+    if (!upload.ok) {
+      const body = (await upload.json().catch(() => ({}))) as MetaErrorBody;
+      throw new MetaTemplateRejected(exampleUploadError(upload.status, body));
+    }
+    const { h } = (await upload.json()) as { h?: string };
+    if (!h) throw new Error("A Meta não devolveu o identificador do arquivo de exemplo.");
+    return h;
   }
 
   /** Todos os modelos da conta, inclusive em análise e recusados (`/disparos/modelos`). */
@@ -202,13 +261,33 @@ export class MetaCloudProvider implements WhatsAppProvider {
     );
   }
 
+  /**
+   * Envia o template. Com `mediaFormat`, `media.link` vai no cabeçalho — quem
+   * baixa o arquivo é a Meta, por isso precisa ser um link público https.
+   */
   async sendBroadcastTemplate(
     toPhone: string,
     template: BroadcastTemplate,
     parameters: string[],
+    media?: { link: string; filename?: string | null } | null,
   ): Promise<string> {
     if (parameters.length !== template.parameterCount)
       throw new Error("Variáveis incompatíveis com o template.");
+    if (template.mediaFormat && !media?.link)
+      throw new Error("Esta mensagem precisa de um arquivo no topo.");
+    const components = [
+      ...(template.mediaFormat && media?.link
+        ? [{ type: "header", parameters: [headerMediaParameter(template.mediaFormat, media)] }]
+        : []),
+      ...(parameters.length
+        ? [
+            {
+              type: "body",
+              parameters: parameters.map((text) => ({ type: "text", text })),
+            },
+          ]
+        : []),
+    ];
     const response = await fetch(
       graphUrl(`${this.credentials.phoneNumberId}/messages`),
       {
@@ -223,19 +302,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
           template: {
             name: template.name,
             language: { code: template.language },
-            ...(parameters.length
-              ? {
-                  components: [
-                    {
-                      type: "body",
-                      parameters: parameters.map((text) => ({
-                        type: "text",
-                        text,
-                      })),
-                    },
-                  ],
-                }
-              : {}),
+            ...(components.length ? { components } : {}),
           },
         }),
       },
@@ -501,6 +568,31 @@ export class MetaCloudProvider implements WhatsAppProvider {
   parseWebhook(payload: unknown): IncomingMessage | null {
     return parseMetaMessages(payload)[0] ?? null;
   }
+}
+
+/** Recusa do envio do arquivo de exemplo, em uma frase para a tela. */
+function exampleUploadError(status: number, body: MetaErrorBody): string {
+  if (status >= 500) return "A Meta não respondeu agora. Tente de novo em alguns minutos.";
+  const error = body.error;
+  if (error?.code === 190)
+    return "O token da Meta expirou ou foi revogado. Atualize as credenciais em Integrações.";
+  if (error?.code === 10 || error?.code === 200 || error?.code === 100)
+    return "A Meta não deixou este token enviar o arquivo de exemplo (o token precisa ser da conexão feita pelo fechai). Crie este modelo direto no Gerenciador do WhatsApp da Meta.";
+  const fromMeta = error?.error_user_msg?.replace(/\s+/g, " ").trim();
+  if (fromMeta && fromMeta.length <= 200) return fromMeta;
+  return "A Meta não aceitou o arquivo de exemplo. Confira o formato e tente de novo.";
+}
+
+function headerMediaParameter(
+  format: NonNullable<BroadcastTemplate["mediaFormat"]>,
+  media: { link: string; filename?: string | null },
+) {
+  if (format === "IMAGE") return { type: "image", image: { link: media.link } };
+  if (format === "VIDEO") return { type: "video", video: { link: media.link } };
+  return {
+    type: "document",
+    document: { link: media.link, ...(media.filename ? { filename: media.filename } : {}) },
+  };
 }
 
 /** Resposta negativa explícita; timeout/rede são resultado desconhecido. */

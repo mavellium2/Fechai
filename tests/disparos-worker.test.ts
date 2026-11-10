@@ -150,7 +150,7 @@ describe("fila de disparos", () => {
   });
   it("grava mensagem manual no histórico e encerra campanha", async () => {
     expect(await scanBroadcasts()).toEqual({ scanned: 1, sent: 1 });
-    expect(mocks.send).toHaveBeenCalledWith(recipient.phone, template, ["Ana"]);
+    expect(mocks.send).toHaveBeenCalledWith(recipient.phone, template, ["Ana"], null);
     expect(mocks.message).toHaveBeenCalledWith({
       data: {
         conversationId: "conv-a",

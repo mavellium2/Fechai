@@ -58,6 +58,7 @@ export default async function NovoModeloPage({
         name: without.length ? `${current}_sem_nome` : `${base}_v${version ? Number(version[1]) + 1 : 2}`,
         category: source.category === "MARKETING" ? "MARKETING" : ("UTILITY" as TemplateCategory),
         header: source.header,
+        headerMedia: source.headerMedia,
         body: without.length ? removeVariables(source.body, without) : source.body,
         footer: source.footer,
       };

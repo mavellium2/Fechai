@@ -4,19 +4,25 @@ import { Check, RefreshCw } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { BroadcastTemplate } from "@/modules/broadcasts/template";
+import { MEDIA_RULES } from "@/modules/broadcasts/media";
 import { cn } from "@/lib/utils";
+import { MEDIA_ICONS } from "./MediaPanel";
 
 /** Mensagem com cada `{{n}}` destacado — preenchido com `values` quando houver. */
 export function MessagePreview({
   template,
   values,
+  media,
 }: {
   template: BroadcastTemplate;
   values?: (string | null)[];
+  /** Arquivo do topo já escolhido (mensagem com mídia). */
+  media?: { url?: string | null; filename?: string | null } | null;
 }) {
   const parts = template.body.split(/({{\d+}})/g);
   return (
     <div className="space-y-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-white/85">
+      {template.mediaFormat && <MediaSlot format={template.mediaFormat} media={media} />}
       {template.header && <p className="font-semibold text-white">{template.header}</p>}
       <p>
         {parts.map((part, i) => {
@@ -39,6 +45,31 @@ export function MessagePreview({
       </p>
       {template.footer && <p className="text-xs text-white/50">{template.footer}</p>}
     </div>
+  );
+}
+
+/** O topo com mídia: a imagem escolhida ou um espaço com o tipo do arquivo. */
+function MediaSlot({
+  format,
+  media,
+}: {
+  format: NonNullable<BroadcastTemplate["mediaFormat"]>;
+  media?: { url?: string | null; filename?: string | null } | null;
+}) {
+  const Icon = MEDIA_ICONS[format];
+  const url = media?.url && !media.url.includes("simulado.invalid") ? media.url : null;
+  if (format === "IMAGE" && url)
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={url} alt="" className="max-h-40 w-full rounded-control bg-black/30 object-contain" />
+    );
+  return (
+    <span className="flex h-20 items-center justify-center gap-2 rounded-control bg-black/25 px-3 text-xs text-white/60">
+      <Icon size={16} aria-hidden />
+      <span className="truncate">
+        {media?.filename || `${MEDIA_RULES[format].label} escolhido no disparo`}
+      </span>
+    </span>
   );
 }
 
@@ -130,6 +161,10 @@ export function TemplatePicker({
           );
         })}
       </div>
+      <p className="text-xs text-white/55">
+        Imagem, vídeo e documento vão no topo de uma mensagem aprovada com esse espaço. Áudio a
+        Meta não aceita em mensagem de disparo.
+      </p>
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/55">
         Não achou a mensagem?
         <Link href="/disparos/modelos/novo" className="underline underline-offset-2 hover:text-white">

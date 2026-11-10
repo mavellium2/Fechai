@@ -1,11 +1,12 @@
 "use client";
 import { useActionState, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Calendar, Clock, Plus, Send, Type, User, X } from "lucide-react";
+import { Calendar, Check, Clock, Plus, Send, Type, Upload, User, X } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { useActionToast } from "@/components/ui/toast/use-save-feedback";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,17 @@ import {
   variablesOutOfOrder,
   type TemplateCategory,
 } from "@/modules/broadcasts/template-draft";
-import { createMessageTemplate, type CreateTemplateState } from "./actions";
+import {
+  mediaAccept,
+  mediaFileProblem,
+  MEDIA_RULES,
+  type MediaFormat,
+} from "@/modules/broadcasts/media";
+import {
+  createMessageTemplate,
+  uploadTemplateExample,
+  type CreateTemplateState,
+} from "./actions";
 import { WhatsAppBubble } from "./WhatsAppBubble";
 
 type Kind = "name" | "date" | "time" | "other";
@@ -49,10 +60,21 @@ const CATEGORIES: { value: TemplateCategory; title: string; text: string }[] = [
 
 const OPT_OUT = "Responda SAIR para não receber mais";
 
+type HeaderKind = "TEXT" | MediaFormat;
+
+const HEADER_KINDS: { value: HeaderKind; label: string }[] = [
+  { value: "TEXT", label: "Título" },
+  { value: "IMAGE", label: "Imagem" },
+  { value: "VIDEO", label: "Vídeo" },
+  { value: "DOCUMENT", label: "Documento" },
+];
+
 export type TemplateEditorInitial = {
   name: string;
   category: TemplateCategory;
   header: string;
+  /** Topo com mídia: o exemplo precisa ser enviado de novo (a Meta não devolve). */
+  headerMedia?: MediaFormat | null;
   body: string;
   footer: string;
 };
@@ -63,7 +85,11 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
   const [body, setBody] = useState(initial?.body ?? "");
   const [header, setHeader] = useState(initial?.header ?? "");
   const [footer, setFooter] = useState(initial?.footer ?? "");
-  const [showHeader, setShowHeader] = useState(Boolean(initial?.header));
+  const [showHeader, setShowHeader] = useState(Boolean(initial?.header || initial?.headerMedia));
+  const [headerKind, setHeaderKind] = useState<HeaderKind>(initial?.headerMedia ?? "TEXT");
+  const [example, setExample] = useState<{ kind: MediaFormat; handle: string; name: string } | null>(null);
+  const [uploadingExample, setUploadingExample] = useState(false);
+  const [exampleError, setExampleError] = useState("");
   const [showFooter, setShowFooter] = useState(Boolean(initial?.footer));
   const [name, setName] = useState(initial?.name ?? "");
   const [nameTouched, setNameTouched] = useState(Boolean(initial?.name));
@@ -91,10 +117,14 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
   const finalName = nameTouched ? name : suggestTemplateName(body);
   const savedName = templateName(finalName);
 
+  const headerMedia = showHeader && headerKind !== "TEXT" ? headerKind : null;
+  const headerHandle = headerMedia && example?.kind === headerMedia ? example.handle : "";
   const live = validateTemplateDraft({
     name: finalName,
     category,
-    header: showHeader ? header : "",
+    header: showHeader && !headerMedia ? header : "",
+    headerMedia,
+    headerHandle,
     body,
     footer: showFooter ? footer : "",
     examples,
@@ -102,7 +132,8 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
   const liveErrors = live.ok ? {} : live.errors;
   const serverErrors = state?.ok === false ? (state.errors ?? {}) : {};
   const outOfOrder = variablesOutOfOrder(body);
-  const promotional = category === "UTILITY" && looksPromotional(`${header} ${body}`);
+  const promotional =
+    category === "UTILITY" && looksPromotional(`${headerMedia ? "" : header} ${body}`);
 
   // O que falta, em frases curtas, no rodapé do botão.
   const missing: string[] = [];
@@ -110,6 +141,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
   else if (liveErrors.body) missing.push(liveErrors.body.replace(/\.$/, "").toLowerCase());
   if (liveErrors.examples && !liveErrors.body) missing.push("preencha o exemplo de cada variável");
   if (liveErrors.header) missing.push(liveErrors.header.replace(/\.$/, "").toLowerCase());
+  if (liveErrors.headerHandle) missing.push("envie o arquivo de exemplo do topo");
   if (liveErrors.footer) missing.push(liveErrors.footer.replace(/\.$/, "").toLowerCase());
   if (body.trim() && !savedName) missing.push("dê um nome ao modelo");
 
@@ -140,8 +172,31 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
     setBody(next);
   }
 
-  function setExample(i: number, example: string) {
+  function setSlotExample(i: number, example: string) {
     setSlots(currentSlots.map((s, j) => (i === j ? { ...s, example } : s)));
+  }
+
+  /** O exemplo vai direto para a Meta; ela devolve o identificador que o modelo leva. */
+  async function sendExample(kind: MediaFormat, file: File) {
+    const problem = mediaFileProblem(kind, file);
+    if (problem) {
+      setExampleError(problem);
+      return;
+    }
+    setExampleError("");
+    setUploadingExample(true);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("format", kind);
+      const result = await uploadTemplateExample(form);
+      if (result.ok) setExample({ kind, handle: result.handle, name: file.name });
+      else setExampleError(result.error);
+    } catch {
+      setExampleError("Não foi possível enviar o exemplo. Tente de novo.");
+    } finally {
+      setUploadingExample(false);
+    }
   }
 
   const bodyProblem = body.trim() && liveErrors.body ? liveErrors.body : serverErrors.body;
@@ -151,7 +206,9 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
       <input type="hidden" name="category" value={category} />
       <input type="hidden" name="name" value={finalName} />
       <input type="hidden" name="body" value={body} />
-      <input type="hidden" name="header" value={showHeader ? header : ""} />
+      <input type="hidden" name="header" value={showHeader && !headerMedia ? header : ""} />
+      <input type="hidden" name="headerMedia" value={headerMedia ?? ""} />
+      <input type="hidden" name="headerHandle" value={headerHandle} />
       <input type="hidden" name="footer" value={showFooter ? footer : ""} />
       {examples.map((e, i) => (
         <input key={i} type="hidden" name="examples" value={e} />
@@ -208,21 +265,81 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
           {showHeader ? (
             <OptionalField
               id={ids.header}
-              label="Título em negrito"
+              label="Topo da mensagem"
               onRemove={() => {
                 setShowHeader(false);
                 setHeader("");
+                setHeaderKind("TEXT");
+                setExampleError("");
               }}
-              error={liveErrors.header ?? serverErrors.header}
+              error={
+                headerMedia
+                  ? exampleError || serverErrors.headerHandle
+                  : (liveErrors.header ?? serverErrors.header)
+              }
             >
-              <Input
-                id={ids.header}
-                value={header}
-                maxLength={TEMPLATE_LIMITS.header}
-                onChange={(e) => setHeader(e.target.value)}
-                placeholder="Ex.: Lembrete de consulta"
-                disabled={pending}
+              <SegmentedControl
+                label="Tipo do topo"
+                value={headerKind}
+                options={HEADER_KINDS}
+                disabled={pending || uploadingExample}
+                onSelect={(next) => {
+                  setHeaderKind(next);
+                  setExampleError("");
+                }}
+                className="mb-3"
               />
+              {headerMedia ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-white/55">
+                    Cada disparo escolhe o próprio arquivo. A Meta só precisa de um exemplo para
+                    analisar ({MEDIA_RULES[headerMedia].hint}). Modelo com arquivo serve só para
+                    Disparos, não para lembretes.
+                  </p>
+                  <input
+                    id={`${ids.header}-file`}
+                    type="file"
+                    accept={mediaAccept(headerMedia)}
+                    className="sr-only"
+                    disabled={pending || uploadingExample}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void sendExample(headerMedia, file);
+                    }}
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      id={ids.header}
+                      type="button"
+                      size="sm"
+                      variant={headerHandle ? "ghost" : "outline"}
+                      loading={uploadingExample}
+                      loadingLabel="Enviando exemplo para a Meta"
+                      disabled={pending}
+                      onClick={() => document.getElementById(`${ids.header}-file`)?.click()}
+                    >
+                      <Upload size={14} aria-hidden />
+                      {headerHandle ? "Trocar exemplo" : "Enviar arquivo de exemplo"}
+                    </Button>
+                    {headerHandle && example && (
+                      <span className="flex min-w-0 items-center gap-1 text-xs text-white/70">
+                        <Check size={12} className="shrink-0 text-success" aria-hidden />
+                        <span className="truncate">{example.name}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <Input
+                  id={ids.header}
+                  value={header}
+                  maxLength={TEMPLATE_LIMITS.header}
+                  onChange={(e) => setHeader(e.target.value)}
+                  placeholder="Ex.: Lembrete de consulta"
+                  disabled={pending}
+                />
+              )}
             </OptionalField>
           ) : null}
 
@@ -302,7 +419,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
                       maxLength={TEMPLATE_LIMITS.example}
                       placeholder={kind.example || "Ex.: 20% de desconto"}
                       aria-invalid={!slot.example.trim() && serverErrors.examples ? true : undefined}
-                      onChange={(e) => setExample(i, e.target.value)}
+                      onChange={(e) => setSlotExample(i, e.target.value)}
                       disabled={pending}
                     />
                   </div>
@@ -336,7 +453,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
             {!showHeader && (
               <Button type="button" size="sm" variant="ghost" onClick={() => setShowHeader(true)}>
                 <Plus size={14} aria-hidden />
-                Título em negrito
+                Título, imagem, vídeo ou documento
               </Button>
             )}
             {!showFooter && (
@@ -409,7 +526,8 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
       <aside className="h-fit space-y-3 lg:sticky lg:top-24" aria-label="Prévia da mensagem">
         <p className="text-xs text-white/55">Como o contato vai receber</p>
         <WhatsAppBubble
-          header={showHeader ? header : ""}
+          media={headerMedia}
+          header={showHeader && !headerMedia ? header : ""}
           body={body}
           footer={showFooter ? footer : ""}
           values={examples}

@@ -140,7 +140,11 @@ export function ReviewStep({
                 />
               )}
             </div>
-            <MessagePreview template={template} values={sample?.parameters} />
+            <MessagePreview
+              template={template}
+              values={sample?.parameters}
+              media={sample ? { url: sample.mediaUrl, filename: sample.mediaFilename } : null}
+            />
           </div>
 
           <section aria-labelledby="test-title" className="space-y-2 rounded-control border border-white/10 p-4">

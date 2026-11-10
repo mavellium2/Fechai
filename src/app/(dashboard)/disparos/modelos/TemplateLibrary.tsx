@@ -22,6 +22,7 @@ import {
 } from "@/modules/broadcasts/template-draft";
 import { listMessageTemplates } from "./actions";
 import { HighlightedText } from "./WhatsAppBubble";
+import { MEDIA_RULES } from "@/modules/broadcasts/media";
 import { DisparosNav } from "../DisparosNav";
 
 type Filter = "all" | "approved" | "pending" | "rejected";
@@ -241,6 +242,7 @@ function TemplateCard({ t }: { t: ManagedTemplate }) {
         </p>
         <Badge tone={status.tone}>{status.label}</Badge>
         <Badge>{templateCategoryLabel(t.category)}</Badge>
+        {t.headerMedia && <Badge tone="iris">{MEDIA_RULES[t.headerMedia].label}</Badge>}
       </div>
 
       <div className="flex-1 text-sm leading-relaxed text-white/80">

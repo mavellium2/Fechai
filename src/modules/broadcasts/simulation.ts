@@ -69,6 +69,35 @@ const SEED: StoredTemplate[] = [
     ],
   },
   {
+    id: "sim-folheto",
+    name: "folheto_campanha",
+    language: "pt_BR",
+    category: "MARKETING",
+    createdAt: 0,
+    components: [
+      { type: "HEADER", format: "IMAGE" },
+      {
+        type: "BODY",
+        text: "Oi {{1}}! Preparamos uma condição especial neste mês. Quer saber mais? É só responder.",
+      },
+      { type: "FOOTER", text: "Responda SAIR para não receber mais" },
+    ],
+  },
+  {
+    id: "sim-orcamento",
+    name: "orcamento_pdf",
+    language: "pt_BR",
+    category: "UTILITY",
+    createdAt: 0,
+    components: [
+      { type: "HEADER", format: "DOCUMENT" },
+      {
+        type: "BODY",
+        text: "Olá {{1}}, segue o documento que combinamos. Qualquer dúvida, responda esta mensagem.",
+      },
+    ],
+  },
+  {
     id: "sim-lembrete",
     name: "retorno_pendente",
     language: "pt_BR",
@@ -85,7 +114,9 @@ const SEED: StoredTemplate[] = [
 
 function load(): StoredTemplate[] {
   try {
-    return JSON.parse(readFileSync(STORE, "utf8")) as StoredTemplate[];
+    const stored = JSON.parse(readFileSync(STORE, "utf8")) as StoredTemplate[];
+    // Exemplos novos aparecem mesmo para quem já tinha o arquivo salvo.
+    return [...SEED.filter((seed) => !stored.some((t) => t.id === seed.id)), ...stored];
   } catch {
     return SEED;
   }
@@ -100,10 +131,10 @@ function withStatus(t: StoredTemplate): StoredTemplate {
 }
 
 const fake = {
-  async listBroadcastTemplates() {
+  async listBroadcastTemplates(options: { media?: boolean } = {}) {
     return load()
       .map(withStatus)
-      .map((t) => supportedTemplate(t as MetaTemplateRecord))
+      .map((t) => supportedTemplate(t as MetaTemplateRecord, options))
       .filter((t) => t !== null);
   },
   async listManagedTemplates() {
@@ -129,6 +160,9 @@ const fake = {
     mkdirSync(STORE_DIR, { recursive: true, mode: 0o700 });
     writeFileSync(STORE, JSON.stringify(all), { mode: 0o600 });
     return { id, status: "PENDING", category: payload.category };
+  },
+  async uploadTemplateExample() {
+    return `sim-handle-${Date.now()}`;
   },
   async sendBroadcastTemplate(toPhone: string) {
     // Um pouco de espera para a fila parecer a de verdade.

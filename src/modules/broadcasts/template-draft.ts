@@ -6,8 +6,10 @@
  *
  * O formato é o mesmo que `supportedTemplate` aceita nos Disparos e lembretes:
  * texto, cabeçalho/rodapé fixos e variáveis posicionais `{{1}}…{{20}}` no corpo.
- * Um modelo criado aqui serve para os dois assim que for aprovado.
+ * O topo pode ser imagem, vídeo ou documento (`headerMedia`); esse modelo serve
+ * só para os Disparos, que escolhem o arquivo a cada envio.
  */
+import { isMediaFormat, type MediaFormat } from "./media";
 
 export const TEMPLATE_CATEGORIES = ["UTILITY", "MARKETING"] as const;
 export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
@@ -28,6 +30,10 @@ export type TemplateDraft = {
   name: string;
   category: TemplateCategory;
   header: string;
+  /** Mídia no topo em vez do título; o exemplo vai em `headerHandle`. */
+  headerMedia: MediaFormat | null;
+  /** Arquivo de exemplo já enviado à Meta (Resumable Upload). */
+  headerHandle: string;
   body: string;
   footer: string;
   /** Um exemplo por variável, na ordem `{{1}}`, `{{2}}`… (a Meta exige). */
@@ -90,6 +96,8 @@ export function validateTemplateDraft(input: {
   name?: unknown;
   category?: unknown;
   header?: unknown;
+  headerMedia?: unknown;
+  headerHandle?: unknown;
   body?: unknown;
   footer?: unknown;
   examples?: unknown;
@@ -103,9 +111,13 @@ export function validateTemplateDraft(input: {
   const category = TEMPLATE_CATEGORIES.find((c) => c === input.category);
   if (!category) errors.category = "Escolha a categoria.";
 
-  const header = text(input.header);
+  const headerMedia = isMediaFormat(input.headerMedia) ? input.headerMedia : null;
+  const headerHandle = headerMedia ? text(input.headerHandle) : "";
+  const header = headerMedia ? "" : text(input.header);
   const headerProblem = header && fixedTextError(header, "cabeçalho", TEMPLATE_LIMITS.header);
   if (headerProblem) errors.header = headerProblem;
+  if (headerMedia && (!headerHandle || headerHandle.length > 2000))
+    errors.headerHandle = "Envie um arquivo de exemplo para o topo.";
 
   const body = text(input.body).replace(/\r\n/g, "\n");
   const bodyProblem = bodyError(body);
@@ -127,7 +139,10 @@ export function validateTemplateDraft(input: {
   }
 
   if (Object.keys(errors).length || !category) return { ok: false, errors };
-  return { ok: true, draft: { name, category, header, body, footer, examples } };
+  return {
+    ok: true,
+    draft: { name, category, header, headerMedia, headerHandle, body, footer, examples },
+  };
 }
 
 /** Corpo do `POST /{WABA}/message_templates` da Graph API. */
@@ -137,7 +152,17 @@ export function templatePayload(draft: TemplateDraft) {
     language: TEMPLATE_LANGUAGE,
     category: draft.category,
     components: [
-      ...(draft.header ? [{ type: "HEADER", format: "TEXT", text: draft.header }] : []),
+      ...(draft.headerMedia
+        ? [
+            {
+              type: "HEADER",
+              format: draft.headerMedia,
+              example: { header_handle: [draft.headerHandle] },
+            },
+          ]
+        : draft.header
+          ? [{ type: "HEADER", format: "TEXT", text: draft.header }]
+          : []),
       {
         type: "BODY",
         text: draft.body,
@@ -158,6 +183,8 @@ export type ManagedTemplate = {
   status: string;
   category: string;
   header: string;
+  /** Imagem/vídeo/documento no topo; `null` = topo de texto ou sem topo. */
+  headerMedia?: MediaFormat | null;
   body: string;
   footer: string;
   rejectedReason: string | null;
@@ -172,7 +199,7 @@ export type MetaManagedTemplateRecord = {
   status?: string;
   category?: string;
   rejected_reason?: string;
-  components?: { type: string; text?: string }[];
+  components?: { type: string; format?: string; text?: string }[];
 };
 
 export function managedTemplate(raw: MetaManagedTemplateRecord): ManagedTemplate | null {
@@ -185,6 +212,10 @@ export function managedTemplate(raw: MetaManagedTemplateRecord): ManagedTemplate
     status: raw.status ?? "",
     category: raw.category ?? "",
     header: raw.components?.find((c) => c.type === "HEADER")?.text ?? "",
+    headerMedia: (() => {
+      const format = raw.components?.find((c) => c.type === "HEADER")?.format;
+      return isMediaFormat(format) ? format : null;
+    })(),
     body: raw.components?.find((c) => c.type === "BODY")?.text ?? "",
     footer: raw.components?.find((c) => c.type === "FOOTER")?.text ?? "",
     rejectedReason: reason,
