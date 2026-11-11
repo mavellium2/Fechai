@@ -25,7 +25,7 @@ aprovados compatíveis. **Imagem, vídeo e documento** vão só no topo de model
 aprovado com cabeçalho de mídia (`media.ts`): arquivo único na CDN (link só da
 própria conta, `checkBroadcastMedia`) ou link por contato na planilha. Só os
 Disparos listam modelo de mídia (`listBroadcastTemplates({ media: true })`);
-lembretes não. **Áudio não existe em modelo da Meta** — não ofereça. Importação cria **rascunho**, envio só após revisão e
+lembretes não. **Áudio não existe em modelo da Meta** — não ofereça. **Botões** de modelo (resposta rápida ou link, até 3, `template-buttons.ts`): o toque chega como `type: "button"` no webhook (`viaButton`), e "Bloquear"/"Parar mensagens" vira `followUpReason: "stop"` fora do turno do agente (`whatsapp/block-button.ts`). Importação cria **rascunho**, envio só após revisão e
 confirmação. A fila está no banco (`BroadcastCampaign`/`BroadcastRecipient`) e
 roda no worker existente, com claim condicional por destinatário. **Nunca
 reenviar automaticamente resultado `unknown`**: a Meta pode ter aceitado antes

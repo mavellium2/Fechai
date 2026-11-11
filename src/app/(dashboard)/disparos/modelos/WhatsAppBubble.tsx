@@ -1,6 +1,8 @@
 import { Fragment } from "react";
 import { CheckCheck, FileText, Film, ImageIcon } from "lucide-react";
 import { MEDIA_RULES, type MediaFormat } from "@/modules/broadcasts/media";
+import type { TemplateButton } from "@/modules/broadcasts/template-buttons";
+import { ButtonRow } from "../ButtonRow";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,9 +50,12 @@ export function WhatsAppBubble({
   header,
   body,
   footer,
+  buttons,
   values,
   labels,
 }: {
+  /** Botões do modelo, abaixo do balão como no WhatsApp. */
+  buttons?: TemplateButton[];
   /** Topo com arquivo: mostra o espaço onde ele aparece. */
   media?: MediaFormat | null;
   header: string;
@@ -62,16 +67,19 @@ export function WhatsAppBubble({
   return (
     <div className="rounded-surface border border-white/10 bg-black/20 p-4">
       {body.trim() ? (
-        <div className="relative ml-auto max-w-[90%] rounded-2xl rounded-tr-sm bg-white/10 px-3 pb-2 pt-2.5 text-sm leading-relaxed text-white/90 shadow-sm">
-          {media && <MediaPlaceholder format={media} />}
-          {header.trim() && <p className="mb-1 font-semibold text-white">{header}</p>}
-          <p className="whitespace-pre-wrap break-words">
-            <HighlightedText text={body} values={values} labels={labels} />
-          </p>
-          {footer.trim() && <p className="mt-2 text-xs text-white/50">{footer}</p>}
-          <p className="mt-1 flex items-center justify-end gap-1 text-xs text-white/40">
-            10:30 <CheckCheck size={14} className="text-iris" aria-hidden />
-          </p>
+        <div className="ml-auto max-w-[90%]">
+          <div className="relative rounded-2xl rounded-tr-sm bg-white/10 px-3 pb-2 pt-2.5 text-sm leading-relaxed text-white/90 shadow-sm">
+            {media && <MediaPlaceholder format={media} />}
+            {header.trim() && <p className="mb-1 font-semibold text-white">{header}</p>}
+            <p className="whitespace-pre-wrap break-words">
+              <HighlightedText text={body} values={values} labels={labels} />
+            </p>
+            {footer.trim() && <p className="mt-2 text-xs text-white/50">{footer}</p>}
+            <p className="mt-1 flex items-center justify-end gap-1 text-xs text-white/40">
+              10:30 <CheckCheck size={14} className="text-iris" aria-hidden />
+            </p>
+          </div>
+          <ButtonRow buttons={buttons} />
         </div>
       ) : (
         <p className="py-6 text-center text-sm text-white/50">

@@ -59,6 +59,7 @@ export default async function NovoModeloPage({
         category: source.category === "MARKETING" ? "MARKETING" : ("UTILITY" as TemplateCategory),
         header: source.header,
         headerMedia: source.headerMedia,
+        buttons: source.buttons,
         body: without.length ? removeVariables(source.body, without) : source.body,
         footer: source.footer,
       };

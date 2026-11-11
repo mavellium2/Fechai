@@ -73,6 +73,16 @@ export async function uploadTemplateExample(
   }
 }
 
+/** O formulário manda os botões como JSON; texto quebrado vira "botões inválidos". */
+function parseButtonsField(raw: FormDataEntryValue | null): unknown {
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return "invalid";
+  }
+}
+
 export type CreateTemplateState = {
   ok?: boolean;
   error?: string;
@@ -99,6 +109,7 @@ export async function createMessageTemplate(
     headerHandle: form.get("headerHandle"),
     body: form.get("body"),
     footer: form.get("footer"),
+    buttons: parseButtonsField(form.get("buttons")),
     examples: form.getAll("examples"),
   });
   if (!checked.ok) {

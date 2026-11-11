@@ -19,6 +19,7 @@ import type { IncomingMessage, WhatsAppProvider } from "./provider";
 import { shouldPauseAgentForReaction } from "./reactions";
 import { sendAgentReply } from "./send-agent-reply";
 import { handleSurveyReply } from "@/modules/satisfaction/capture";
+import { handleBlockButton, isBlockButton } from "./button-reply";
 import { isSurveyOutbound } from "@/modules/satisfaction/echo";
 import { recordLeadAdOrigin } from "@/modules/campaign-reports/record";
 
@@ -283,6 +284,20 @@ export async function processIncomingWhatsapp(
     audioUrl: received?.audioUrl,
   });
   if (survey.handled) return ok({ ok: true, silent: "pesquisa de satisfação" });
+
+  // Toque em "Bloquear" (botão do modelo): pedido de parar, fora do turno do agente.
+  if (incoming.viaButton && !incoming.isGroup && isBlockButton(userMessage)) {
+    const blocked = await handleBlockButton({
+      tenantId,
+      conversationId: conversation.id,
+      phone: incoming.fromPhone,
+      externalId: incoming.instanceExternalId,
+      provider,
+      text: userMessage,
+      messageKeyId: incoming.messageKeyId,
+    });
+    if (blocked.handled) return ok({ ok: true, silent: "pediu para parar (botão)" });
+  }
 
   // Número só de recebimento (ex.: Meta usada só para Disparos): a mensagem
   // entra em Conversas para a equipe e o agente não é chamado nem cobrado.

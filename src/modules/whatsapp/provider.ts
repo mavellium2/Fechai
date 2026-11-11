@@ -44,6 +44,8 @@ export type IncomingMessage = {
    * `text` leva o título da opção, para o resto do fluxo tratar como texto.
    */
   replyId?: string;
+  /** A mensagem é o toque num botão de modelo (resposta rápida), não texto digitado. */
+  viaButton?: boolean;
 };
 
 export type WhatsAppGroup = {

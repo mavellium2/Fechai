@@ -21,6 +21,13 @@ import {
   variablesOutOfOrder,
   type TemplateCategory,
 } from "@/modules/broadcasts/template-draft";
+import { isBlockButton } from "@/modules/whatsapp/block-button";
+import {
+  BUTTON_LIMITS,
+  QUICK_REPLY_PRESETS,
+  type ButtonKind,
+  type TemplateButton,
+} from "@/modules/broadcasts/template-buttons";
 import {
   mediaAccept,
   mediaFileProblem,
@@ -75,6 +82,8 @@ export type TemplateEditorInitial = {
   header: string;
   /** Topo com mídia: o exemplo precisa ser enviado de novo (a Meta não devolve). */
   headerMedia?: MediaFormat | null;
+  /** Botões do modelo de origem (duplicar/corrigir). */
+  buttons?: TemplateButton[];
   body: string;
   footer: string;
 };
@@ -91,6 +100,8 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
   const [uploadingExample, setUploadingExample] = useState(false);
   const [exampleError, setExampleError] = useState("");
   const [showFooter, setShowFooter] = useState(Boolean(initial?.footer));
+  const [buttons, setButtons] = useState<TemplateButton[]>(initial?.buttons ?? []);
+  const [buttonKind, setButtonKind] = useState<ButtonKind>(initial?.buttons?.[0]?.type ?? "QUICK_REPLY");
   const [name, setName] = useState(initial?.name ?? "");
   const [nameTouched, setNameTouched] = useState(Boolean(initial?.name));
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -127,6 +138,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
     headerHandle,
     body,
     footer: showFooter ? footer : "",
+    buttons,
     examples,
   });
   const liveErrors = live.ok ? {} : live.errors;
@@ -143,6 +155,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
   if (liveErrors.header) missing.push(liveErrors.header.replace(/\.$/, "").toLowerCase());
   if (liveErrors.headerHandle) missing.push("envie o arquivo de exemplo do topo");
   if (liveErrors.footer) missing.push(liveErrors.footer.replace(/\.$/, "").toLowerCase());
+  if (liveErrors.buttons) missing.push(liveErrors.buttons.replace(/\.$/, "").toLowerCase());
   if (body.trim() && !savedName) missing.push("dê um nome ao modelo");
 
   function insert(kind: Kind) {
@@ -170,6 +183,30 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
     const { body: next, order } = renumberVariables(body);
     setSlots(order.map((old) => currentSlots[old - 1] ?? { kind: "other", example: "" }));
     setBody(next);
+  }
+
+  function addButton(text = "") {
+    if (buttons.length >= BUTTON_LIMITS.count) return;
+    setButtons([
+      ...buttons,
+      buttonKind === "URL" ? { type: "URL", text, url: "" } : { type: "QUICK_REPLY", text },
+    ]);
+  }
+
+  /** Resposta rápida e link não se misturam: trocar o tipo converte a lista. */
+  function changeButtonKind(kind: ButtonKind) {
+    setButtonKind(kind);
+    setButtons(
+      buttons.map((b) =>
+        kind === "URL"
+          ? { type: "URL" as const, text: b.text, url: b.type === "URL" ? b.url : "" }
+          : { type: "QUICK_REPLY" as const, text: b.text },
+      ),
+    );
+  }
+
+  function patchButton(i: number, patch: { text?: string; url?: string }) {
+    setButtons(buttons.map((b, j) => (i === j ? ({ ...b, ...patch } as TemplateButton) : b)));
   }
 
   function setSlotExample(i: number, example: string) {
@@ -208,6 +245,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
       <input type="hidden" name="body" value={body} />
       <input type="hidden" name="header" value={showHeader && !headerMedia ? header : ""} />
       <input type="hidden" name="headerMedia" value={headerMedia ?? ""} />
+      <input type="hidden" name="buttons" value={JSON.stringify(buttons)} />
       <input type="hidden" name="headerHandle" value={headerHandle} />
       <input type="hidden" name="footer" value={showFooter ? footer : ""} />
       {examples.map((e, i) => (
@@ -483,6 +521,108 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
           )}
         </section>
 
+        <section aria-labelledby="btn-title" className="space-y-3">
+          <div>
+            <h2 id="btn-title" className="font-display text-lg font-semibold text-white">
+              Botões <span className="text-sm font-normal text-white/45">(opcional)</span>
+            </h2>
+            <p className="mt-1 text-sm text-white/60">
+              O contato toca e a resposta chega na conversa. Até {BUTTON_LIMITS.count} botões; resposta
+              rápida e link não se misturam.
+            </p>
+          </div>
+          <SegmentedControl
+            label="Tipo do botão"
+            value={buttonKind}
+            options={[
+              { value: "QUICK_REPLY", label: "Resposta rápida" },
+              { value: "URL", label: "Link" },
+            ]}
+            disabled={pending}
+            onSelect={changeButtonKind}
+          />
+          {buttons.length > 0 && (
+            <ul className="space-y-3">
+              {buttons.map((b, i) => (
+                <li key={i} className="grid items-start gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <Input
+                    aria-label={`Texto do botão ${i + 1}`}
+                    value={b.text}
+                    maxLength={BUTTON_LIMITS.text}
+                    placeholder={b.type === "URL" ? "Ex.: Ver ingressos" : "Ex.: Eu quero"}
+                    disabled={pending}
+                    onChange={(e) => patchButton(i, { text: e.target.value })}
+                    className={b.type === "URL" ? "" : "sm:col-span-2"}
+                  />
+                  {b.type === "URL" && (
+                    <Input
+                      aria-label={`Link do botão ${i + 1}`}
+                      value={b.url}
+                      type="url"
+                      inputMode="url"
+                      placeholder="https://seusite.com.br/pagina"
+                      disabled={pending}
+                      onChange={(e) => patchButton(i, { url: e.target.value })}
+                    />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={pending}
+                    aria-label={`Remover botão ${i + 1}`}
+                    onClick={() => setButtons(buttons.filter((_, j) => j !== i))}
+                  >
+                    <X size={14} aria-hidden />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending || buttons.length >= BUTTON_LIMITS.count}
+              onClick={() => addButton()}
+            >
+              <Plus size={14} aria-hidden />
+              Adicionar botão
+            </Button>
+            {buttonKind === "QUICK_REPLY" && (
+              <>
+                <span className="text-xs text-white/55">Atalhos:</span>
+                {QUICK_REPLY_PRESETS.filter(
+                  (p) => !buttons.some((b) => b.text.toLowerCase() === p.toLowerCase()),
+                ).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => addButton(preset)}
+                    disabled={pending || buttons.length >= BUTTON_LIMITS.count}
+                    className="inline-flex h-8 items-center rounded-full border border-white/15 px-3 text-xs text-white/80 transition-colors hover:border-iris hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris disabled:opacity-50"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+          {liveErrors.buttons && buttons.length > 0 && !buttons.some((b) => !b.text.trim()) && (
+            <p role="alert" className="text-sm text-danger">
+              {liveErrors.buttons}
+            </p>
+          )}
+          {serverErrors.buttons && <p className="text-sm text-danger">{serverErrors.buttons}</p>}
+          {buttonKind === "QUICK_REPLY" && buttons.some((b) => isBlockButton(b.text)) && (
+            <p className="text-xs text-white/55">
+              Quem tocar em um botão como “Bloquear” ou “Parar mensagens” deixa de receber seus
+              disparos, e o fechai avisa que o pedido foi registrado.
+            </p>
+          )}
+        </section>
+
         <section aria-labelledby="name-title" className="space-y-2">
           <h2 id="name-title" className="font-display text-lg font-semibold text-white">
             Nome do modelo
@@ -530,6 +670,7 @@ export function TemplateEditor({ initial }: { initial: TemplateEditorInitial | n
           header={showHeader && !headerMedia ? header : ""}
           body={body}
           footer={showFooter ? footer : ""}
+          buttons={buttons.filter((b) => b.text.trim())}
           values={examples}
           labels={labels}
         />

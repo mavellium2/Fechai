@@ -22,6 +22,7 @@ import {
 } from "@/modules/broadcasts/template-draft";
 import { listMessageTemplates } from "./actions";
 import { HighlightedText } from "./WhatsAppBubble";
+import { ButtonRow } from "../ButtonRow";
 import { MEDIA_RULES } from "@/modules/broadcasts/media";
 import { DisparosNav } from "../DisparosNav";
 
@@ -251,7 +252,8 @@ function TemplateCard({ t }: { t: ManagedTemplate }) {
           <HighlightedText text={t.body} />
         </p>
         {t.footer && open && <p className="mt-2 text-xs text-white/50">{t.footer}</p>}
-        {(long || t.footer) && (
+        {open && <ButtonRow buttons={t.buttons} />}
+        {(long || t.footer || t.buttons?.length) && (
           <button
             type="button"
             onClick={() => setOpen(!open)}

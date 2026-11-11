@@ -10,6 +10,7 @@
  * só para os Disparos, que escolhem o arquivo a cada envio.
  */
 import { isMediaFormat, type MediaFormat } from "./media";
+import { metaButtons, validateButtons, type TemplateButton } from "./template-buttons";
 
 export const TEMPLATE_CATEGORIES = ["UTILITY", "MARKETING"] as const;
 export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
@@ -36,6 +37,8 @@ export type TemplateDraft = {
   headerHandle: string;
   body: string;
   footer: string;
+  /** Botões de resposta rápida ou de link (`template-buttons.ts`). */
+  buttons: TemplateButton[];
   /** Um exemplo por variável, na ordem `{{1}}`, `{{2}}`… (a Meta exige). */
   examples: string[];
 };
@@ -100,6 +103,7 @@ export function validateTemplateDraft(input: {
   headerHandle?: unknown;
   body?: unknown;
   footer?: unknown;
+  buttons?: unknown;
   examples?: unknown;
 }): { ok: true; draft: TemplateDraft } | { ok: false; errors: TemplateDraftErrors } {
   const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
@@ -127,6 +131,9 @@ export function validateTemplateDraft(input: {
   const footerProblem = footer && fixedTextError(footer, "rodapé", TEMPLATE_LIMITS.footer);
   if (footerProblem) errors.footer = footerProblem;
 
+  const checkedButtons = validateButtons(input.buttons);
+  if (!checkedButtons.ok) errors.buttons = checkedButtons.error;
+
   const rawExamples = Array.isArray(input.examples) ? input.examples : [];
   const examples = rawExamples.map(text);
   if (!bodyProblem) {
@@ -141,7 +148,17 @@ export function validateTemplateDraft(input: {
   if (Object.keys(errors).length || !category) return { ok: false, errors };
   return {
     ok: true,
-    draft: { name, category, header, headerMedia, headerHandle, body, footer, examples },
+    draft: {
+      name,
+      category,
+      header,
+      headerMedia,
+      headerHandle,
+      body,
+      footer,
+      buttons: checkedButtons.ok ? checkedButtons.buttons : [],
+      examples,
+    },
   };
 }
 
@@ -169,6 +186,7 @@ export function templatePayload(draft: TemplateDraft) {
         ...(draft.examples.length ? { example: { body_text: [draft.examples] } } : {}),
       },
       ...(draft.footer ? [{ type: "FOOTER", text: draft.footer }] : []),
+      ...(draft.buttons.length ? [{ type: "BUTTONS", buttons: draft.buttons }] : []),
     ],
   };
 }
@@ -187,6 +205,8 @@ export type ManagedTemplate = {
   headerMedia?: MediaFormat | null;
   body: string;
   footer: string;
+  /** Botões do modelo; vazio/ausente = sem botões (ou formato que o fechai não lê). */
+  buttons?: TemplateButton[];
   rejectedReason: string | null;
   /** Quando foi criado pelo fechai (a Meta não informa); `null` = desconhecido. */
   createdAt?: string | null;
@@ -199,7 +219,12 @@ export type MetaManagedTemplateRecord = {
   status?: string;
   category?: string;
   rejected_reason?: string;
-  components?: { type: string; format?: string; text?: string }[];
+  components?: {
+    type: string;
+    format?: string;
+    text?: string;
+    buttons?: { type?: string; text?: string; url?: string }[];
+  }[];
 };
 
 export function managedTemplate(raw: MetaManagedTemplateRecord): ManagedTemplate | null {
@@ -218,6 +243,7 @@ export function managedTemplate(raw: MetaManagedTemplateRecord): ManagedTemplate
     })(),
     body: raw.components?.find((c) => c.type === "BODY")?.text ?? "",
     footer: raw.components?.find((c) => c.type === "FOOTER")?.text ?? "",
+    buttons: metaButtons(raw.components?.find((c) => c.type === "BUTTONS")?.buttons) ?? [],
     rejectedReason: reason,
   };
 }

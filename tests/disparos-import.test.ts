@@ -183,7 +183,7 @@ describe("templates compatíveis", () => {
         components: [{ type: "BODY", text: "Olá!" }],
       })?.parameterCount,
     ).toBe(0));
-  it("recusa pendente, nomeadas, buracos na sequência, botões e mídia", () => {
+  it("recusa pendente, nomeadas, buracos na sequência, botões não suportados e mídia", () => {
     expect(supportedTemplate({ ...raw, status: "PENDING" })).toBeNull();
     expect(supportedTemplate({ ...raw, parameter_format: "NAMED" })).toBeNull();
     expect(
@@ -201,9 +201,30 @@ describe("templates compatíveis", () => {
     expect(
       supportedTemplate({
         ...raw,
+        components: [
+          ...raw.components,
+          { type: "BUTTONS", buttons: [{ type: "PHONE_NUMBER", text: "Ligar" }] },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      supportedTemplate({
+        ...raw,
         components: [...raw.components, { type: "HEADER", format: "IMAGE" }],
       }),
     ).toBeNull();
+  });
+
+  it("aceita botões de resposta rápida", () => {
+    expect(
+      supportedTemplate({
+        ...raw,
+        components: [
+          ...raw.components,
+          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Eu quero" }] },
+        ],
+      })?.buttons,
+    ).toEqual([{ type: "QUICK_REPLY", text: "Eu quero" }]);
   });
 });
 

@@ -7,6 +7,7 @@ import type { BroadcastTemplate } from "@/modules/broadcasts/template";
 import { MEDIA_RULES } from "@/modules/broadcasts/media";
 import { cn } from "@/lib/utils";
 import { MEDIA_ICONS } from "./MediaPanel";
+import { ButtonRow } from "./ButtonRow";
 
 /** Mensagem com cada `{{n}}` destacado — preenchido com `values` quando houver. */
 export function MessagePreview({
@@ -44,6 +45,7 @@ export function MessagePreview({
         })}
       </p>
       {template.footer && <p className="text-xs text-white/50">{template.footer}</p>}
+      <ButtonRow buttons={template.buttons} />
     </div>
   );
 }

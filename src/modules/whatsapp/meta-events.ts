@@ -38,7 +38,14 @@ function liveMessages(payload: unknown): IncomingMessage[] {
       const isReaction = m.type === "reaction";
       // Resposta a lista/botão: o título vira o texto (o resto do fluxo o trata
       // como mensagem comum) e o id da opção segue à parte.
-      const choice = m.type === "interactive" ? interactiveChoice(m.interactive) : null;
+      // Botão de resposta rápida de um modelo chega como `type: "button"`, não
+      // como `interactive`: sem isto o toque em "Eu quero" seria descartado.
+      const choice =
+        m.type === "interactive"
+          ? interactiveChoice(m.interactive)
+          : m.type === "button"
+            ? templateButtonChoice(m.button)
+            : null;
       const content = isReaction
         ? text(object(m.reaction).emoji)
         : choice?.title ?? text(object(m.text).body);
@@ -68,10 +75,18 @@ function liveMessages(payload: unknown): IncomingMessage[] {
           mediaId: text(object(m.audio).id) || undefined,
           occurredAt: timestamp(m.timestamp),
           ...(choice?.id ? { replyId: choice.id } : {}),
+          ...(m.type === "button" && choice ? { viaButton: true } : {}),
         },
       ];
     });
   });
+}
+
+/** Toque num botão de resposta rápida de modelo: texto do botão e o payload. */
+function templateButtonChoice(raw: unknown): { id: string; title: string } | null {
+  const b = object(raw);
+  const title = text(b.text).trim();
+  return title ? { id: text(b.payload) || title, title } : null;
 }
 
 /** `interactive.list_reply` / `button_reply`: id e título da opção escolhida. */

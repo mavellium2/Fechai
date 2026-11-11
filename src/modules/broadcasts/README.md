@@ -144,8 +144,32 @@ de fórmulas para abertura no Excel.
 ```
 
 Templates compatíveis: aprovados, cabeçalho de texto fixo **ou de mídia**,
-rodapé fixo e até 20 variáveis posicionais no corpo. Botões, variáveis nomeadas,
-cabeçalho de texto com variável e cabeçalho de localização ficam fora.
+rodapé fixo, até 20 variáveis posicionais no corpo e **botões** (abaixo).
+Variáveis nomeadas, botão de telefone/código, link com variável, cabeçalho de
+texto com variável e cabeçalho de localização ficam fora.
+
+## Botões (`template-buttons.ts`)
+
+Até 3 botões por modelo, de **um tipo só** (a Meta não deixa misturar):
+**resposta rápida** (`QUICK_REPLY`, ex.: "Eu quero", "Bloquear") ou **link**
+(`URL` https fixo, sem variável, máx. 2000 caracteres). Texto até 25 caracteres,
+sem repetir. `metaButtons` lê o que a Meta devolve; modelo com botão que não
+sabemos enviar (telefone, link com variável) some da lista de disparo.
+
+- Botão estático não leva parâmetro no envio: `sendBroadcastTemplate` não muda.
+  `sameBroadcastTemplate` compara os botões (modelo trocado = disparo recusado) e
+  `Message.content` registra `Botões: Eu quero · Bloquear`.
+- **O toque chega como `type: "button"`** no webhook (não `interactive`):
+  `meta-events.ts` vira mensagem com o texto do botão e `viaButton: true`. Antes
+  isso era descartado em silêncio. "Eu quero" segue o atendimento normal.
+- **"Bloquear" / "Parar mensagens" / "Sair"** (`whatsapp/block-button.ts`, só no
+  toque do botão): `handleBlockButton` marca `followUpReason: "stop"` (a regra que
+  Disparos e follow-up já respeitam), guarda o toque e confirma com texto livre
+  (dentro das 24h abertas pelo toque). Fora do turno do agente: sem LLM e sem
+  cota; nunca lança. **Não** entra em `WhatsappBlockedNumber` — o agente ainda
+  responde se a pessoa escrever. "Cancelar" não conta (é desmarcar consulta).
+- Editor (`/disparos/modelos/novo`): seção "Botões" com atalhos; prévia com os
+  botões abaixo do balão (`ButtonRow`). Duplicar um modelo traz os botões.
 
 ## Imagem, vídeo e documento (`media.ts`, `media-storage.ts`)
 

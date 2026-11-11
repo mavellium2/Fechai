@@ -1,5 +1,6 @@
 import { removeVariables } from "./template-draft";
 import { isMediaFormat, MEDIA_RULES, type MediaFormat } from "./media";
+import { buttonsLabel, metaButtons, sameButtons, type TemplateButton } from "./template-buttons";
 /**
  * Template aprovado com variáveis posicionais no corpo. O topo é texto fixo ou,
  * com `mediaFormat`, uma imagem/vídeo/documento escolhido a cada envio.
@@ -14,6 +15,8 @@ export type BroadcastTemplate = {
   parameterCount: number;
   /** Mídia no topo. Ausente = topo de texto (ou sem topo). */
   mediaFormat?: MediaFormat;
+  /** Botões de resposta rápida ou de link. Ausente = sem botões. */
+  buttons?: TemplateButton[];
 };
 
 export type MetaTemplateRecord = {
@@ -22,7 +25,12 @@ export type MetaTemplateRecord = {
   language?: string;
   status?: string;
   parameter_format?: string;
-  components?: { type: string; format?: string; text?: string }[];
+  components?: {
+    type: string;
+    format?: string;
+    text?: string;
+    buttons?: { type?: string; text?: string; url?: string }[];
+  }[];
 };
 
 /** PostgreSQL JsonB reordena chaves: comparar JSON.stringify cancelaria rascunhos válidos. */
@@ -41,7 +49,8 @@ export function sameBroadcastTemplate(
       "parameterCount",
     ] as const
   ).every((field) => left[field] === right[field]) &&
-    (left.mediaFormat ?? null) === (right.mediaFormat ?? null);
+    (left.mediaFormat ?? null) === (right.mediaFormat ?? null) &&
+    sameButtons(left.buttons, right.buttons);
 }
 
 /**
@@ -62,8 +71,13 @@ export function supportedTemplate(
   )
     return null;
   const components = raw.components ?? [];
-  if (components.some((c) => !["BODY", "HEADER", "FOOTER"].includes(c.type)))
+  if (components.some((c) => !["BODY", "HEADER", "FOOTER", "BUTTONS"].includes(c.type)))
     return null;
+  const buttonsComponent = components.find((c) => c.type === "BUTTONS");
+  // `BUTTONS` sem botão nenhum é formato quebrado, não "sem botões".
+  if (buttonsComponent && !buttonsComponent.buttons?.length) return null;
+  const buttons = metaButtons(buttonsComponent?.buttons);
+  if (!buttons) return null;
   const header = components.find((c) => c.type === "HEADER");
   const footer = components.find((c) => c.type === "FOOTER")?.text ?? "";
   const mediaFormat =
@@ -95,6 +109,7 @@ export function supportedTemplate(
     footer,
     parameterCount: slots.length,
     ...(mediaFormat ? { mediaFormat } : {}),
+    ...(buttons.length ? { buttons } : {}),
   };
 }
 
@@ -111,6 +126,7 @@ export function renderBroadcast(
       (_, index) => parameters[Number(index) - 1],
     ),
     template.footer,
+    template.buttons?.length ? `Botões: ${buttonsLabel(template.buttons)}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -165,6 +181,7 @@ export function findNamelessVersion(
       t.id !== main.id &&
       t.parameterCount === expected &&
       (t.mediaFormat ?? null) === (main.mediaFormat ?? null) &&
+      sameButtons(t.buttons, main.buttons) &&
       (t.name === `${main.name}_sem_nome` ||
         (t.body === body && t.header === main.header && t.footer === main.footer)),
   );
