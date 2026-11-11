@@ -203,9 +203,12 @@ modelo** — só dentro das 24h abertas pelo contato —, por isso não é ofere
   falha de entrega no recibo, nunca como reenvio.
 - **Criar modelo com mídia** (`/disparos/modelos/novo`, "Topo da mensagem"): o
   exemplo vai direto para a Meta pela Resumable Upload API do app
-  (`uploadTemplateExample`, exige `META_APP_ID` e token do mesmo app) e o modelo
-  leva `example.header_handle`. Sem isso a tela orienta criar no Gerenciador do
-  WhatsApp. Duplicar um modelo de mídia pede o exemplo de novo.
+  (`uploadTemplateExample`, via `/app/uploads` com o token da própria conexão)
+  e o modelo leva `example.header_handle`. O app é resolvido pelo token, nunca
+  pelo `META_APP_ID` global do cadastro incorporado: a configuração manual pode
+  usar outro app. O retorno precisa ser um handle de exemplo, nunca ID de mídia
+  ou URL; a recusa `2494102` orienta trocar o exemplo. Duplicar um modelo de
+  mídia pede o exemplo de novo.
 - Simulação: `folheto_campanha` (imagem) e `orcamento_pdf` (documento); sem CDN
   configurada, o arquivo vira um link falso (`simulado.invalid`), que nada baixa.
 - Schema novo (`BroadcastCampaign.media`, `BroadcastRecipient.mediaUrl`/`mediaFilename`,

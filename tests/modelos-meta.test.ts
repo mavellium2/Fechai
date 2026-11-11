@@ -119,6 +119,18 @@ describe("Recusa da Meta em uma frase", () => {
     expect(templateErrorMessage(401, { error: { code: 190 } })).toMatch(/token/);
     expect(templateErrorMessage(503, {})).toMatch(/Tente de novo/);
   });
+
+  it("referência de mídia recusada orienta reenviar o exemplo, sem pedir mudança no texto", () => {
+    const message = templateErrorMessage(400, {
+      error: {
+        code: 131009,
+        error_subcode: 2494102,
+        error_user_msg: "Check the handle provided for the uploaded media in the request.",
+      },
+    });
+    expect(message).toMatch(/arquivo de exemplo/);
+    expect(message).not.toMatch(/handle|request|nome e o texto/);
+  });
 });
 
 describe("Provider", () => {
@@ -193,6 +205,75 @@ describe("Provider", () => {
       ["promo", "REJECTED", "PROMOTIONAL"],
     ]);
   });
+});
+
+describe("Upload do exemplo para aprovação", () => {
+  const handle = "4::dmlkZW8vbXA0:ZXhlbXBsby5tcDQ=:assinatura";
+  const sessionId = "upload:session-id?sig=assinatura-da-sessao";
+  const bytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
+  const provider = () => new MetaCloudProvider({
+    phoneNumberId: "1234567890",
+    businessAccountId: "9876543210",
+    accessToken: "token-da-conta",
+  });
+
+  beforeEach(() => {
+    vi.stubEnv("META_GRAPH_API_VERSION", "v26.0");
+    vi.stubEnv("META_APP_ID", "app-global");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it.each(["", "app-global-diferente"])(
+    "usa o app do token, mesmo com META_APP_ID=%s, e preserva bytes e referência até o modelo",
+    async (appId) => {
+      vi.stubEnv("META_APP_ID", appId);
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(Response.json({ id: sessionId }))
+        .mockResolvedValueOnce(Response.json({ h: handle }))
+        .mockResolvedValueOnce(Response.json({ id: "modelo-video", status: "PENDING" }));
+      vi.stubGlobal("fetch", fetchMock);
+      const meta = provider();
+      const uploaded = await meta.uploadTemplateExample({
+        bytes, mime: "video/mp4", name: "WhatsApp Video 2026-11-10 at 10.13.33.mp4",
+      });
+      const draft = valid({ headerMedia: "VIDEO", headerHandle: uploaded });
+      if (!draft.ok) throw new Error("rascunho deveria ser válido");
+      await meta.createMessageTemplate(templatePayload(draft.draft));
+
+      const [sessionUrl, sessionRequest] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const url = new URL(sessionUrl);
+      expect(url.pathname).toBe("/v26.0/app/uploads");
+      expect(url.searchParams.get("file_name")).toBe("WhatsApp Video 2026-11-10 at 10.13.33.mp4");
+      expect(url.searchParams.get("file_length")).toBe(String(bytes.length));
+      expect(url.searchParams.get("file_type")).toBe("video/mp4");
+      expect(new Headers(sessionRequest.headers).get("Authorization")).toBe("Bearer token-da-conta");
+
+      const [uploadUrl, uploadRequest] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(uploadUrl).toBe(`https://graph.facebook.com/v26.0/${sessionId}`);
+      expect(new Headers(uploadRequest.headers).get("Authorization")).toBe("OAuth token-da-conta");
+      expect(new Headers(uploadRequest.headers).get("file_offset")).toBe("0");
+      expect(uploadRequest.body).toEqual(new Uint8Array(bytes));
+
+      const [, createRequest] = fetchMock.mock.calls[2] as [string, RequestInit];
+      expect(JSON.parse(createRequest.body as string).components[0]).toEqual({
+        type: "HEADER", format: "VIDEO", example: { header_handle: [handle] },
+      });
+    },
+  );
+
+  it.each([undefined, "", "1234567890", "https://example.com/video.mp4", { id: "media" }])(
+    "não anuncia upload concluído quando a Meta não devolve um handle de exemplo: %j",
+    async (h) => {
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(Response.json({ id: sessionId }))
+        .mockResolvedValueOnce(Response.json({ h })));
+      await expect(provider().uploadTemplateExample({ bytes, mime: "video/mp4", name: "video.mp4" }))
+        .rejects.toBeInstanceOf(MetaTemplateRejected);
+    },
+  );
 });
 
 describe("Status para a tela", () => {

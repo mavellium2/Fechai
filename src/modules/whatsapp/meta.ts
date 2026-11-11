@@ -126,26 +126,22 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   /**
    * Sobe o arquivo de exemplo de um modelo com mídia no topo e devolve o
-   * `header_handle` que a Meta exige para analisar. Usa a Resumable Upload API
-   * do app (`META_APP_ID`); o token precisa ser do mesmo app. Recusa vira
-   * `MetaTemplateRejected` com uma frase para a tela.
+   * `header_handle` que a Meta exige para analisar. `/app/uploads` resolve o
+   * app pelo token da própria conexão: contas configuradas manualmente podem
+   * usar outro app que não o `META_APP_ID` do cadastro incorporado do servidor.
+   * Recusa vira `MetaTemplateRejected` com uma frase para a tela.
    */
   async uploadTemplateExample(file: {
     bytes: Buffer;
     mime: string;
     name: string;
   }): Promise<string> {
-    const appId = process.env.META_APP_ID?.trim();
-    if (!appId)
-      throw new MetaTemplateRejected(
-        "Falta configurar o app da Meta no servidor para enviar o arquivo de exemplo. Crie este modelo direto no Gerenciador do WhatsApp da Meta.",
-      );
     const query = new URLSearchParams({
       file_name: file.name,
       file_length: String(file.bytes.length),
       file_type: file.mime,
     });
-    const session = await fetch(`${graphUrl(`${appId}/uploads`)}?${query}`, {
+    const session = await fetch(`${graphUrl("app/uploads")}?${query}`, {
       method: "POST",
       headers: this.headers(false),
       cache: "no-store",
@@ -173,8 +169,13 @@ export class MetaCloudProvider implements WhatsAppProvider {
       const body = (await upload.json().catch(() => ({}))) as MetaErrorBody;
       throw new MetaTemplateRejected(exampleUploadError(upload.status, body));
     }
-    const { h } = (await upload.json()) as { h?: string };
-    if (!h) throw new Error("A Meta não devolveu o identificador do arquivo de exemplo.");
+    const { h } = (await upload.json()) as { h?: unknown };
+    // ID numérico de /{phone}/media e URL de arquivo não são handles de
+    // exemplo. Não anunciar sucesso para só descobrir isso ao criar o modelo.
+    if (typeof h !== "string" || !/^\d+::\S+$/.test(h))
+      throw new MetaTemplateRejected(
+        "A Meta não confirmou o arquivo de exemplo. Envie o arquivo novamente antes de mandar o modelo para aprovação.",
+      );
     return h;
   }
 
@@ -615,6 +616,8 @@ export function templateErrorMessage(status: number, body: MetaErrorBody): strin
   // conta. Nenhum ajuste no formulário resolve; só o suporte da Meta.
   if (error?.error_subcode === 2494160)
     return "A Meta não autoriza esta conta do WhatsApp a criar modelos. Peça a liberação ao suporte da Meta.";
+  if (error?.error_subcode === 2494102)
+    return "A Meta não reconheceu o arquivo de exemplo deste modelo. Use Trocar exemplo para enviá-lo novamente. Se continuar, a equipe precisa conferir a conexão da Meta.";
   const fromMeta = error?.error_user_msg?.replace(/\s+/g, " ").trim();
   if (fromMeta && fromMeta.length <= 200) return fromMeta;
   return "A Meta recusou o modelo. Revise o nome e o texto e tente de novo.";
