@@ -274,6 +274,27 @@ describe("Upload do exemplo para aprovação", () => {
         .rejects.toBeInstanceOf(MetaTemplateRejected);
     },
   );
+
+  it.each([
+    "4:V2hhdHNBcHAgVmlkZW8ubXA0:dmlkZW8vbXA0:assinatura:e:1794400000:app:user:sig",
+    `${handle}\n4::dmlkZW8vbXA0:outra-assinatura`,
+    `\r\n${handle}\r\n4::dmlkZW8vbXA0:outra-assinatura\r\n`,
+  ])("aceita nome de arquivo e respostas com vários handles, enviando um só no modelo", async (h) => {
+    const expected = h.trim().split(/\r?\n/)[0];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ id: sessionId }))
+      .mockResolvedValueOnce(Response.json({ h }))
+      .mockResolvedValueOnce(Response.json({ id: "modelo-video", status: "PENDING" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const meta = provider();
+    const uploaded = await meta.uploadTemplateExample({ bytes, mime: "video/mp4", name: "video.mp4" });
+    expect(uploaded).toBe(expected);
+    const draft = valid({ headerMedia: "VIDEO", headerHandle: uploaded });
+    if (!draft.ok) throw new Error("rascunho deveria ser válido");
+    await meta.createMessageTemplate(templatePayload(draft.draft));
+    const [, request] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(JSON.parse(request.body as string).components[0].example.header_handle).toEqual([expected]);
+  });
 });
 
 describe("Status para a tela", () => {

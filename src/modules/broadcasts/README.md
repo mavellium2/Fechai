@@ -207,8 +207,11 @@ modelo** — só dentro das 24h abertas pelo contato —, por isso não é ofere
   e o modelo leva `example.header_handle`. O app é resolvido pelo token, nunca
   pelo `META_APP_ID` global do cadastro incorporado: a configuração manual pode
   usar outro app. O retorno precisa ser um handle de exemplo, nunca ID de mídia
-  ou URL; a recusa `2494102` orienta trocar o exemplo. Duplicar um modelo de
-  mídia pede o exemplo de novo.
+  ou URL. A Meta pode devolver vários handles em `h`, separados por quebra de
+  linha: usamos só o primeiro completo, sem concatenar no `header_handle`.
+  O nome de arquivo pode preencher o campo depois da versão (`4:nome:...`);
+  não exigir `4::...`. A recusa `2494102` orienta trocar o exemplo. Duplicar
+  um modelo de mídia pede o exemplo de novo.
 - Simulação: `folheto_campanha` (imagem) e `orcamento_pdf` (documento); sem CDN
   configurada, o arquivo vira um link falso (`simulado.invalid`), que nada baixa.
 - Schema novo (`BroadcastCampaign.media`, `BroadcastRecipient.mediaUrl`/`mediaFilename`,

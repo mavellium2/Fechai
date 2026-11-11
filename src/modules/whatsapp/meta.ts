@@ -170,13 +170,18 @@ export class MetaCloudProvider implements WhatsAppProvider {
       throw new MetaTemplateRejected(exampleUploadError(upload.status, body));
     }
     const { h } = (await upload.json()) as { h?: unknown };
-    // ID numérico de /{phone}/media e URL de arquivo não são handles de
-    // exemplo. Não anunciar sucesso para só descobrir isso ao criar o modelo.
-    if (typeof h !== "string" || !/^\d+::\S+$/.test(h))
+    // A Meta pode devolver vários handles completos em `h`, um por linha
+    // (exemplo oficial: https://www.postman.com/meta/whatsapp-business-platform/request/fw6itvt/).
+    // O modelo precisa de UM deles, não da lista concatenada. O campo de
+    // nome também pode estar preenchido: `4:nome:mime:...`, além de `4::mime:...`.
+    const handles = typeof h === "string"
+      ? h.split(/\r?\n/).map((handle) => handle.trim()).filter(Boolean)
+      : [];
+    if (!handles.length || handles.some((handle) => !/^\d+:\S+$/.test(handle)))
       throw new MetaTemplateRejected(
         "A Meta não confirmou o arquivo de exemplo. Envie o arquivo novamente antes de mandar o modelo para aprovação.",
       );
-    return h;
+    return handles[0];
   }
 
   /** Todos os modelos da conta, inclusive em análise e recusados (`/disparos/modelos`). */
