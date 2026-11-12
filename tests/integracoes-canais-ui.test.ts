@@ -149,7 +149,7 @@ describe("Cartão da API oficial da Meta", () => {
 
   it("avisa que o número precisa ser diferente do conectado por QR code", () => {
     for (const html of [meta(), meta({ connected: false, hasCredentials: false })]) {
-      expect(html).toContain("Use um número diferente do conectado por QR code");
+      expect(html).toContain("Use um número diferente do conectado por QR code enquanto o agente responder também pela Meta");
     }
   });
 
@@ -168,7 +168,11 @@ describe("Cartão da API oficial da Meta", () => {
 
   it("conectado: oferece deixar o número só para Disparos", () => {
     expect(meta()).toContain("O agente responde por este número");
-    expect(meta({ agentReplies: false })).toContain("Este número só faz disparos");
+    const html = meta({ agentReplies: false });
+    expect(html).toContain("Este número só faz disparos");
+    expect(html).toContain("conversas são recebidas apenas pelo QR code");
+    expect(html).not.toContain("Quem escreve para este número entra em Conversas");
+    expect(html).not.toContain("Use um número diferente do conectado por QR code");
   });
 
   it("desconectado não mostra a chave do agente", () => {

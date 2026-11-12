@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getWhatsAppProvider } from "@/modules/whatsapp";
 import { processIncomingWhatsapp } from "@/modules/whatsapp/process-incoming";
+import { recordBroadcastResponse } from "@/modules/broadcasts/outcomes";
 
 /** Webhook exclusivo da Evolution. A Cloud API oficial usa `/meta/[tenantId]`. */
 const SECRET_HEADER = "x-webhook-secret";
@@ -40,5 +41,17 @@ export async function POST(req: Request) {
   if (!incoming) return NextResponse.json({ ignored: true });
 
   const result = await processIncomingWhatsapp(incoming, provider);
+  // Com a Meta só para Disparos, a resposta é registrada unicamente pelo QR.
+  // A atribuição continua usando a mensagem persistida e a mesma regra de 7 dias.
+  if ((result.status ?? 200) < 400 && !incoming.isFromMe &&
+      !incoming.isReaction && !incoming.isGroup && incoming.messageKeyId) {
+    const instance = await prisma.whatsappInstance.findFirst({
+      where: { externalId: incoming.instanceExternalId, provider: "evolution" },
+      select: { tenantId: true },
+    });
+    if (instance) await recordBroadcastResponse(
+      instance.tenantId, incoming.fromPhone, incoming.messageKeyId, incoming.occurredAt,
+    );
+  }
   return NextResponse.json(result.body, { status: result.status ?? 200 });
 }

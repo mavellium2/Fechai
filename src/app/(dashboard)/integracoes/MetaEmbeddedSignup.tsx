@@ -253,8 +253,8 @@ export function MetaEmbeddedSignup({
         </p>
         <p className="mt-1 max-w-prose text-sm text-white/60">
           Autorize pela janela oficial da Meta e confirme no celular. Seu número
-          continua no aplicativo WhatsApp Business. Use um número diferente do
-          conectado por QR code ao Fechai.
+          continua no aplicativo WhatsApp Business. Para usar o mesmo número do
+          QR code, deixe a Meta somente para Disparos.
         </p>
       </div>
       <ol className="list-decimal space-y-1 pl-5 text-sm text-white/70">

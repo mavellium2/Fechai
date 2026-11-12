@@ -123,9 +123,9 @@ export function MetaWhatsappConnect(props: Props) {
       )}
 
       <p className="max-w-prose text-sm text-white/55">
-        Use um número diferente do conectado por QR code: o mesmo número não atende pelas duas
-        conexões ao mesmo tempo. Cada conversa continua pelo número em que o contato escreveu, e
-        os Disparos saem por este.
+        {props.agentReplies
+          ? "Use um número diferente do conectado por QR code enquanto o agente responder também pela Meta."
+          : "Com a Meta só para Disparos, as conversas são recebidas apenas pelo QR code. Mantenha o QR conectado para acompanhar e responder às mensagens."}
       </p>
 
       {warning && <Alert tone="warn">{warning}</Alert>}

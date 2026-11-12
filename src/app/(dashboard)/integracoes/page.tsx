@@ -338,7 +338,7 @@ export default async function IntegracoesPage({
             </h2>
             <p className="max-w-prose text-sm text-white/60">
               {evolutionEnabled
-                ? "Os dois números podem ficar conectados ao mesmo tempo. O agente responde pelo número em que o contato escreveu, e os Disparos saem sempre pelo oficial."
+                ? "QR code e Meta podem ficar conectados ao mesmo tempo. Com a Meta só para Disparos, as conversas entram apenas pelo QR code."
                 : "O agente responde pelo número em que o contato escreveu, e os Disparos saem sempre pelo oficial."}
             </p>
           </div>

@@ -218,12 +218,14 @@ export function AgentRepliesControl({
           </span>
           <div className="min-w-0">
             <p className="font-medium text-white">
-              {on ? "O agente responde por este número" : "Este número só faz disparos"}
+              {on ? "O agente responde por este número" : provider === "meta" ? "Este número só faz disparos" : "O agente não responde por este número"}
             </p>
             <p id={descId} className="mt-0.5 max-w-prose text-sm text-white/65">
-              {on
-                ? "Desligue para usar este número só nos Disparos. Quem responder entra em Conversas para a equipe, sem resposta automática."
-                : "Quem escreve para este número entra em Conversas e é respondido pela equipe. O agente segue respondendo nos outros números."}
+              {provider === "meta"
+                ? on
+                  ? "Desligue para usar a Meta só nos Disparos e receber as conversas apenas pelo QR code."
+                  : "A Meta envia os Disparos e acompanha a entrega. Textos, áudios e mensagens da equipe entram em Conversas apenas pelo QR code, que precisa estar conectado."
+                : "As mensagens entram em Conversas para a equipe. A chave controla apenas a resposta automática do agente neste número."}
             </p>
           </div>
         </div>

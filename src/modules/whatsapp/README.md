@@ -5,8 +5,9 @@
 Conecta o número de WhatsApp do tenant e troca mensagens atrás de uma interface
 que isola o provedor. Uma conta tem até **uma conexão por provedor**:
 **Evolution API self-hosted** (QR code) e **WhatsApp Cloud API oficial da Meta**,
-e com a Meta liberada as duas ficam de pé **ao mesmo tempo**, cada uma com o seu
-número. Contas antigas continuam só com a Evolution.
+e com a Meta liberada as duas ficam de pé **ao mesmo tempo**. No mesmo número,
+o QR recebe o atendimento e a Meta deve ficar **somente para Disparos**
+(`agentReplies: false`). Contas antigas continuam só com a Evolution.
 
 ## Arquivos
 
@@ -87,9 +88,12 @@ antiga tem uma linha só — o `db push` não muda nenhuma delas. Para Meta,
 
 Antes a conta tinha uma linha só, e trocar de provedor exigia desconectar a
 outra — para não terem Evolution e Meta processando o mesmo número. Agora as
-duas convivem, **com números diferentes** (o mesmo número não atende pelas duas
-conexões: a mensagem chegaria pelos dois webhooks e o agente responderia duas
-vezes). A tela diz isso no cartão da Meta.
+duas convivem. Para atender pelas duas, use **números diferentes**. No mesmo
+número, deixe a **Meta somente para Disparos**: seu webhook não importa textos,
+áudios, reações nem ecos da equipe; o atendimento entra só pelo QR. Isso evita
+duplicação pelos ids diferentes de cada provedor e impede a Meta de tomar o
+canal da conversa ou pausar o agente. QR indisponível não libera entrada pela
+Meta: é preciso restabelecer o QR.
 
 Como a mensagem sai depende de **por onde o contato fala**, e isso é decidido em
 um lugar só (`instances.ts`):
@@ -121,12 +125,14 @@ um lugar só (`instances.ts`):
 - **Lembretes do Clinicorp** escolhem por paciente: quem já conversou pelo QR
   recebe o texto por lá; quem nunca falou, ou fala pela Meta, recebe o template
   aprovado pela Meta. Nunca primeiro contato pelo QR.
-- **Número só de recebimento** (`WhatsappInstance.agentReplies`, nasce `true`):
-  desligado em `/integracoes` (hoje a chave fica no cartão da Meta), quem
-  escreve para aquele número entra em Conversas e o agente **não** é chamado —
-  nem resposta, nem follow-up, nem "responder pendente". É o "Meta só para
-  Disparos" enquanto o QR atende. Não desvia para o outro número (mesma regra de
-  nunca cruzar); a equipe responde à mão dentro da janela de 24h.
+- **Meta somente para Disparos** (`WhatsappInstance.agentReplies`, nasce `true`):
+  desligado em `/integracoes`, ignora mensagens e ecos da Meta antes de abrir
+  conversa, baixar mídia, transcrever ou mudar canal/pausa. Não chama agente,
+  follow-up nem "responder pendente". Recibos de entrega/leitura continuam no
+  webhook Meta; resultados das campanhas vêm da resposta registrada pelo QR,
+  com a mesma atribuição de sete dias. A exceção é o botão explícito de parar:
+  registra o pedido e a confirmação sem trocar o canal da conversa. Desligar a
+  resposta automática no QR mantém o recebimento para a equipe.
 - **Estado em uma palavra** (início, onboarding, admin): conectada se **qualquer**
   conexão atende (`summarizeWhatsappStatus`).
 - **Abrir `/integracoes` não cria instância na Evolution** de conta que só usa a

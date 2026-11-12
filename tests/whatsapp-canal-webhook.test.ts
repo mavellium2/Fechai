@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   resolveAgent: vi.fn(),
   runAgentTurn: vi.fn(),
   speakReply: vi.fn(),
+  getMediaAsBase64: vi.fn(),
+  transcribeAudio: vi.fn(),
+  handleBlockButton: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -46,7 +49,11 @@ vi.mock("@/modules/agent-engine/orchestrator", () => ({
   runAgentTurn: mocks.runAgentTurn,
 }));
 vi.mock("@/modules/agent-engine/handoff", () => ({ notifyHandoffGroup: vi.fn(async () => {}) }));
-vi.mock("@/modules/ai/transcribe", () => ({ transcribeAudio: vi.fn() }));
+vi.mock("@/modules/ai/transcribe", () => ({ transcribeAudio: mocks.transcribeAudio }));
+vi.mock("@/modules/whatsapp/button-reply", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/modules/whatsapp/button-reply")>(),
+  handleBlockButton: mocks.handleBlockButton,
+}));
 vi.mock("@/modules/voice/reply", () => ({ speakReply: mocks.speakReply }));
 vi.mock("@/modules/voice/storage", () => ({ storeVoiceMessage: vi.fn(async () => null) }));
 
@@ -54,7 +61,7 @@ import { processIncomingWhatsapp } from "@/modules/whatsapp/process-incoming";
 
 const sendMessage = vi.fn<(...args: unknown[]) => Promise<string | null>>(async () => "key-resposta");
 const fakeProvider = (name: string) =>
-  ({ name, sendMessage, sendAudio: vi.fn(), getMediaAsBase64: vi.fn() }) as unknown as WhatsAppProvider;
+  ({ name, sendMessage, sendAudio: vi.fn(), getMediaAsBase64: mocks.getMediaAsBase64 }) as unknown as WhatsAppProvider;
 
 const BASE: IncomingMessage = {
   instanceExternalId: "numero-1",
@@ -96,7 +103,85 @@ beforeEach(() => {
   mocks.resolveAgent.mockResolvedValue({ id: "agente-1", stopOnEmoji: true, listenAudio: false, speakReplies: false });
   mocks.runAgentTurn.mockResolvedValue({ reply: "Claro! Qual dia fica bom?", status: "ok", replyMessageId: "m-resp" });
   mocks.speakReply.mockResolvedValue({ spoken: false });
+  mocks.handleBlockButton.mockResolvedValue({ handled: true });
   conversa(null);
+});
+
+describe("Meta somente para Disparos", () => {
+  beforeEach(() => {
+    mocks.instanceFindFirst.mockResolvedValue({
+      tenantId: "tenant-1", status: "connected", agentReplies: false, tenant: {},
+    });
+  });
+
+  it.each([
+    { text: "Quero agendar" },
+    { text: "", hasAudio: true },
+    { text: "Resposta da equipe", isFromMe: true },
+    { text: "", hasAudio: true, isFromMe: true },
+    { text: "👍", isReaction: true, isFromMe: true },
+    { text: "Eu quero", viaButton: true },
+  ])("ignora a cópia da Meta sem histórico, mídia, pausa ou troca de canal: %j", async (message) => {
+    const result = await processIncomingWhatsapp({ ...BASE, ...message }, fakeProvider("meta"));
+
+    expect(result.body).toMatchObject({ ignored: "Meta somente para disparos" });
+    expect(mocks.getOrCreateConversation).not.toHaveBeenCalled();
+    expect(mocks.appendMessage).not.toHaveBeenCalled();
+    expect(mocks.getMediaAsBase64).not.toHaveBeenCalled();
+    expect(mocks.transcribeAudio).not.toHaveBeenCalled();
+    expect(mocks.conversationUpdate).not.toHaveBeenCalled();
+    expect(mocks.resolveAgent).not.toHaveBeenCalled();
+    expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(mocks.handleBlockButton).not.toHaveBeenCalled();
+  });
+
+  it("o QR continua recebendo a mensagem para a equipe quando sua IA está desligada", async () => {
+    await processIncomingWhatsapp(BASE, fakeProvider("evolution"));
+
+    expect(mocks.appendMessage).toHaveBeenCalledWith(
+      "conv-1", "user", BASE.text, undefined, "msg-1", undefined, undefined,
+    );
+    expect(canaisGravados()).toEqual(["evolution"]);
+    expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("registra um único turno pelo QR com ids diferentes e Meta chegando primeiro: %s", async (metaFirst) => {
+    mocks.instanceFindFirst.mockImplementation(async ({ where }) => ({
+      tenantId: "tenant-1", status: "connected", agentReplies: where.provider !== "meta", tenant: {},
+    }));
+    const meta = () => processIncomingWhatsapp({ ...BASE, messageKeyId: "wamid.copia" }, fakeProvider("meta"));
+    const qr = () => processIncomingWhatsapp({ ...BASE, messageKeyId: "qr-original" }, fakeProvider("evolution"));
+    if (metaFirst) { await meta(); await qr(); }
+    else { await qr(); await meta(); }
+
+    expect(mocks.getOrCreateConversation).toHaveBeenCalledOnce();
+    expect(mocks.runAgentTurn).toHaveBeenCalledOnce();
+    expect(mocks.runAgentTurn).toHaveBeenCalledWith(expect.objectContaining({ incomingMessageKeyId: "qr-original" }));
+    expect(canaisGravados()).toEqual(["evolution"]);
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("preserva o pedido para parar por botão sem tomar o canal do QR", async () => {
+    conversa("evolution");
+    const provider = fakeProvider("meta");
+    const result = await processIncomingWhatsapp({ ...BASE, text: "Parar mensagens", viaButton: true }, provider);
+
+    expect(result.body).toMatchObject({ silent: "pediu para parar (botão)" });
+    expect(mocks.handleBlockButton).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: "tenant-1", conversationId: "conv-1", text: "Parar mensagens", provider,
+    }));
+    expect(mocks.conversationUpdate).not.toHaveBeenCalled();
+    expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("pede reentrega se não conseguiu registrar o pedido para parar", async () => {
+    mocks.handleBlockButton.mockResolvedValue({ handled: false });
+    const result = await processIncomingWhatsapp({ ...BASE, text: "Bloquear", viaButton: true }, fakeProvider("meta"));
+
+    expect(result.status).toBe(500);
+    expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+  });
 });
 
 describe("Canal da conversa na entrada", () => {

@@ -47,6 +47,11 @@ e não podem ser escolhidos (`contact-search.ts`, sempre com `tenantId`).
   pé ao mesmo tempo (ver `modules/whatsapp/README.md`, "Duas conexões ao mesmo
   tempo"). Contato novo criado pelo envio nasce como conversa da Meta; quem já
   fala pelo QR continua nele até responder pela Meta.
+  Com a Meta somente para Disparos (`agentReplies: false`), textos, áudios e
+  ecos da Meta não entram em Conversas: o QR é a única entrada. Recibos Meta
+  continuam ativos e o webhook do QR atribui a resposta à campanha pela mesma
+  regra de sete dias. Botão de parar segue sendo respeitado na Meta, sem trocar
+  o canal do atendimento.
 - Sem conexão, a página mantém o histórico e orienta a configuração.
 
 ## Telas

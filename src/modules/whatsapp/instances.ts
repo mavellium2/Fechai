@@ -26,8 +26,9 @@ export const WHATSAPP_CHANNEL_SELECT = {
 } as const;
 
 /**
- * O agente pode escrever sozinho por esta conexão? Desligado, o número só
- * recebe (a Meta fica só para Disparos). Linha sem o campo vale como ligada.
+ * O agente pode escrever sozinho por esta conexão? Desligado, a Meta fica só
+ * para Disparos, sem importar conversas; o QR ainda registra mensagens para a
+ * equipe. Linha sem o campo vale como ligada.
  */
 export function agentRepliesOn(row: { agentReplies?: boolean | null }): boolean {
   return row.agentReplies !== false;

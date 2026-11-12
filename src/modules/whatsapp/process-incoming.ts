@@ -109,6 +109,29 @@ export async function processIncomingWhatsapp(
     if (existing) return ok({ ok: true, silent: "mensagem já registrada" });
   }
 
+  // Meta só para Disparos não é uma segunda entrada do atendimento. O mesmo
+  // número pode estar no QR e os ids dos dois provedores não coincidem.
+  // Interromper antes de mídia, conversa e canal também evita que um eco da
+  // Meta pause o agente ou tome o atendimento do QR.
+  if (provider.name === "meta" && !agentRepliesOn(instance)) {
+    // O pedido explícito para parar precisa valer mesmo sem importar conversas.
+    if (!incoming.isFromMe && !incoming.isReaction && !incoming.isGroup &&
+        incoming.viaButton && isBlockButton(incoming.text)) {
+      const { conversation } = await getOrCreateConversation(
+        tenantId, incoming.fromPhone, incoming.fromName,
+      );
+      const blocked = await handleBlockButton({
+        tenantId, conversationId: conversation.id, phone: incoming.fromPhone,
+        externalId: incoming.instanceExternalId, provider,
+        text: incoming.text, messageKeyId: incoming.messageKeyId,
+      });
+      return blocked.handled
+        ? ok({ ok: true, silent: "pediu para parar (botão)" })
+        : { body: { error: "falha ao registrar pedido para parar" }, status: 500 };
+    }
+    return ok({ ok: true, ignored: "Meta somente para disparos" });
+  }
+
   const rateKey = `${provider.name}:${incoming.instanceExternalId}`;
   const burst = await rateLimit("whatsapp:instance", rateKey, 120, 60);
   if (!burst.allowed) {
@@ -299,8 +322,8 @@ export async function processIncomingWhatsapp(
     if (blocked.handled) return ok({ ok: true, silent: "pediu para parar (botão)" });
   }
 
-  // Número só de recebimento (ex.: Meta usada só para Disparos): a mensagem
-  // entra em Conversas para a equipe e o agente não é chamado nem cobrado.
+  // QR com resposta automática desligada ainda registra o atendimento humano.
+  // A Meta somente para Disparos foi interrompida antes de abrir a conversa.
   if (!agentRepliesOn(instance)) {
     await appendMessage(
       conversation.id,
