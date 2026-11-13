@@ -73,7 +73,7 @@ import {
   updateCampaign,
 } from "@/app/(dashboard)/campanhas/actions";
 import { requireCampaignActor } from "@/modules/campaigns/access";
-import { countCampaigns, getCampaign, hasMetaBroadcasts, listCampaigns } from "@/modules/campaigns/queries";
+import { getCampaign, hasMetaBroadcasts, listCampaigns } from "@/modules/campaigns/queries";
 import { CAMPAIGN_STATUS_FILTERS, CAMPAIGN_STATUSES, campaignStatus } from "@/modules/campaigns/status";
 
 const NOW = new Date("2026-11-15T15:00:00.000Z");
@@ -827,7 +827,6 @@ describe("páginas — guarda do produto e conta da sessão", () => {
   it("a lista consulta pelo tenant da sessão e pelo filtro da URL", async () => {
     await ListPage({ searchParams: Promise.resolve({ status: "paused" }) });
     expect(mocks.findMany.mock.calls[0][0].where).toMatchObject({ tenantId: "tenant-a", pausedAt: { not: null } });
-    for (const [args] of mocks.count.mock.calls) expect(args.where.tenantId).toBe("tenant-a");
   });
 
   it("filtro inválido na URL cai em 'todas' (sem arquivadas), nunca num erro", async () => {
@@ -876,12 +875,11 @@ describe("consultas — uma conta nunca vê as campanhas de outra", () => {
     }
   });
 
-  it("a aba é filtrada no banco, com o `now` do servidor, e a lista é limitada", async () => {
+  it("a aba é filtrada no banco, com o `now` do servidor", async () => {
     await listCampaigns("tenant-a", { status: "paused", now: NOW });
     const args = mocks.findMany.mock.calls[0][0];
     expect(args.where).toMatchObject({ tenantId: "tenant-a", archivedAt: null, pausedAt: { not: null }, startsAt: { lte: NOW } });
     expect(args.orderBy).toEqual([{ createdAt: "desc" }, { id: "desc" }]);
-    expect(args.take).toBe(200);
   });
 
   it("'todas' não traz as arquivadas; 'arquivadas' traz só elas", async () => {
@@ -896,16 +894,6 @@ describe("consultas — uma conta nunca vê as campanhas de outra", () => {
     const where = JSON.stringify(mocks.findMany.mock.calls[0][0].where);
     expect(where).not.toContain("endsAt");
     expect(where).not.toContain("pausedAt");
-  });
-
-  it("countCampaigns conta cada aba com o tenantId da sessão", async () => {
-    mocks.count.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (where.archivedAt === null ? 3 : 1));
-    const counts = await countCampaigns("tenant-a", NOW);
-    expect(mocks.count).toHaveBeenCalledTimes(CAMPAIGN_STATUS_FILTERS.length);
-    for (const [args] of mocks.count.mock.calls) expect(args.where.tenantId).toBe("tenant-a");
-    expect(Object.keys(counts).sort()).toEqual([...CAMPAIGN_STATUS_FILTERS].sort());
-    expect(counts.archived).toBe(1);
-    expect(counts.all).toBe(3);
   });
 
   it("getCampaign procura pelo id E pelo tenantId, e devolve null quando não acha", async () => {

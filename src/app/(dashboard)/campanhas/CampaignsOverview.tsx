@@ -6,14 +6,12 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterTabs } from "@/components/ui/filter-tabs";
 import { PageHeader } from "@/components/ui/page-header";
-import { CAMPAIGN_LIST_LIMIT, type CampaignCounts } from "@/modules/campaigns/queries";
 import type { CampaignStatusFilter } from "@/modules/campaigns/status";
 import { CampaignList, type ListedCampaign } from "./CampaignList";
 import { EMPTY_FILTER, FILTER_LABEL, FILTER_ORDER } from "./labels";
 import { NewCampaignButton } from "./NewCampaignButton";
 import { CampaignGuideButton, CampaignIntro } from "./CampaignGuide";
 import { PeriodSelect } from "./PeriodSelect";
-import { TAB_ITEM_CLASS, TAB_ROW_CLASS, TabScroller } from "./TabScroller";
 
 export type PeriodFilter = "todos" | "mes" | "trimestre" | "ano";
 
@@ -33,14 +31,12 @@ export type RunningCampaign = { id: string; name: string; until: string | null; 
 export function CampaignsOverview({
   campaigns,
   running,
-  counts,
   status,
   period,
   canEdit,
 }: {
   campaigns: ListedCampaign[];
   running: RunningCampaign[];
-  counts: CampaignCounts;
   status: CampaignStatusFilter;
   period: PeriodFilter;
   canEdit: boolean;
@@ -54,9 +50,8 @@ export function CampaignsOverview({
     return params.size ? `/campanhas?${params}` : "/campanhas";
   };
   const special = running.filter((campaign) => campaign.specialRules);
-  // "Todas" não inclui as arquivadas, então "a conta não tem nenhuma" soma as duas.
-  const hasAny = counts.all + counts.archived > 0;
-  const cut = counts[status] > campaigns.length;
+  // Lista vazia sem nenhum filtro: a conta ainda não tem campanha.
+  const noneYet = campaigns.length === 0 && status === "all" && period === "todos";
 
   return (
     <div className="w-full space-y-6">
@@ -113,28 +108,19 @@ export function CampaignsOverview({
         </section>
       )}
 
-      {/* Sem nenhuma campanha não há o que filtrar: seis abas zeradas só atrapalham. */}
-      {hasAny && (
-        <>
-          <TabScroller>
-            <FilterTabs
-              label="Filtrar campanhas por situação"
-              options={FILTER_ORDER.map((key) => ({ key, label: FILTER_LABEL[key], count: counts[key] }))}
-              active={status}
-              href={(key) => query({ status: key as CampaignStatusFilter })}
-              className={TAB_ROW_CLASS}
-              itemClassName={TAB_ITEM_CLASS}
-            />
-          </TabScroller>
-          <PeriodSelect
-            value={period}
-            options={(Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => ({ value: key, label: PERIOD_LABEL[key] }))}
-            hrefFor={Object.fromEntries((Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => [key, query({ period: key })]))}
-          />
-        </>
-      )}
+      <FilterTabs
+        label="Filtrar campanhas por situação"
+        options={FILTER_ORDER.map((key) => ({ key, label: FILTER_LABEL[key] }))}
+        active={status}
+        href={(key) => query({ status: key as CampaignStatusFilter })}
+      />
+      <PeriodSelect
+        value={period}
+        options={(Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => ({ value: key, label: PERIOD_LABEL[key] }))}
+        hrefFor={Object.fromEntries((Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => [key, query({ period: key })]))}
+      />
 
-      {!hasAny ? (
+      {noneYet ? (
         <Card>
           <EmptyState
             icon={Megaphone}
@@ -167,14 +153,7 @@ export function CampaignsOverview({
           />
         </Card>
       ) : (
-        <>
-          <CampaignList campaigns={campaigns} />
-          {cut && (
-            <p className="text-sm text-neutral panel:text-white/60">
-              Mostrando as {CAMPAIGN_LIST_LIMIT} campanhas mais recentes de {counts[status]}.
-            </p>
-          )}
-        </>
+        <CampaignList campaigns={campaigns} />
       )}
     </div>
   );
