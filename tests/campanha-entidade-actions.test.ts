@@ -7,7 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
  * - o tenant vem da sessão, nunca do formulário;
  * - id de outra conta é "não encontrada", sem escrita e sem auditoria;
  * - terminada e arquivada ficam só para leitura;
- * - cada mutação grava o evento certo na trilha (a trilha em si e o desfazer, em
+ * - cada mutação grava o evento certo na trilha (a trilha em si, em
  *   `campanha-entidade-auditoria.test.ts`);
  * - sem permissão (`canEdit` falso) ou com o guarda redirecionando, nada acontece.
  */
