@@ -2,6 +2,7 @@ import "dotenv/config";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../src/lib/prisma";
+import { resolveScriptActor, type ScriptActor } from "../src/modules/campaign-override/actor";
 import { buildRescheduleWorkbook, listRescheduleCandidates, rescheduleFileName } from "../src/modules/campaign-override/reschedule-list";
 
 /**
@@ -24,6 +25,16 @@ async function main() {
   const tenantId = one("tenant");
   if (!tenantId) throw new Error("Uso: npx tsx scripts/campanha-implantes-reagendar.ts --tenant <id> [--out caminho] [--actor <userId>] [--no-audit]");
 
+  // Ator inválido recusa antes de gerar qualquer arquivo.
+  const audit = !args.includes("--no-audit");
+  const actorId = one("actor");
+  let actor: ScriptActor | null = null;
+  if (audit && actorId) {
+    const resolved = await resolveScriptActor(actorId, tenantId);
+    if (!resolved.ok) throw new Error(resolved.message);
+    actor = resolved.actor;
+  }
+
   const now = new Date();
   const rows = await listRescheduleCandidates(tenantId, now);
 
@@ -34,11 +45,8 @@ async function main() {
   console.log(`${rows.length} consulta(s) para reagendar.`);
   console.log(`Arquivo: ${file}`);
 
-  if (args.includes("--no-audit")) return;
-  const actorId = one("actor");
-  if (!actorId) return console.log("Sem --actor: a geração não foi registrada na auditoria.");
-  const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { id: true, email: true, role: true } });
-  if (!actor) return console.log("--actor não encontrado: a geração não foi registrada na auditoria.");
+  if (!audit) return;
+  if (!actor) return console.log("Sem --actor: a geração não foi registrada na auditoria.");
   // Carregada aqui para a geração sem auditoria não puxar sessão nem Redis.
   const { recordAudit } = await import("../src/modules/audit/log");
   await recordAudit({
@@ -46,7 +54,7 @@ async function main() {
     target: { type: "CampaignOverride", id: tenantId },
     meta: { count: rows.length },
     tenantId,
-    actor: { id: actor.id, email: actor.email, role: actor.role },
+    actor,
   });
 }
 

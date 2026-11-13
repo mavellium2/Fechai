@@ -1,6 +1,7 @@
 import "dotenv/config";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
+import { resolveScriptActor } from "../src/modules/campaign-override/actor";
 import { DEFAULT_OVERRIDE_RULES, IMPLANTES_ENDS_AT, IMPLANTES_KEY } from "../src/modules/campaign-override/config";
 import { auditView, buildOverrideUpdate, currentUpdate, type OverrideChanges } from "../src/modules/campaign-override/update";
 
@@ -93,8 +94,9 @@ async function main() {
   }
   if (!apply) return console.log("\nRode de novo com --apply --actor <userId> para gravar.");
 
-  const actor = await prisma.user.findUnique({ where: { id: actorId! }, select: { id: true, email: true, role: true } });
-  if (!actor) throw new Error("--actor: usuário não encontrado.");
+  const resolved = await resolveScriptActor(actorId!, tenantId);
+  if (!resolved.ok) throw new Error(resolved.message);
+  const actor = resolved.actor;
   const data = {
     adCodes: built.next.adCodes,
     adSourceIds: built.next.adSourceIds,
