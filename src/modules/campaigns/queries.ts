@@ -1,6 +1,6 @@
 import type { Campaign } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { CAMPAIGN_STATUS_FILTERS, statusWhere, type CampaignStatusFilter } from "./status";
+import { statusWhere, type CampaignStatusFilter } from "./status";
 
 /**
  * Leitura de campanhas. TODA consulta daqui leva `tenantId` no `where`, e quem
@@ -10,14 +10,6 @@ import { CAMPAIGN_STATUS_FILTERS, statusWhere, type CampaignStatusFilter } from 
  * Nenhuma consulta filtra por "ativa": o filtro de status é só a lista da
  * tela. Campanha terminada continua existindo para os resultados.
  */
-
-/**
- * Teto da lista. Uma conta com mais campanhas que isso é improvável, mas a
- * consulta não pode ser ilimitada: a tela avisa quando o teto corta a lista.
- */
-export const CAMPAIGN_LIST_LIMIT = 200;
-
-export type CampaignCounts = Record<CampaignStatusFilter, number>;
 
 /**
  * Campanhas da conta, mais recentes primeiro. O filtro de status roda no banco
@@ -38,22 +30,7 @@ export async function listCampaigns(
         : {}),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: CAMPAIGN_LIST_LIMIT,
   });
-}
-
-/**
- * Quantas campanhas há em cada aba (a de "todas" não conta as arquivadas).
- * Seis contagens em paralelo, cada uma com o mesmo filtro da lista.
- */
-export async function countCampaigns(tenantId: string, now: Date = new Date()): Promise<CampaignCounts> {
-  const entries = await Promise.all(
-    CAMPAIGN_STATUS_FILTERS.map(
-      async (filter) =>
-        [filter, await prisma.campaign.count({ where: { tenantId, ...statusWhere(filter, now) } })] as const,
-    ),
-  );
-  return Object.fromEntries(entries) as CampaignCounts;
 }
 
 export type CampaignWithCreator = Campaign & {

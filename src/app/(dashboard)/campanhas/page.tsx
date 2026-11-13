@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requireCampaignActor } from "@/modules/campaigns/access";
 import { DEFAULT_CAMPAIGN_TIMEZONE, formatDateTime } from "@/modules/campaigns/period";
-import { countCampaigns, listCampaigns, listRunningCampaigns } from "@/modules/campaigns/queries";
+import { listCampaigns, listRunningCampaigns } from "@/modules/campaigns/queries";
 import { loadCampaignCounts } from "@/modules/campaigns/results";
 import { hasSpecialRules, parseCampaignRules } from "@/modules/campaigns/rules";
 import { parseStatusFilter } from "@/modules/campaigns/status";
@@ -35,11 +35,10 @@ export default async function CampanhasPage({
   const rawPeriod = Array.isArray(params.periodo) ? params.periodo[0] : params.periodo;
   const period: PeriodFilter = PERIODS.includes(rawPeriod as PeriodFilter) ? (rawPeriod as PeriodFilter) : "todos";
 
-  // Um `now` só para a lista, as contagens das abas e o status de cada linha.
+  // Um `now` só para a lista e o status de cada linha.
   const now = new Date();
-  const [campaigns, counts, running] = await Promise.all([
+  const [campaigns, running] = await Promise.all([
     listCampaigns(actor.tenantId, { status, now, period: periodRange(period) }),
-    countCampaigns(actor.tenantId, now),
     listRunningCampaigns(actor.tenantId, now),
   ]);
   const numbers = await loadCampaignCounts(actor.tenantId, campaigns);
@@ -56,7 +55,6 @@ export default async function CampanhasPage({
         until: campaign.endsAt ? formatDateTime(campaign.endsAt, campaign.timezone) : null,
         specialRules: hasSpecialRules(parseCampaignRules(campaign.rules)),
       }))}
-      counts={counts}
       status={status}
       period={period}
       canEdit={actor.canEdit}

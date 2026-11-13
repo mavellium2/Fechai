@@ -20,11 +20,9 @@ import { HistoryTab } from "./HistoryTab";
 import { SECTIONS, STEPS, type StepId } from "./labels";
 import { OverviewTab } from "./OverviewTab";
 import { ReviewTab } from "./ReviewTab";
-import { TAB_ITEM_CLASS, TAB_ROW_CLASS, TabScroller } from "./TabScroller";
 
 /** O que o Resumo mostra além da campanha: já formatado no servidor, no fuso dela. */
 export type CampaignSummary = {
-  statusNote: string;
   createdBy: string | null;
   createdAt: string;
   /** `null` = nunca foi alterada depois de criada. */
@@ -103,16 +101,12 @@ export function CampaignSections(props: Props) {
 
   return (
     <>
-      <TabScroller>
-        <FilterTabs
-          label="Abas da campanha"
-          options={SECTIONS.map(({ id, label }) => ({ key: id, label }))}
-          active={section}
-          href={(key) => `${base}?aba=${key}`}
-          className={TAB_ROW_CLASS}
-          itemClassName={TAB_ITEM_CLASS}
-        />
-      </TabScroller>
+      <FilterTabs
+        label="Abas da campanha"
+        options={SECTIONS.map(({ id, label }) => ({ key: id, label }))}
+        active={section}
+        href={(key) => `${base}?aba=${key}`}
+      />
 
       <div className="space-y-6">
         {section === "resultados" && props.results && <OverviewTab campaign={campaign} results={props.results} />}
