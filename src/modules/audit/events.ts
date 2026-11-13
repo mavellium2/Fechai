@@ -232,6 +232,13 @@ export const AUDIT_EVENTS = {
   "campaign.archived": { label: "Arquivou uma campanha", kind: "update", group: "campanhas" },
   "campaign.unarchived": { label: "Desarquivou uma campanha", kind: "update", group: "campanhas" },
 
+  // Regra provisória da campanha de implantes (URG-01), gravada só por script.
+  // Não revertível: corrige-se rodando o script de novo.
+  "campaign_override.created": { label: "Criou a regra provisória da campanha", kind: "create", group: "campanhas" },
+  "campaign_override.updated": { label: "Alterou a regra provisória da campanha", kind: "update", group: "campanhas" },
+  // Só a quantidade de contatos da lista de reagendamento: nada de nome ou telefone.
+  "campaign_override.reschedule_list_generated": { label: "Gerou a lista de reagendamento da campanha", kind: "access", group: "campanhas" },
+
   // ── integrações ───────────────────────────────────────────────────────
   "whatsapp.connected": { label: "Conectou o WhatsApp", kind: "update", group: "integracoes" },
   "whatsapp.history_recovery_started": { label: "Solicitou recuperação do histórico do WhatsApp", kind: "create", group: "integracoes" },
