@@ -9,7 +9,7 @@ import { loadCampaignResults } from "@/modules/campaigns/results";
 import { parseCampaignRules } from "@/modules/campaigns/rules";
 import { toCampaignView } from "@/modules/campaigns/view";
 import { CampaignDetail } from "../CampaignDetail";
-import { parseSection, parseStep, readOnlyNotice, statusNote } from "../labels";
+import { parseSection, parseStep, readOnlyNotice } from "../labels";
 
 export const metadata: Metadata = { title: "Campanha" };
 
@@ -83,7 +83,6 @@ export default async function CampanhaPage({
             : null,
       }}
       summary={{
-        statusNote: statusNote(view.status, campaign),
         createdBy: campaign.createdBy?.name ?? campaign.createdBy?.email ?? null,
         createdAt: formatDateTime(campaign.createdAt, zone),
         updatedAt: edited ? formatDateTime(campaign.updatedAt, zone) : null,

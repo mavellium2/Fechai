@@ -30,7 +30,6 @@ import {
   STATUS_ICON,
   STATUS_LABEL,
   STATUS_TONE,
-  statusNote,
 } from "@/app/(dashboard)/campanhas/labels";
 
 /**
@@ -505,30 +504,6 @@ describe("textos da tela — o que cada status diz", () => {
     expect(readOnlyNotice("active", dated)).toBeNull();
     expect(readOnlyNotice("draft", dated)).toBeNull();
     expect(readOnlyNotice("paused", dated)).toBeNull();
-  });
-
-  it("o resumo explica o rascunho (com e sem início) e a agendada", () => {
-    expect(statusNote("draft", { ...dated, activatedAt: null })).toBe(
-      "Rascunho: nada vale para os leads até você ativar no último passo.",
-    );
-    expect(statusNote("draft", { ...dated, activatedAt: null, startsAt: null, endsAt: null })).toBe(
-      "Rascunho sem data de início. Defina o período e ative no último passo.",
-    );
-    expect(statusNote("scheduled", { ...dated, startsAt: startOfDayUtc("2026-12-01", SP) })).toBe(
-      "Ativada. Começa em 01/12/2026; até lá as regras não valem.",
-    );
-  });
-
-  it("o resumo diz quando termina, desde quando está pausada e quando foi arquivada", () => {
-    expect(statusNote("active", dated)).toBe("Termina em 30/11/2026.");
-    expect(statusNote("active", { ...dated, endsAt: null })).toMatch(/Sem data de fim/);
-    expect(statusNote("paused", { ...dated, pausedAt: at("2026-11-10T15:30:00Z") })).toBe(
-      "Pausada em 10/11/2026 às 12:30. Retome quando quiser.",
-    );
-    expect(statusNote("finished", dated)).toBe("Terminou em 30/11/2026.");
-    expect(statusNote("archived", { ...dated, archivedAt: at("2026-11-12T12:00:00Z") })).toBe(
-      "Arquivada em 12/11/2026 às 09:00.",
-    );
   });
 
   it("a campanha chega à tela como texto e booleanos: status, ações permitidas e datas do formulário", () => {

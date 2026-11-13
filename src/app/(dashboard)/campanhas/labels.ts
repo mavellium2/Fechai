@@ -1,6 +1,6 @@
 import { Archive, CalendarClock, CircleCheck, CircleDot, CirclePause, FilePenLine, type LucideIcon } from "lucide-react";
 import type { BadgeProps } from "@/components/ui/badge";
-import { dayOf, formatDateTime, formatDay, zoneOrDefault } from "@/modules/campaigns/period";
+import { dayOf, formatDay, zoneOrDefault } from "@/modules/campaigns/period";
 import type { CampaignStatus, CampaignStatusFilter } from "@/modules/campaigns/status";
 
 /**
@@ -143,39 +143,6 @@ type DatedCampaign = {
   archivedAt: Date | null;
   timezone: string;
 };
-
-/**
- * Uma frase sobre a situação atual, para o Resumo. Existe porque o status é
- * calculado das datas e, sozinho, "Rascunho" confunde quem pôs uma data de
- * início que ainda não chegou.
- */
-export function statusNote(status: CampaignStatus, campaign: DatedCampaign): string {
-  const zone = zoneOrDefault(campaign.timezone);
-  switch (status) {
-    case "draft":
-      return campaign.startsAt
-        ? "Rascunho: nada vale para os leads até você ativar no último passo."
-        : "Rascunho sem data de início. Defina o período e ative no último passo.";
-    case "scheduled":
-      return campaign.startsAt
-        ? `Ativada. Começa em ${formatDay(dayOf(campaign.startsAt, zone))}; até lá as regras não valem.`
-        : "Ativada, aguardando o início.";
-    case "active":
-      return campaign.endsAt
-        ? `Termina em ${formatDay(dayOf(campaign.endsAt, zone))}.`
-        : "Sem data de fim: continua ativa até você definir uma ou arquivá-la.";
-    case "paused":
-      return campaign.pausedAt
-        ? `Pausada em ${formatDateTime(campaign.pausedAt, zone)}. Retome quando quiser.`
-        : "Pausada. Retome quando quiser.";
-    case "finished":
-      return campaign.endsAt ? `Terminou em ${formatDay(dayOf(campaign.endsAt, zone))}.` : "Terminada.";
-    case "archived":
-      return campaign.archivedAt
-        ? `Arquivada em ${formatDateTime(campaign.archivedAt, zone)}.`
-        : "Arquivada.";
-  }
-}
 
 /**
  * Aviso do topo da página quando a campanha é só para consulta. Terminada e
