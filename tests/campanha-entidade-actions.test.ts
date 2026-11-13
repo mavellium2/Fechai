@@ -75,6 +75,8 @@ import { countCampaigns, getCampaign, hasMetaBroadcasts, listCampaigns } from "@
 import { CAMPAIGN_STATUS_FILTERS, CAMPAIGN_STATUSES, campaignStatus } from "@/modules/campaigns/status";
 
 const NOW = new Date("2026-11-15T15:00:00.000Z");
+const FILLED_OBJECTIVE = "Encher a agenda de novembro";
+const ACTIVATED_AT = new Date("2026-10-21T12:00:00.000Z");
 const START = new Date("2026-11-01T03:00:00.000Z");
 const END = new Date("2026-12-01T02:59:59.000Z");
 
@@ -87,15 +89,31 @@ const row = (over: Record<string, unknown> = {}) => ({
   startsAt: START,
   endsAt: END,
   timezone: "America/Sao_Paulo",
+  activatedAt: ACTIVATED_AT,
   pausedAt: null,
   archivedAt: null,
+  objectiveType: null,
+  description: null,
+  goalValue: null,
+  goalType: null,
+  budgetCents: null,
+  messageCostCents: null,
+  keywords: [],
+  rules: null,
   createdById: "user-a",
   createdAt: new Date("2026-10-20T12:00:00.000Z"),
   updatedAt: new Date("2026-10-20T12:00:00.000Z"),
   ...over,
 });
 
-const DRAFT = { startsAt: null, endsAt: null };
+const DRAFT = { activatedAt: null, startsAt: null, endsAt: null };
+
+/** Os campos de dados gerais da spec que o formulário de teste deixa em branco. */
+const EXTRA_NULLS = { objectiveType: null, description: null, goalValue: null, goalType: null, budgetCents: null, messageCostCents: null };
+/** O que a edição grava além dos campos do formulário antigo. */
+const EXTRA_DATA = { ...EXTRA_NULLS, keywords: [] };
+/** O estado lido que a edição confere na escrita. */
+const READ_STATE = { name: "Black Friday", ...EXTRA_NULLS, objective: FILLED_OBJECTIVE, startsAt: START, endsAt: END };
 const PAUSED = { pausedAt: new Date("2026-11-10T12:00:00.000Z") };
 const FINISHED = { endsAt: new Date("2026-11-10T02:59:59.000Z") };
 const ARCHIVED = { archivedAt: new Date("2026-11-12T12:00:00.000Z") };
@@ -106,7 +124,7 @@ const form = (fields: Record<string, string>) => {
   return data;
 };
 
-const FILLED = { name: "Black Friday", objective: "Encher a agenda de novembro", startsOn: "2026-11-01", endsOn: "2026-11-30" };
+const FILLED = { name: "Black Friday", objective: FILLED_OBJECTIVE, startsOn: "2026-11-01", endsOn: "2026-11-30" };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -143,10 +161,12 @@ describe("criar campanha", () => {
         tenantId: "tenant-a",
         name: "Black Friday",
         objective: "Encher a agenda de novembro",
+        ...EXTRA_DATA,
         startsAt: START,
         endsAt: END,
         timezone: "America/Sao_Paulo",
         createdById: "user-a",
+        updatedById: "user-a",
       },
     });
   });
@@ -224,8 +244,8 @@ describe("editar campanha", () => {
     expect(result).toEqual({ ok: true, id: "camp-1" });
     expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" } });
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null, name: "Black Friday", objective: FILLED.objective, startsAt: START, endsAt: END },
-      data: { name: "Black Friday 2026", objective: "Encher a agenda de novembro", startsAt: START, endsAt: END },
+      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null, ...READ_STATE },
+      data: { name: "Black Friday 2026", objective: "Encher a agenda de novembro", ...EXTRA_DATA, startsAt: START, endsAt: END, updatedById: "user-a" },
     });
   });
 
@@ -235,8 +255,8 @@ describe("editar campanha", () => {
     expect(mocks.change).toHaveBeenCalledWith({
       event: "campaign.updated",
       target: { type: "Campaign", id: "camp-1", label: "Black Friday 2026" },
-      before: { name: "Black Friday", objective: "Encher a agenda de novembro", startsAt: START, endsAt: END },
-      after: { name: "Black Friday 2026", objective: "Encher a agenda de novembro", startsAt: START, endsAt: END },
+      before: { name: "Black Friday", objective: "Encher a agenda de novembro", ...EXTRA_DATA, startsAt: START, endsAt: END },
+      after: { name: "Black Friday 2026", objective: "Encher a agenda de novembro", ...EXTRA_DATA, startsAt: START, endsAt: END },
     });
     expect(mocks.revalidate).toHaveBeenCalledWith("/campanhas");
     expect(mocks.revalidate).toHaveBeenCalledWith("/campanhas/camp-1");
@@ -344,13 +364,15 @@ describe("editar o período de uma campanha pausada", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null, name: "Black Friday", objective: FILLED.objective, startsAt: START, endsAt: END },
+      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null, ...READ_STATE },
       data: {
         name: "Black Friday 2026",
         objective: "Encher a agenda de novembro",
+        ...EXTRA_DATA,
         startsAt: new Date("2026-12-10T03:00:00.000Z"),
         endsAt: new Date("2027-01-01T02:59:59.000Z"),
         pausedAt: null,
+        updatedById: "user-a",
       },
     });
   });
@@ -414,8 +436,8 @@ describe("editar o período de uma campanha pausada", () => {
     await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
 
     const stored = { ...before, ...written() } as unknown as Parameters<typeof campaignStatus>[0];
-    // Hoje (15/11) ela voltou a ser rascunho...
-    expect(campaignStatus(stored, NOW)).toBe("draft");
+    // Hoje (15/11) ela voltou a esperar o início (ativada, então agendada)...
+    expect(campaignStatus(stored, NOW)).toBe("scheduled");
     // ...e no meio da campanha nova está ativa, não pausada.
     expect(campaignStatus(stored, new Date("2026-12-20T15:00:00.000Z"))).toBe("active");
     // Sem a limpeza, o mesmo dia mostraria "paused".
@@ -449,8 +471,8 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
     expect(result.id).toBe("camp-1");
     expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" } });
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", startsAt: START, endsAt: END, pausedAt: null, archivedAt: null, ...c.from },
-      data: c.data,
+      where: { id: "camp-1", tenantId: "tenant-a", activatedAt: ACTIVATED_AT, startsAt: START, endsAt: END, pausedAt: null, archivedAt: null, ...c.from },
+      data: { ...c.data, updatedById: "user-a" },
     });
     expect(mocks.audit).toHaveBeenCalledTimes(1);
     expect(mocks.audit).toHaveBeenCalledWith({
@@ -537,8 +559,8 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
       mocks.findFirst.mockResolvedValue(row(over));
       expect((await archiveCampaign("camp-1")).ok).toBe(true);
       expect(mocks.updateMany).toHaveBeenCalledWith({
-        where: { id: "camp-1", tenantId: "tenant-a", startsAt: START, endsAt: END, pausedAt: null, archivedAt: null, ...over },
-        data: { archivedAt: NOW },
+        where: { id: "camp-1", tenantId: "tenant-a", activatedAt: ACTIVATED_AT, startsAt: START, endsAt: END, pausedAt: null, archivedAt: null, ...over },
+        data: { archivedAt: NOW, updatedById: "user-a" },
       });
     });
 
@@ -796,7 +818,7 @@ describe("páginas — guarda do produto e conta da sessão", () => {
 
   it("o detalhe bloqueia antes de consultar qualquer coisa", async () => {
     redirecting();
-    await expect(DetailPage({ params: Promise.resolve({ id: "camp-1" }) })).rejects.toThrow("REDIRECT:/afiliado");
+    await expect(DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) })).rejects.toThrow("REDIRECT:/afiliado");
     expect(mocks.findFirst).not.toHaveBeenCalled();
   });
 
@@ -813,7 +835,7 @@ describe("páginas — guarda do produto e conta da sessão", () => {
 
   it("o detalhe de campanha de OUTRA conta é 404, igual a um id que não existe", async () => {
     mocks.findFirst.mockResolvedValue(null);
-    await expect(DetailPage({ params: Promise.resolve({ id: "camp-de-outra-conta" }) })).rejects.toThrow("NOT_FOUND");
+    await expect(DetailPage({ params: Promise.resolve({ id: "camp-de-outra-conta" }), searchParams: Promise.resolve({}) })).rejects.toThrow("NOT_FOUND");
     expect(mocks.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "camp-de-outra-conta", tenantId: "tenant-a" } }),
     );
@@ -821,22 +843,22 @@ describe("páginas — guarda do produto e conta da sessão", () => {
 
   it("o detalhe da própria campanha abre (e `canEdit` falso esconde os botões)", async () => {
     mocks.findFirst.mockResolvedValue({ ...row(), createdBy: { name: "Dono", email: "dono@example.test" } });
-    const open = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    const open = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
     expect(open.props).toMatchObject({ canEdit: true, notice: null, campaign: { id: "camp-1", status: "active" } });
 
     mocks.canEdit.value = false;
-    const readOnly = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    const readOnly = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
     expect(readOnly.props.canEdit).toBe(false);
   });
 
   it("terminada e arquivada abrem com o aviso de 'só para consulta' e sem ações de edição", async () => {
     mocks.findFirst.mockResolvedValue({ ...row(FINISHED), createdBy: null });
-    const finished = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    const finished = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
     expect(finished.props.notice).toBe("Campanha terminada em 09/11/2026. Fica só para consulta e segue nos relatórios.");
     expect(finished.props.campaign.allowed).toMatchObject({ edit: false, pause: false, resume: false, archive: true });
 
     mocks.findFirst.mockResolvedValue({ ...row(ARCHIVED), createdBy: null });
-    const archived = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    const archived = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
     expect(archived.props.notice).toBe("Campanha arquivada. Fica só para consulta e segue nos relatórios.");
     expect(archived.props.campaign.allowed).toMatchObject({ edit: false, archive: false, unarchive: true });
   });
@@ -892,10 +914,12 @@ describe("consultas — uma conta nunca vê as campanhas de outra", () => {
     );
   });
 
-  it("getCampaign traz só nome e e-mail de quem criou", async () => {
+  it("getCampaign traz só nome e e-mail de quem criou e de quem alterou por último", async () => {
     await getCampaign("tenant-a", "camp-1");
     expect(mocks.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ include: { createdBy: { select: { name: true, email: true } } } }),
+      expect.objectContaining({
+        include: { createdBy: { select: { name: true, email: true } }, updatedBy: { select: { name: true, email: true } } },
+      }),
     );
   });
 

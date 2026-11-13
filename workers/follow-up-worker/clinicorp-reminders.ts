@@ -1,4 +1,5 @@
 import { blockReminder, claimReminder, finishReminder, markReminderManual, reminderAlreadyHandled, type ReminderKey } from "../../src/modules/scheduling/reminder-dispatch";
+import { loadReminderOverrides } from "../../src/modules/campaigns/active";
 import { recordMessageContext } from "../../src/modules/reports/contact-context-events";
 import { prisma } from "../../src/lib/prisma";
 import {
@@ -190,9 +191,16 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
   const phone = clinicorpWhatsappPhone(item.phone);
   if (!phone || await isPhoneBlocked(tenantId, phone)) { await blockReminder(key, "Telefone inválido ou contato bloqueado."); return { sent: false, reason: "phone" }; }
   const known = await prisma.lead.findFirst({ where: { tenantId, phone: { in: broadcastPhoneVariants(phone) } },
-    select: { phone: true, isTest: true, conversation: { select: { id: true, lastInboundAt: true, followUpReason: true, variables: true, whatsappProvider: true } } } });
+    select: { id: true, phone: true, isTest: true, conversation: { select: { id: true, lastInboundAt: true, followUpReason: true, variables: true, whatsappProvider: true } } } });
   if (known?.isTest || known?.conversation?.followUpReason === "stop") {
     await blockReminder(key, "Conversa de teste ou contato que pediu para parar."); return { sent: false, reason: "stop" };
+  }
+  // Lead de campanha em vigor com lembretes desligados ou próprios: a
+  // confirmação automática do Clinicorp não sai (os personalizados valem para
+  // as consultas do fechai). Não bloqueia: ao fim da campanha volta a valer.
+  if (known && !options.operation) {
+    const campaign = (await loadReminderOverrides([tenantId], now)).get(known.id);
+    if (campaign) return { sent: false, reason: "campaign" };
   }
   if (options.operation === "manual") {
     const recorded = await markReminderManual(key, options.userId ?? "");

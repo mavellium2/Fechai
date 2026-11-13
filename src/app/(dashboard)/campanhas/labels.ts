@@ -1,4 +1,4 @@
-import { Archive, CircleCheck, CircleDot, CirclePause, FilePenLine, type LucideIcon } from "lucide-react";
+import { Archive, CalendarClock, CircleCheck, CircleDot, CirclePause, FilePenLine, type LucideIcon } from "lucide-react";
 import type { BadgeProps } from "@/components/ui/badge";
 import { dayOf, formatDateTime, formatDay, zoneOrDefault } from "@/modules/campaigns/period";
 import type { CampaignStatus, CampaignStatusFilter } from "@/modules/campaigns/status";
@@ -11,6 +11,7 @@ import type { CampaignStatus, CampaignStatusFilter } from "@/modules/campaigns/s
 
 export const STATUS_LABEL: Record<CampaignStatus, string> = {
   draft: "Rascunho",
+  scheduled: "Agendada",
   active: "Ativa",
   paused: "Pausada",
   finished: "Terminada",
@@ -26,6 +27,7 @@ export const STATUS_LABEL: Record<CampaignStatus, string> = {
  */
 export const STATUS_TONE: Record<CampaignStatus, NonNullable<BadgeProps["tone"]>> = {
   draft: "neutral",
+  scheduled: "signal",
   active: "iris",
   paused: "warn",
   finished: "success",
@@ -35,6 +37,7 @@ export const STATUS_TONE: Record<CampaignStatus, NonNullable<BadgeProps["tone"]>
 /** Estado nunca é só cor: cada um tem o próprio ícone além do texto. */
 export const STATUS_ICON: Record<CampaignStatus, LucideIcon> = {
   draft: FilePenLine,
+  scheduled: CalendarClock,
   active: CircleDot,
   paused: CirclePause,
   finished: CircleCheck,
@@ -42,11 +45,12 @@ export const STATUS_ICON: Record<CampaignStatus, LucideIcon> = {
 };
 
 /** Ordem e nome das abas da lista. */
-export const FILTER_ORDER: readonly CampaignStatusFilter[] = ["all", "active", "draft", "paused", "finished", "archived"];
+export const FILTER_ORDER: readonly CampaignStatusFilter[] = ["all", "active", "scheduled", "draft", "paused", "finished", "archived"];
 
 export const FILTER_LABEL: Record<CampaignStatusFilter, string> = {
   all: "Todas",
   active: "Ativas",
+  scheduled: "Agendadas",
   draft: "Rascunho",
   paused: "Pausadas",
   finished: "Terminadas",
@@ -65,7 +69,11 @@ export const EMPTY_FILTER: Record<CampaignStatusFilter, { title: string; descrip
   },
   draft: {
     title: "Nenhum rascunho",
-    description: "Campanha sem data de início, ou que ainda não começou, fica aqui.",
+    description: "Campanha que ainda não foi ativada fica aqui, sem valer para os leads.",
+  },
+  scheduled: {
+    title: "Nenhuma campanha agendada",
+    description: "Campanha ativada com início no futuro fica aqui até a data chegar.",
   },
   paused: {
     title: "Nenhuma campanha pausada",
@@ -81,18 +89,27 @@ export const EMPTY_FILTER: Record<CampaignStatusFilter, { title: string; descrip
   },
 };
 
-/** Seções da página da campanha, na ordem em que aparecem (e na navegação). */
+/** Abas da página da campanha, na ordem em que aparecem. */
 export const SECTIONS = [
-  { id: "resumo", label: "Resumo" },
-  { id: "anuncios", label: "Anúncios" },
-  { id: "regras", label: "Regras do agente" },
-  { id: "midias", label: "Mídias" },
+  { id: "visao-geral", label: "Visão geral" },
+  { id: "dados", label: "Dados gerais" },
+  { id: "anuncios", label: "Anúncios e mídias" },
   { id: "disparos", label: "Disparos" },
+  { id: "regras", label: "Regras do agente" },
   { id: "leads", label: "Leads" },
-  { id: "resultados", label: "Resultados" },
+  { id: "historico", label: "Histórico" },
+  { id: "revisao", label: "Revisão" },
 ] as const;
 
+export type SectionId = (typeof SECTIONS)[number]["id"];
+
+export function parseSection(value: unknown): SectionId | null {
+  const first = Array.isArray(value) ? value[0] : value;
+  return SECTIONS.some((section) => section.id === first) ? (first as SectionId) : null;
+}
+
 type DatedCampaign = {
+  activatedAt: Date | null;
   startsAt: Date | null;
   endsAt: Date | null;
   pausedAt: Date | null;
@@ -110,8 +127,12 @@ export function statusNote(status: CampaignStatus, campaign: DatedCampaign): str
   switch (status) {
     case "draft":
       return campaign.startsAt
-        ? `Começa em ${formatDay(dayOf(campaign.startsAt, zone))}. Até lá ela fica como rascunho.`
-        : "Sem data de início, a campanha fica como rascunho.";
+        ? "Rascunho: nada vale para os leads até você ativar na aba Revisão."
+        : "Rascunho sem data de início. Defina o período e ative na aba Revisão.";
+    case "scheduled":
+      return campaign.startsAt
+        ? `Ativada. Começa em ${formatDay(dayOf(campaign.startsAt, zone))}; até lá as regras não valem.`
+        : "Ativada, aguardando o início.";
     case "active":
       return campaign.endsAt
         ? `Termina em ${formatDay(dayOf(campaign.endsAt, zone))}.`

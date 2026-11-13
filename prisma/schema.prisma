@@ -369,14 +369,107 @@ model Campaign {
   pausedAt    DateTime?
   /// Arquivada em. Ganha de todo o resto; desarquivar volta ao status das datas.
   archivedAt  DateTime?
+  /// Ativada em ("Ativar" na revisão). Sem isto a campanha é rascunho mesmo com
+  /// datas: dá para montar anúncios, mídias e regras sem que nada valha para os
+  /// leads. Ver `modules/campaigns/status.ts`.
+  activatedAt DateTime?
+  /// Tipo do objetivo: agendamento | reativacao | evento | promocao | outro.
+  /// O texto livre continua em `objective`.
+  objectiveType String?  @db.VarChar(20)
+  /// Contexto para a equipe e para a IA (entra no prompt enquanto a campanha vale).
+  description String?
+  /// Meta numérica e do quê: leads | agendamentos | comparecimentos.
+  goalValue   Int?
+  goalType    String?   @db.VarChar(20)
+  /// Investimento em mídia, em centavos (custo por lead/agendamento).
+  budgetCents Int?
+  /// Quanto custa cada mensagem de disparo enviada (tabela da Meta), em
+  /// centavos. Custo dos disparos = enviadas × isto; sem valor, não há custo.
+  messageCostCents Int?
+  /// Termos que atribuem o lead pela primeira mensagem (sem acento, minúsculas).
+  keywords    String[]  @default([])
+  /// Regras do agente (datas, horários, chegada, lembretes, oferta, instruções).
+  /// Json lido por `parseCampaignRules`, que nunca lança. Ver `modules/campaigns/rules.ts`.
+  rules       Json?
   /// Quem criou. `SetNull`: remover o usuário não apaga a campanha da conta.
   createdById String?
-  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?     @relation("CampaignCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  /// Quem alterou por último (dados, regras, anúncios, mídias, leads).
+  updatedById String?
+  updatedBy   User?     @relation("CampaignUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  ads         CampaignAd[]
+  assets      CampaignAsset[]
+  leads       CampaignLead[]
+  broadcasts  BroadcastCampaign[]
 
   @@index([tenantId, archivedAt])
   @@index([tenantId, endsAt])
+}
+
+/// Anúncio da Meta ligado a uma campanha: o lead que chega por ele entra na
+/// campanha (`origin = anuncio`). Pelo menos um nível de id, ou o código que o
+/// gestor escreve no anúncio ("AD37"), que é o que a Evolution entrega.
+model CampaignAd {
+  id             String   @id @default(cuid())
+  tenantId       String
+  campaignId     String
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  platform       String   @default("meta")
+  metaCampaignId String?
+  adsetId        String?
+  adId           String?
+  /// Código do anúncio (`LeadAdOrigin.code`), sem o nome.
+  code           String?
+  displayName    String
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, adId])
+  @@index([tenantId, code])
+  @@index([campaignId])
+}
+
+/// Arquivo da campanha (imagem, vídeo, PDF, áudio) na CDN. `usage` diz quem
+/// pode usar: o agente na conversa, o disparo, ou os dois.
+model CampaignAsset {
+  id          String   @id @default(cuid())
+  tenantId    String
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  kind        String   // image | video | pdf | audio
+  url         String
+  /// Caminho na CDN, para apagar o arquivo junto com a linha.
+  path        String?
+  name        String
+  mime        String
+  size        Int
+  usage       String   @default("agent") // agent | broadcast | both
+  instruction String?
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId])
+}
+
+/// Lead de uma campanha. Um lead pode estar em várias ao longo do tempo; as
+/// regras aplicadas são as da campanha em vigor mais recente.
+model CampaignLead {
+  id          String   @id @default(cuid())
+  tenantId    String
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// anuncio | disparo | palavra_chave | manual
+  source      String
+  assignedAt  DateTime @default(now())
+  /// Quem adicionou à mão (null nas atribuições automáticas).
+  assignedById String?
+  /// Mídias da campanha que o agente já mandou a este lead (não repetir).
+  sentAssetIds String[] @default([])
+
+  @@unique([campaignId, leadId])
+  @@index([tenantId, leadId])
 }
 
 /// Pesquisa de satisfação pós-conversa, por conta. Sem linha = desligada, com
@@ -649,8 +742,12 @@ model BroadcastCampaign {
   finishedAt       DateTime?
   error            String?
   recipients       BroadcastRecipient[]
+  /// Campanha (`Campaign`) a que este disparo pertence; no máximo uma.
+  campaignId       String?
+  campaign         Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
+  @@index([campaignId])
   @@index([status, createdAt])
   @@index([status, nextAttemptAt, tenantId])
 }
@@ -758,7 +855,8 @@ model User {
   passwordResetTokens PasswordResetToken[]
 
   /// Campanhas que esta pessoa criou (`Campaign.createdById`).
-  campaignsCreated Campaign[]
+  campaignsCreated Campaign[] @relation("CampaignCreatedBy")
+  campaignsUpdated Campaign[] @relation("CampaignUpdatedBy")
 
   // Programa de afiliados: presente só se a pessoa optou por ser afiliada
   // (no /cadastro ou ativando depois). Papel, não conta separada.
@@ -1067,6 +1165,7 @@ model Lead {
   conversation Conversation?
   appointments Appointment[]
   adOrigin     LeadAdOrigin?
+  campaignLinks CampaignLead[]
 
   @@index([tenantId, updatedAt, id])
   @@index([tenantId])

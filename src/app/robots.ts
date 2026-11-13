@@ -10,7 +10,7 @@ import { absoluteUrl } from "@/lib/seo";
  * ser citado como resposta, e para isso o conteúdo precisa ser lido.
  */
 export default function robots(): MetadataRoute.Robots {
-  const disallow = ["/api/", "/admin/", "/inicio", "/agentes", "/conversas", "/contatos", "/agenda", "/relatorios", "/integracoes", "/configuracoes", "/onboarding"];
+  const disallow = ["/api/", "/admin/", "/inicio", "/agentes", "/conversas", "/contatos", "/agenda", "/relatorios", "/campanhas", "/integracoes", "/configuracoes", "/onboarding"];
 
   return {
     rules: [

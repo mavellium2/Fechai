@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { broadcastPhoneVariants } from "./phone";
+import { attributeByBroadcast } from "@/modules/campaigns/attribution";
 export const ATTRIBUTION_DAYS = 7;
 
 /** Último disparo antes da resposta, em até 7 dias. Não atribui testes. */
@@ -36,6 +37,8 @@ export async function recordBroadcastResponse(
     orderBy: [{ sentAt: "desc" }, { id: "desc" }],
   });
   if (!recipient?.sentAt || recipient.isTest) return;
+  // Disparo vinculado a uma campanha: quem respondeu entra nela (nunca lança).
+  await attributeByBroadcast({ tenantId, leadId: message.conversation.lead.id, broadcastId: recipient.campaignId, at: occurredAt });
   await prisma.broadcastRecipient.updateMany({
     where: { id: recipient.id, repliedAt: null },
     data: { repliedAt: occurredAt, firstReplyMessageId: messageId },

@@ -14,9 +14,16 @@ import type { Prisma } from "@prisma/client";
  * `Prisma` importado é só o TIPO do filtro (apagado na compilação).
  */
 
-export type CampaignStatus = "draft" | "active" | "paused" | "finished" | "archived";
+export type CampaignStatus = "draft" | "scheduled" | "active" | "paused" | "finished" | "archived";
 
-export const CAMPAIGN_STATUSES = ["draft", "active", "paused", "finished", "archived"] as const satisfies readonly CampaignStatus[];
+export const CAMPAIGN_STATUSES = [
+  "draft",
+  "scheduled",
+  "active",
+  "paused",
+  "finished",
+  "archived",
+] as const satisfies readonly CampaignStatus[];
 
 /** Filtro da lista: um status, ou `all` = tudo que não está arquivado. */
 export type CampaignStatusFilter = "all" | CampaignStatus;
@@ -29,8 +36,9 @@ export function parseStatusFilter(value: unknown): CampaignStatusFilter {
   return (CAMPAIGN_STATUS_FILTERS as readonly unknown[]).includes(first) ? (first as CampaignStatusFilter) : "all";
 }
 
-/** As quatro datas de que o status depende. */
+/** As cinco datas de que o status depende. */
 export type CampaignTimeline = {
+  activatedAt: Date | null;
   startsAt: Date | null;
   endsAt: Date | null;
   pausedAt: Date | null;
@@ -41,11 +49,13 @@ export type CampaignTimeline = {
  * Precedência (a ordem É a regra):
  *
  * 1. `archivedAt` → arquivada, vença o que vencer.
- * 2. Sem `startsAt`, ou ainda antes dele → rascunho.
- * 3. Passou de `endsAt` → terminada. Vem **antes** da pausa: a pausa só vale
+ * 2. Sem `activatedAt` ou sem `startsAt` → rascunho. Datas preenchidas não
+ *    bastam: a campanha só vale para os leads depois de "Ativar".
+ * 3. Ativada e ainda antes do início → agendada.
+ * 4. Passou de `endsAt` → terminada. Vem **antes** da pausa: a pausa só vale
  *    dentro do período, então campanha pausada que chegou ao fim está terminada.
- * 4. `pausedAt` → pausada.
- * 5. Senão, ativa.
+ * 5. `pausedAt` → pausada.
+ * 6. Senão, ativa.
  *
  * `endsAt` é inclusivo: no instante exato dele a campanha ainda está ativa, e
  * só vira terminada no instante seguinte (`now > endsAt`).
@@ -53,7 +63,8 @@ export type CampaignTimeline = {
 export function campaignStatus(campaign: CampaignTimeline, now: Date): CampaignStatus {
   const at = now.getTime();
   if (campaign.archivedAt) return "archived";
-  if (!campaign.startsAt || at < campaign.startsAt.getTime()) return "draft";
+  if (!campaign.activatedAt || !campaign.startsAt) return "draft";
+  if (at < campaign.startsAt.getTime()) return "scheduled";
   if (campaign.endsAt && at > campaign.endsAt.getTime()) return "finished";
   if (campaign.pausedAt) return "paused";
   return "active";
@@ -72,8 +83,10 @@ export function isReadOnly(campaign: CampaignTimeline, now: Date): boolean {
  */
 export type CampaignAllowed = {
   edit: boolean;
+  activate: boolean;
   pause: boolean;
   resume: boolean;
+  finish: boolean;
   archive: boolean;
   unarchive: boolean;
 };
@@ -81,10 +94,13 @@ export type CampaignAllowed = {
 export function allowedActions(status: CampaignStatus): CampaignAllowed {
   return {
     // Terminada não prorroga e arquivada não edita: ficam como foram.
-    edit: status === "draft" || status === "active" || status === "paused",
+    edit: status === "draft" || status === "scheduled" || status === "active" || status === "paused",
+    activate: status === "draft",
     // Pausar só tem sentido no meio do período.
     pause: status === "active",
     resume: status === "paused",
+    // Encerrar antes do fim: agendada, ativa ou pausada.
+    finish: status === "scheduled" || status === "active" || status === "paused",
     // Arquivar vale até para a terminada (é como se tira da lista), e
     // desarquivar só para a arquivada.
     archive: status !== "archived",
@@ -105,8 +121,9 @@ export function allowedActions(status: CampaignStatus): CampaignAllowed {
  * `where` em `tests/campanha-entidade-status.test.ts`.
  */
 export function statusWhere(filter: CampaignStatusFilter, now: Date): Prisma.CampaignWhereInput {
+  const activated: Prisma.CampaignWhereInput = { archivedAt: null, activatedAt: { not: null } };
   const running: Prisma.CampaignWhereInput = {
-    archivedAt: null,
+    ...activated,
     startsAt: { lte: now },
     OR: [{ endsAt: null }, { endsAt: { gte: now } }],
   };
@@ -115,9 +132,11 @@ export function statusWhere(filter: CampaignStatusFilter, now: Date): Prisma.Cam
     case "archived":
       return { archivedAt: { not: null } };
     case "draft":
-      return { archivedAt: null, OR: [{ startsAt: null }, { startsAt: { gt: now } }] };
+      return { archivedAt: null, OR: [{ activatedAt: null }, { startsAt: null }] };
+    case "scheduled":
+      return { ...activated, startsAt: { gt: now } };
     case "finished":
-      return { archivedAt: null, startsAt: { lte: now }, endsAt: { lt: now } };
+      return { ...activated, startsAt: { lte: now }, endsAt: { lt: now } };
     case "paused":
       return { ...running, pausedAt: { not: null } };
     case "active":

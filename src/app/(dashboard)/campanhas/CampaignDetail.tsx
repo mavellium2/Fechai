@@ -1,35 +1,48 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import type { CampaignAd, CampaignAsset } from "@prisma/client";
 import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/ui/page-header";
+import type { CampaignHistoryEntry, CapturedAd } from "@/modules/campaigns/detail";
+import type { CampaignResults } from "@/modules/campaigns/results";
+import type { CampaignRules } from "@/modules/campaigns/rules";
 import type { CampaignView } from "@/modules/campaigns/view";
 import { CampaignActions } from "./CampaignActions";
 import { CampaignSections, type CampaignSummary } from "./CampaignSections";
 import { CampaignStatusBadge } from "./CampaignStatusBadge";
+import type { SectionId } from "./labels";
+
+export type AvailableBroadcast = { id: string; name: string; status: string; createdAt: Date; confirmedAt: Date | null };
 
 /**
  * A página `/campanhas/[id]` já com os dados na mão: voltar, título com situação
- * e período, ações, aviso de "só para consulta" e as seções. A `page.tsx` cuida
- * da sessão e da busca; aqui só se apresenta.
+ * e período, ações, aviso de "só para consulta" e a aba aberta. A `page.tsx`
+ * cuida da sessão e da busca (só do que a aba precisa); aqui só se apresenta.
  *
  * Terminada e arquivada ganham um aviso neutro e nenhum botão de edição (quem
  * decide é `campaign.allowed`). Sem permissão (`canEdit` falso) os botões somem
  * e uma linha discreta diz por quê — a action recusa do mesmo jeito.
  */
-export function CampaignDetail({
-  campaign,
-  summary,
-  notice,
-  metaEnabled,
-  canEdit,
-}: {
+export function CampaignDetail(props: {
   campaign: CampaignView;
+  section: SectionId;
   summary: CampaignSummary;
   /** "Campanha terminada em…": só para consulta. `null` quando a campanha é editável. */
   notice: string | null;
   metaEnabled: boolean;
   canEdit: boolean;
+  timezone: string;
+  rules: CampaignRules;
+  ruleWindow: { endsAt: string | null; graceUntil: string | null };
+  results: CampaignResults | null;
+  ads: CampaignAd[] | null;
+  assets: CampaignAsset[] | null;
+  capturedAds: CapturedAd[] | null;
+  availableBroadcasts: AvailableBroadcast[] | null;
+  linkedBroadcasts: { id: string; name: string }[] | null;
+  history: CampaignHistoryEntry[] | null;
 }) {
+  const { campaign, canEdit, notice } = props;
   return (
     <div className="w-full space-y-6">
       <Link
@@ -59,14 +72,12 @@ export function CampaignDetail({
       />
 
       {!canEdit && (
-        <p className="text-sm text-neutral panel:text-white/60">
-          Você pode ver, mas só o dono ou um administrador edita.
-        </p>
+        <p className="text-sm text-neutral panel:text-white/60">Você pode ver, mas só o dono ou um administrador edita.</p>
       )}
 
       {notice && <Alert tone="info">{notice}</Alert>}
 
-      <CampaignSections campaign={campaign} summary={summary} metaEnabled={metaEnabled} />
+      <CampaignSections {...props} />
     </div>
   );
 }

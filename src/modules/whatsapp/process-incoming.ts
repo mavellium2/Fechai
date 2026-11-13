@@ -354,7 +354,7 @@ export async function processIncomingWhatsapp(
     });
   }
   try {
-    const { reply, status, replyMessageId } = await runAgentTurn({
+    const { reply, status, replyMessageId, media } = await runAgentTurn({
       tenantId,
       conversationId: conversation.id,
       leadId: lead.id,
@@ -377,6 +377,7 @@ export async function processIncomingWhatsapp(
       replyMessageId,
       incomingWasAudio: incoming.hasAudio,
       agent,
+      media,
     });
   } catch (err) {
     console.error("[whatsapp webhook] falha ao processar turno", err);

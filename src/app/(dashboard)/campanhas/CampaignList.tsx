@@ -1,7 +1,36 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
+import { GOAL_TYPE_LABEL, type GoalType } from "@/modules/campaigns/limits";
 import type { CampaignView } from "@/modules/campaigns/view";
+
+export type ListedCampaign = CampaignView & { numbers: { leads: number; scheduled: number; attended: number } };
+
+/** Progresso da meta da linha, ou null sem meta. */
+function goalProgress(campaign: ListedCampaign): { text: string; percent: number } | null {
+  if (!campaign.goalValue || !campaign.goalType) return null;
+  const reached =
+    campaign.goalType === "agendamentos"
+      ? campaign.numbers.scheduled
+      : campaign.goalType === "comparecimentos"
+        ? campaign.numbers.attended
+        : campaign.numbers.leads;
+  const percent = Math.round((reached / campaign.goalValue) * 100);
+  return { text: `${reached}/${campaign.goalValue} ${GOAL_TYPE_LABEL[campaign.goalType as GoalType] ?? ""} (${percent}%)`, percent };
+}
+
+function GoalBar({ campaign }: { campaign: ListedCampaign }) {
+  const goal = goalProgress(campaign);
+  if (!goal) return <span className="text-neutral panel:text-white/55">Sem meta</span>;
+  return (
+    <span className="block min-w-32">
+      <span className="block whitespace-nowrap text-sm">{goal.text}</span>
+      <span className="mt-1 block h-1 overflow-hidden rounded-full bg-ink/10 panel:bg-white/10" aria-hidden>
+        <span className="block h-full rounded-full bg-iris" style={{ width: `${Math.min(goal.percent, 100)}%` }} />
+      </span>
+    </span>
+  );
+}
 import { CampaignStatusBadge } from "./CampaignStatusBadge";
 
 /** Link do nome: o mesmo nos dois formatos da lista, com o foco do produto. */
@@ -22,15 +51,15 @@ const NAME_LINK =
  * Os dois existem no HTML e o CSS mostra um só; nunca há rolagem horizontal da
  * página. Componente de servidor: não tem estado, só apresenta.
  */
-export function CampaignList({ campaigns }: { campaigns: CampaignView[] }) {
+export function CampaignList({ campaigns }: { campaigns: ListedCampaign[] }) {
   return (
     <>
       <Card className="hidden md:block">
         <DataTable
           caption="Campanhas da conta"
-          head={["Nome", "Objetivo", "Período", "Situação"]}
+          head={["Nome", "Situação", "Período", "Leads", "Agendados", "Compareceram", "Meta"]}
           headerAlign="left"
-          columnAlign={["left", "left", "left", "left"]}
+          columnAlign={["left", "left", "left", "left", "left", "left", "left"]}
           rows={campaigns.map((campaign) => ({
             id: campaign.id,
             cells: [
@@ -38,19 +67,14 @@ export function CampaignList({ campaigns }: { campaigns: CampaignView[] }) {
               <Link key="nome" href={`/campanhas/${campaign.id}`} className={`${NAME_LINK} wrap-anywhere`}>
                 {campaign.name}
               </Link>,
-              campaign.objective ? (
-                <span key="objetivo" className="block max-w-xs truncate" title={campaign.objective}>
-                  {campaign.objective}
-                </span>
-              ) : (
-                <span key="objetivo" className="text-neutral panel:text-white/55">
-                  Sem objetivo
-                </span>
-              ),
+              <CampaignStatusBadge key="situacao" status={campaign.status} />,
               <span key="periodo" className="whitespace-nowrap">
                 {campaign.period}
               </span>,
-              <CampaignStatusBadge key="situacao" status={campaign.status} />,
+              String(campaign.numbers.leads),
+              String(campaign.numbers.scheduled),
+              String(campaign.numbers.attended),
+              <GoalBar key="meta" campaign={campaign} />,
             ],
           }))}
         />
@@ -75,6 +99,14 @@ export function CampaignList({ campaigns }: { campaigns: CampaignView[] }) {
                 <CampaignStatusBadge status={campaign.status} className="shrink-0" />
               </div>
               <p className="mt-2 text-sm text-neutral panel:text-white/60">{campaign.period}</p>
+              <p className="mt-1 text-sm text-ink panel:text-white/85">
+                {campaign.numbers.leads} leads · {campaign.numbers.scheduled} agendados · {campaign.numbers.attended} compareceram
+              </p>
+              {goalProgress(campaign) && (
+                <div className="mt-2">
+                  <GoalBar campaign={campaign} />
+                </div>
+              )}
             </Card>
           </li>
         ))}

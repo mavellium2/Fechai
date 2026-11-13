@@ -42,7 +42,10 @@ import {
 
 const SP = DEFAULT_CAMPAIGN_TIMEZONE;
 
+const ACTIVATED = new Date("2026-10-01T12:00:00.000Z");
+
 const line = (over: Partial<CampaignTimeline> = {}): CampaignTimeline => ({
+  activatedAt: ACTIVATED,
   startsAt: null,
   endsAt: null,
   pausedAt: null,
@@ -65,8 +68,16 @@ describe("status — os cinco estados", () => {
     expect(campaignStatus(line({ pausedAt: at("2026-11-01T00:00:00Z") }), now)).toBe("draft");
   });
 
-  it("início no futuro continua rascunho", () => {
-    expect(campaignStatus(line({ startsAt: at("2026-12-01T03:00:00Z") }), now)).toBe("draft");
+  it("ativada com início no futuro é agendada", () => {
+    expect(campaignStatus(line({ startsAt: at("2026-12-01T03:00:00Z") }), now)).toBe("scheduled");
+  });
+
+  it("sem ativar é rascunho, mesmo com o período inteiro preenchido e em andamento", () => {
+    // As regras da campanha só valem depois de "Ativar": datas não bastam.
+    const dated = { startsAt: at("2026-11-01T03:00:00Z"), endsAt: at("2026-12-01T02:59:59Z") };
+    expect(campaignStatus(line({ ...dated, activatedAt: null }), now)).toBe("draft");
+    expect(campaignStatus(line({ ...dated, activatedAt: null, pausedAt: at("2026-11-10T12:00:00Z") }), now)).toBe("draft");
+    expect(campaignStatus(line({ ...dated, activatedAt: null, archivedAt: now }), now)).toBe("archived");
   });
 
   it("dentro do período é ativa, com ou sem data de fim", () => {
@@ -101,7 +112,7 @@ describe("status — fronteiras e precedência", () => {
   const endsAt = endOfDayUtc("2026-11-30", SP);
 
   it("o início é inclusivo: no instante exato já está ativa", () => {
-    expect(campaignStatus(line({ startsAt, endsAt }), new Date(startsAt.getTime() - 1))).toBe("draft");
+    expect(campaignStatus(line({ startsAt, endsAt }), new Date(startsAt.getTime() - 1))).toBe("scheduled");
     expect(campaignStatus(line({ startsAt, endsAt }), startsAt)).toBe("active");
   });
 
@@ -124,9 +135,9 @@ describe("status — fronteiras e precedência", () => {
     expect(campaignStatus(paused, at("2026-12-02T12:00:00Z"))).toBe("finished");
   });
 
-  it("a pausa também não vale antes do início (volta a ser rascunho)", () => {
+  it("a pausa também não vale antes do início (fica agendada)", () => {
     const paused = line({ startsAt, endsAt, pausedAt: at("2026-10-20T12:00:00Z") });
-    expect(campaignStatus(paused, at("2026-10-25T12:00:00Z"))).toBe("draft");
+    expect(campaignStatus(paused, at("2026-10-25T12:00:00Z"))).toBe("scheduled");
   });
 
   it("arquivada vence tudo, em qualquer momento do ciclo", () => {
@@ -160,11 +171,12 @@ describe("somente leitura e o que cada status permite", () => {
 
   it("tabela de ações por status", () => {
     const table: Record<CampaignStatus, ReturnType<typeof allowedActions>> = {
-      draft: { edit: true, pause: false, resume: false, archive: true, unarchive: false },
-      active: { edit: true, pause: true, resume: false, archive: true, unarchive: false },
-      paused: { edit: true, pause: false, resume: true, archive: true, unarchive: false },
-      finished: { edit: false, pause: false, resume: false, archive: true, unarchive: false },
-      archived: { edit: false, pause: false, resume: false, archive: false, unarchive: true },
+      draft: { edit: true, activate: true, pause: false, resume: false, finish: false, archive: true, unarchive: false },
+      scheduled: { edit: true, activate: false, pause: false, resume: false, finish: true, archive: true, unarchive: false },
+      active: { edit: true, activate: false, pause: true, resume: false, finish: true, archive: true, unarchive: false },
+      paused: { edit: true, activate: false, pause: false, resume: true, finish: true, archive: true, unarchive: false },
+      finished: { edit: false, activate: false, pause: false, resume: false, finish: false, archive: true, unarchive: false },
+      archived: { edit: false, activate: false, pause: false, resume: false, finish: false, archive: false, unarchive: true },
     };
     for (const status of CAMPAIGN_STATUSES) expect(allowedActions(status), status).toEqual(table[status]);
   });
@@ -218,15 +230,17 @@ describe("statusWhere — o filtro do banco concorda com a regra", () => {
   const ends = [null, ms(-86_400_000), ms(-1), ms(0), ms(1), ms(86_400_000)];
   const pauses = [null, ms(-3_600_000)];
   const archives = [null, ms(-3_600_000)];
+  const activations = [null, ms(-7_200_000)];
 
   const rows: Row[] = [];
   for (const startsAt of starts)
     for (const endsAt of ends)
       for (const pausedAt of pauses)
-        for (const archivedAt of archives) rows.push({ startsAt, endsAt, pausedAt, archivedAt });
+        for (const archivedAt of archives)
+          for (const activatedAt of activations) rows.push({ activatedAt, startsAt, endsAt, pausedAt, archivedAt });
 
   it("cada campanha cai em exatamente um status, e em exatamente um filtro", () => {
-    expect(rows.length).toBe(6 * 6 * 2 * 2);
+    expect(rows.length).toBe(6 * 6 * 2 * 2 * 2);
     for (const row of rows) {
       const status = campaignStatus(row as CampaignTimeline, now);
       const hits = CAMPAIGN_STATUSES.filter((s) => matches(statusWhere(s, now) as Record<string, unknown>, row));
@@ -313,15 +327,46 @@ describe("período — do dia da tela ao instante UTC", () => {
 
 describe("formulário — o que a tela pode mandar", () => {
   const ok = { name: "Black Friday", objective: "Encher a agenda de novembro", startsOn: "2026-11-01", endsOn: "2026-11-30" };
+  /** O que os campos opcionais novos devolvem quando vêm vazios. */
+  const blank = { objectiveType: null, description: null, goalValue: null, goalType: null, budget: null, messageCost: null, keywords: [] };
 
   it("aceita o preenchimento completo e tira os espaços das pontas", () => {
     const parsed = parseCampaignForm({ ...ok, name: "  Black Friday  " });
-    expect(parsed).toEqual({ ok: true, data: ok });
+    expect(parsed).toEqual({ ok: true, data: { ...ok, ...blank } });
   });
 
   it("objetivo e datas são opcionais: vazio vira null (rascunho)", () => {
     const parsed = parseCampaignForm({ name: "Rascunho", objective: "  ", startsOn: "", endsOn: "" });
-    expect(parsed).toEqual({ ok: true, data: { name: "Rascunho", objective: null, startsOn: null, endsOn: null } });
+    expect(parsed).toEqual({ ok: true, data: { name: "Rascunho", objective: null, startsOn: null, endsOn: null, ...blank } });
+  });
+
+  it("dados gerais da spec: tipo de objetivo, meta, investimento, custo por mensagem e palavras-chave", () => {
+    const parsed = parseCampaignForm({
+      ...ok,
+      objectiveType: "evento",
+      description: "Evento de implantes",
+      goalValue: "40",
+      goalType: "agendamentos",
+      budget: "1.500,50",
+      messageCost: "0,35",
+      keywords: "IMPLANTE, implante; evento implante",
+    });
+    expect(parsed).toEqual({
+      ok: true,
+      data: {
+        ...ok,
+        objectiveType: "evento",
+        description: "Evento de implantes",
+        goalValue: 40,
+        goalType: "agendamentos",
+        budget: 150050,
+        messageCost: 35,
+        keywords: ["IMPLANTE", "evento implante"],
+      },
+    });
+    const bad = parseCampaignForm({ ...ok, objectiveType: "x", goalValue: "40", budget: "abc" });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(Object.keys(bad.errors).sort()).toEqual(["budget", "goalType", "objectiveType"]);
   });
 
   it("nome: obrigatório, de 2 a 80 caracteres, sem quebra de linha", () => {
@@ -378,7 +423,21 @@ describe("formulário — o que a tela pode mandar", () => {
   it("campos desconhecidos (tenantId, createdById, status) não entram no resultado", () => {
     const parsed = parseCampaignForm({ ...ok, tenantId: "outra-conta", createdById: "x", status: "active" } as never);
     expect(parsed.ok).toBe(true);
-    if (parsed.ok) expect(Object.keys(parsed.data).sort()).toEqual(["endsOn", "name", "objective", "startsOn"]);
+    if (parsed.ok) {
+      expect(Object.keys(parsed.data).sort()).toEqual([
+        "budget",
+        "description",
+        "endsOn",
+        "goalType",
+        "goalValue",
+        "keywords",
+        "messageCost",
+        "name",
+        "objective",
+        "objectiveType",
+        "startsOn",
+      ]);
+    }
   });
 
   it("devolve um erro por campo, na ordem do formulário", () => {
@@ -388,19 +447,31 @@ describe("formulário — o que a tela pode mandar", () => {
   });
 
   it("o schema é o mesmo que a action usa (sem segunda cópia da regra)", () => {
-    expect(campaignFormSchema.safeParse({ name: "ab", objective: "", startsOn: "", endsOn: "" }).success).toBe(true);
+    const empty = { objectiveType: "", description: "", goalValue: "", goalType: "", budget: "", messageCost: "", keywords: "" };
+    expect(campaignFormSchema.safeParse({ name: "ab", objective: "", startsOn: "", endsOn: "", ...empty }).success).toBe(true);
   });
 });
 
 describe("textos da tela — o que cada status diz", () => {
   const startsAt = startOfDayUtc("2026-11-01", SP);
   const endsAt = endOfDayUtc("2026-11-30", SP);
-  const dated = { startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: SP };
+  const dated = { activatedAt: ACTIVATED, startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: SP };
+  const viewRow = {
+    ...dated,
+    objectiveType: null,
+    objective: null,
+    description: null,
+    goalValue: null,
+    goalType: null,
+    budgetCents: null,
+    messageCostCents: null,
+    keywords: [] as string[],
+  };
 
   it("todo status tem rótulo, tom e ícone próprios (estado nunca é só cor)", () => {
     const labels = CAMPAIGN_STATUSES.map((status) => STATUS_LABEL[status]);
     expect(new Set(labels).size).toBe(CAMPAIGN_STATUSES.length);
-    expect(labels).toEqual(["Rascunho", "Ativa", "Pausada", "Terminada", "Arquivada"]);
+    expect(labels).toEqual(["Rascunho", "Agendada", "Ativa", "Pausada", "Terminada", "Arquivada"]);
     for (const status of CAMPAIGN_STATUSES) {
       expect(STATUS_TONE[status], status).toBeTruthy();
       expect(STATUS_ICON[status], status).toBeTruthy();
@@ -413,6 +484,7 @@ describe("textos da tela — o que cada status diz", () => {
     expect(FILTER_ORDER.map((key) => FILTER_LABEL[key])).toEqual([
       "Todas",
       "Ativas",
+      "Agendadas",
       "Rascunho",
       "Pausadas",
       "Terminadas",
@@ -435,12 +507,15 @@ describe("textos da tela — o que cada status diz", () => {
     expect(readOnlyNotice("paused", dated)).toBeNull();
   });
 
-  it("o resumo explica o rascunho com início no futuro e o sem início", () => {
-    expect(statusNote("draft", { ...dated, startsAt: startOfDayUtc("2026-12-01", SP) })).toBe(
-      "Começa em 01/12/2026. Até lá ela fica como rascunho.",
+  it("o resumo explica o rascunho (com e sem início) e a agendada", () => {
+    expect(statusNote("draft", { ...dated, activatedAt: null })).toBe(
+      "Rascunho: nada vale para os leads até você ativar na aba Revisão.",
     );
-    expect(statusNote("draft", { ...dated, startsAt: null, endsAt: null })).toBe(
-      "Sem data de início, a campanha fica como rascunho.",
+    expect(statusNote("draft", { ...dated, activatedAt: null, startsAt: null, endsAt: null })).toBe(
+      "Rascunho sem data de início. Defina o período e ative na aba Revisão.",
+    );
+    expect(statusNote("scheduled", { ...dated, startsAt: startOfDayUtc("2026-12-01", SP) })).toBe(
+      "Ativada. Começa em 01/12/2026; até lá as regras não valem.",
     );
   });
 
@@ -457,27 +532,30 @@ describe("textos da tela — o que cada status diz", () => {
   });
 
   it("a campanha chega à tela como texto e booleanos: status, ações permitidas e datas do formulário", () => {
-    const view = toCampaignView(
-      { id: "c1", name: "Black Friday", objective: null, startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: SP },
-      at("2026-11-15T15:00:00Z"),
-    );
+    const view = toCampaignView({ ...viewRow, id: "c1", name: "Black Friday", timezone: SP }, at("2026-11-15T15:00:00Z"));
     expect(view).toEqual({
       id: "c1",
       name: "Black Friday",
+      objectiveType: null,
       objective: null,
+      description: null,
       status: "active",
-      allowed: { edit: true, pause: true, resume: false, archive: true, unarchive: false },
+      allowed: { edit: true, activate: false, pause: true, resume: false, finish: true, archive: true, unarchive: false },
       period: "01/11 a 30/11/2026",
       startsOn: "2026-11-01",
       endsOn: "2026-11-30",
+      goalValue: null,
+      goalType: null,
+      budget: "",
+      budgetCents: null,
+      messageCost: "",
+      messageCostCents: null,
+      keywords: "",
     });
   });
 
   it("fuso inválido na linha não derruba a tela: cai em Brasília", () => {
-    const view = toCampaignView(
-      { id: "c1", name: "X1", objective: null, startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: "Nao/Existe" },
-      at("2026-11-15T15:00:00Z"),
-    );
+    const view = toCampaignView({ ...viewRow, id: "c1", name: "X1", timezone: "Nao/Existe" }, at("2026-11-15T15:00:00Z"));
     expect(view.startsOn).toBe("2026-11-01");
     expect(view.period).toBe("01/11 a 30/11/2026");
   });
@@ -485,6 +563,7 @@ describe("textos da tela — o que cada status diz", () => {
   it("o tom de cada status segue o que a cor significa no produto (success é só o concluído)", () => {
     expect(STATUS_TONE).toEqual({
       draft: "neutral",
+      scheduled: "signal",
       active: "iris",
       paused: "warn",
       finished: "success",

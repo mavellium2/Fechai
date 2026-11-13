@@ -128,6 +128,16 @@ export interface WhatsAppProvider {
     document: { base64: string; mimetype: string; fileName: string; caption: string },
   ): Promise<string | null>;
   /**
+   * Envia um arquivo público (CDN) para um contato: imagem, vídeo, PDF ou
+   * áudio da campanha. O provedor baixa pelo link. Lança na falha; quem chama
+   * (`sendAgentReply`) segue sem o arquivo.
+   */
+  sendMediaUrl?(
+    externalId: string,
+    toPhone: string,
+    media: { url: string; kind: "image" | "video" | "pdf" | "audio"; fileName: string; mime: string },
+  ): Promise<string | null>;
+  /**
    * Envia uma lista interativa de escolha única (até 10 linhas) — a pesquisa de
    * satisfação a usa para a nota. Opcional: só a Cloud API da Meta tem; no QR a
    * pergunta vai como texto numerado. Devolve o id da mensagem; lança na falha.

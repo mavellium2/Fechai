@@ -19,6 +19,8 @@ export async function sendAgentReply(input: {
     speechBlocklist: string | null;
     voiceStyle: string | null;
   } | null;
+  /** Arquivos da campanha pedidos pelo agente (`send_campaign_media`): saem depois do texto. */
+  media?: { assetId: string; url: string; kind: string; name: string; mime: string }[];
 }): Promise<void> {
   const spoken = await speakReply({
     text: input.reply,
@@ -61,5 +63,36 @@ export async function sendAgentReply(input: {
       where: { id: input.replyMessageId },
       data: { whatsappMessageId: keyId, audioUrl },
     }).catch(() => {});
+  }
+
+  await sendCampaignMedia(input);
+}
+
+const MEDIA_KINDS = new Set(["image", "video", "pdf", "audio"]);
+
+/**
+ * Os arquivos da campanha, um por um, pelo mesmo número da resposta. Falha de
+ * um arquivo não derruba a conversa nem os outros: o texto já foi entregue.
+ */
+async function sendCampaignMedia(input: {
+  conversationId: string;
+  phone: string;
+  externalId: string;
+  provider: WhatsAppProvider;
+  media?: { assetId: string; url: string; kind: string; name: string; mime: string }[];
+}): Promise<void> {
+  if (!input.media?.length || !input.provider.sendMediaUrl) return;
+  for (const item of input.media) {
+    if (!MEDIA_KINDS.has(item.kind)) continue;
+    try {
+      await input.provider.sendMediaUrl(input.externalId, input.phone, {
+        url: item.url,
+        kind: item.kind as "image" | "video" | "pdf" | "audio",
+        fileName: item.name,
+        mime: item.mime,
+      });
+    } catch (error) {
+      console.error("[whatsapp] arquivo da campanha não enviado", input.conversationId, item.assetId, error);
+    }
   }
 }

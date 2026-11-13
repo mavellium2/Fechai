@@ -31,6 +31,10 @@ import { loadConversationVariables, parseVariableDefinitions, variablesSystemCon
 import { INJECTION_GUARD } from "./injection-guard";
 import { unansweredRule, type Retrieved } from "./unanswered-rule";
 import { leadInsightRule } from "@/modules/lead-insights/tool";
+import { findLeadCampaign, type LeadCampaign } from "@/modules/campaigns/active";
+import { attributeByKeyword } from "@/modules/campaigns/attribution";
+import { campaignRulesPrompt, restrictsSchedule } from "@/modules/campaigns/rules";
+import { campaignHandoffSchema, sendCampaignMediaSchema } from "@/modules/campaigns/agent";
 
 const MAX_TOOL_ITERATIONS = 3;
 const DEFAULT_SYSTEM =
@@ -65,6 +69,8 @@ export type AgentTurn = {
   /** id da mensagem da resposta gravada no histórico — o webhook usa para anexar o key.id do WhatsApp e não duplicar o eco fromMe. */
   replyMessageId?: string;
   inspection?: SandboxInspection;
+  /** Arquivos da campanha que o agente pediu para enviar depois do texto. */
+  media?: NonNullable<ToolContext["outgoingMedia"]>;
 };
 
 // Monta o contexto (persona + RAG + histórico), roda o loop de function calling
@@ -133,6 +139,12 @@ export async function runAgentTurn(input: {
     await appendMessage(conversationId, "user", userMessage, undefined, input.incomingMessageKeyId, input.incomingAudioUrl, input.incomingAudioSeconds);
   } else {
     await appendMessage(conversationId, "user", userMessage);
+  }
+
+  // Palavra-chave da campanha na mensagem inicial: o lead entra na campanha
+  // antes de o agente responder (e mesmo com o agente pausado). Nunca lança.
+  if (!input.historyOverride) {
+    await attributeByKeyword({ tenantId, leadId, conversationId, message: userMessage });
   }
 
   // Humano assumiu esta conversa (respondeu manualmente pelo painel): a
@@ -240,6 +252,23 @@ export async function runAgentTurn(input: {
       })
     : {};
 
+  // Campanha em vigor para o lead: as regras dela entram no prompt e nas
+  // ferramentas de agenda. Falha de leitura não derruba o turno — mas aí a
+  // trava do backend (`createAppointment`) continua valendo.
+  const leadCampaign: LeadCampaign | null | undefined = agent
+    ? await findLeadCampaign(tenantId, leadId, now).catch((err) => {
+        console.error("[orchestrator] campanha do lead indisponível", err);
+        return undefined;
+      })
+    : null;
+  const handoffEnabled = actions.some((a) => a.key === "handoff_human");
+  const pendingAssets = leadCampaign
+    ? leadCampaign.assets.filter((asset) => !leadCampaign.sentAssetIds.includes(asset.id))
+    : [];
+  const campaignContext = leadCampaign
+    ? campaignRulesPrompt(leadCampaign.campaign, leadCampaign.rules, { handoffAvailable: handoffEnabled, assets: pendingAssets })
+    : "";
+
   const personaPrompt = input.systemPromptOverride?.trim() || agent?.systemPrompt || DEFAULT_SYSTEM;
   const systemPrompt = [
     personaPrompt,
@@ -250,6 +279,8 @@ export async function runAgentTurn(input: {
     // ("Te esperamos amanhã às 10h" como modelo a repetir).
     timeContext,
     scheduleContext,
+    // Depois da agenda geral: a regra da campanha vence o expediente normal.
+    campaignContext,
     appointmentsContext,
     agent ? variablesSystemContext(variableDefinitions, variableValues) : "",
     context,
@@ -272,7 +303,13 @@ export async function runAgentTurn(input: {
     agent ? variableDefinitions : undefined,
     handoff ? parseHandoffConfig(handoff.config) : undefined,
   );
-  const ctx: ToolContext = { tenantId, conversationId, leadId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling };
+  if (leadCampaign && pendingAssets.length) toolSchemas.push(sendCampaignMediaSchema(pendingAssets.map((a) => a.id)));
+  if (leadCampaign?.rules.outside === "handoff" && restrictsSchedule(leadCampaign.rules) && !handoffEnabled) {
+    toolSchemas.push(campaignHandoffSchema);
+  }
+  const ctx: ToolContext = {
+    tenantId, conversationId, leadId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling, campaign: leadCampaign,
+  };
   // A cadeia de fallback vem do painel (/admin/ia): o admin monta a ordem e
   // aponta cada degrau para uma credencial. Sem nada cadastrado, cai no padrão
   // do código (modelo ativo → Grok → Groq). Resolvida UMA vez por turno, já
@@ -369,6 +406,7 @@ export async function runAgentTurn(input: {
   finalReply = sanitizedReply || "Certo!";
   const replyMsg = await appendMessage(conversationId, "assistant", finalReply, "agent");
   return { reply: finalReply, toolsUsed, status: agent ? "ok" : "no_agent", replyMessageId: replyMsg.id,
+    ...(ctx.outgoingMedia?.length ? { media: ctx.outgoingMedia } : {}),
     ...(input.inspect ? { inspection: { sources: retrieved?.sources ?? [], searched: retrieved?.searched ?? false, instructions: personaPrompt, tools: toolsUsed } } : {}) };
 }
 

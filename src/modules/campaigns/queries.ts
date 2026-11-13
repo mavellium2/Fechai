@@ -25,11 +25,18 @@ export type CampaignCounts = Record<CampaignStatusFilter, number>;
  */
 export async function listCampaigns(
   tenantId: string,
-  options: { status?: CampaignStatusFilter; now?: Date } = {},
+  options: { status?: CampaignStatusFilter; now?: Date; period?: { from: Date; to: Date } | null } = {},
 ): Promise<Campaign[]> {
-  const { status = "all", now = new Date() } = options;
+  const { status = "all", now = new Date(), period } = options;
   return prisma.campaign.findMany({
-    where: { tenantId, ...statusWhere(status, now) },
+    where: {
+      tenantId,
+      ...statusWhere(status, now),
+      // Período: campanhas cujo período cruza a janela (sem data não cruza nada).
+      ...(period
+        ? { AND: [{ startsAt: { lte: period.to } }, { OR: [{ endsAt: null }, { endsAt: { gte: period.from } }] }] }
+        : {}),
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: CAMPAIGN_LIST_LIMIT,
   });
@@ -49,7 +56,10 @@ export async function countCampaigns(tenantId: string, now: Date = new Date()): 
   return Object.fromEntries(entries) as CampaignCounts;
 }
 
-export type CampaignWithCreator = Campaign & { createdBy: { name: string | null; email: string } | null };
+export type CampaignWithCreator = Campaign & {
+  createdBy: { name: string | null; email: string } | null;
+  updatedBy: { name: string | null; email: string } | null;
+};
 
 /**
  * Uma campanha da conta, ou `null`: id que não existe e id de OUTRA conta são
@@ -60,7 +70,20 @@ export async function getCampaign(tenantId: string, id: string): Promise<Campaig
   if (!id) return null;
   return prisma.campaign.findFirst({
     where: { id, tenantId },
-    include: { createdBy: { select: { name: true, email: true } } },
+    include: {
+      createdBy: { select: { name: true, email: true } },
+      updatedBy: { select: { name: true, email: true } },
+    },
+  });
+}
+
+/** Campanhas em vigor agora (ativas), para o topo da lista e o alerta de regra especial. */
+export async function listRunningCampaigns(tenantId: string, now: Date = new Date()) {
+  return prisma.campaign.findMany({
+    where: { tenantId, ...statusWhere("active", now) },
+    select: { id: true, name: true, endsAt: true, timezone: true, rules: true },
+    orderBy: [{ endsAt: "asc" }, { id: "asc" }],
+    take: 20,
   });
 }
 

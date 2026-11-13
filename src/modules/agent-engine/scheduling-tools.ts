@@ -6,6 +6,10 @@ import type { ToolContext } from "./tools";
 import { relativeDayLabel } from "./time-context";
 import { describeRanges, getWeeklyAvailability } from "@/modules/scheduling/weekly-availability";
 import { clinicorpConfirmationPending } from "@/modules/scheduling/clinicorp";
+import { campaignOutsideReply, campaignSlotsForTool } from "@/modules/campaigns/agent";
+import { findLeadCampaign } from "@/modules/campaigns/active";
+import { restrictsSchedule } from "@/modules/campaigns/rules";
+import { checkCampaignSlot } from "@/modules/campaigns/slots";
 
 const DEFAULT_AVAILABILITY_SEARCH_DAYS = 14;
 const MAX_AVAILABILITY_SEARCH_DAYS = 14;
@@ -232,6 +236,11 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
   if (name === "list_appointments") return leadAppointmentsContext(ctx, cfg);
   if (name === "list_available_slots") {
     if (typeof args.date !== "string") return "Informe a data em AAAA-MM-DD.";
+    // Lead de campanha com agenda restrita: só as vagas da campanha.
+    if (ctx.campaign === undefined) ctx.campaign = await findLeadCampaign(ctx.tenantId, ctx.leadId);
+    if (ctx.campaign && restrictsSchedule(ctx.campaign.rules)) {
+      return campaignSlotsForTool(ctx, cfg, args.date.trim(), typeof args.days === "number" ? args.days : 14);
+    }
     return availableSlotsContext(
       ctx,
       cfg,
@@ -273,18 +282,33 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
   }
   if (startsAt.getTime() < Date.now() + cfg.minNoticeHours * 3_600_000) return "O novo horário já passou ou não respeita a antecedência mínima. O horário original continua reservado.";
   const durationMinutes = (appointment.endsAt.getTime() - appointment.startsAt.getTime()) / 60_000;
-  if (!isWithinBusinessHours(startsAt, { ...cfg, durationMinutes })) return "O novo horário fica fora do expediente ou atravessa uma pausa. O horário original continua reservado. Combine outro horário.";
+  // A regra da campanha vale também para remarcar: a trava é a mesma de marcar.
+  const slot = await checkCampaignSlot({
+    tenantId: ctx.tenantId, leadId: ctx.leadId, startsAt, timezone: cfg.timezone,
+    ignoreAppointmentId: appointment.id, campaign: ctx.campaign,
+  });
+  if (ctx.campaign === undefined) ctx.campaign = slot.campaign;
+  if (slot.problem) return `${campaignOutsideReply(ctx, slot.problem)} O horário original continua reservado.`;
+  if (!slot.eventSlot && !isWithinBusinessHours(startsAt, { ...cfg, durationMinutes })) return "O novo horário fica fora do expediente ou atravessa uma pausa. O horário original continua reservado. Combine outro horário.";
   if (ctx.dryRun) {
     // Mesma checagem de conflito da remarcação real (ignora a própria consulta
     // e o espelho dela no Clinicorp), sem gravar nada.
     const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
-    if (await hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone, appointment.id, appointment.clinicorpAppointmentId ?? undefined)) {
+    if (!slot.eventSlot && await hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone, appointment.id, appointment.clinicorpAppointmentId ?? undefined)) {
       return offerAlternativeSlots(ctx, cfg, startsAt, durationMinutes);
     }
     return `Simulação: a consulta de ${previous} seria remarcada para ${formatInZone(startsAt, cfg.timezone)}${cfg.location ? ` (${cfg.location})` : ""}. Nada foi alterado na agenda nem enviado ao Clinicorp, Google ou iCloud. Confirme com o contato como se tivesse sido remarcada, sem dizer que é uma simulação.`;
   }
-  const result = await rescheduleAppointment({ tenantId: ctx.tenantId, leadId: ctx.leadId, id: appointment.id, startsAt, timezone: cfg.timezone });
-  if (result.status === "conflict") return offerAlternativeSlots(ctx, cfg, startsAt, durationMinutes);
+  const result = await rescheduleAppointment({
+    tenantId: ctx.tenantId, leadId: ctx.leadId, id: appointment.id, startsAt, timezone: cfg.timezone, eventSlot: slot.eventSlot,
+  });
+  if (result.status === "campaign_rule") return `${campaignOutsideReply(ctx, result.reason)} O horário original continua reservado.`;
+  if (result.status === "conflict") {
+    if (ctx.campaign && restrictsSchedule(ctx.campaign.rules)) {
+      return `Esse horário está ocupado. O horário original continua reservado. ${await campaignSlotsForTool(ctx, cfg, dayKeyInZone(startsAt, cfg.timezone))}`;
+    }
+    return offerAlternativeSlots(ctx, cfg, startsAt, durationMinutes);
+  }
   if (result.status === "unavailable") return "A consulta mudou ou não está mais disponível. Consulte os agendamentos novamente antes de confirmar qualquer alteração.";
   const when = formatInZone(startsAt, cfg.timezone);
   if (result.status === "unchanged") return `A consulta já está marcada para ${when}. Nenhuma alteração necessária.`;

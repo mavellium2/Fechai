@@ -29,7 +29,7 @@ export function NewCampaignButton({ label = "Nova campanha" }: { label?: string 
         onClose={() => setOpen(false)}
         onSaved={(result) => {
           setOpen(false);
-          if (result.id) router.push(`/campanhas/${result.id}`);
+          if (result.id) router.push(`/campanhas/${result.id}?aba=anuncios`);
         }}
       />
     </>

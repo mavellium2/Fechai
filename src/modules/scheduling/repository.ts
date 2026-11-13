@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { assertCampaignSlot, checkCampaignSlot } from "@/modules/campaigns/slots";
 import { Prisma } from "@prisma/client";
 import { AvailabilityUnavailableError } from "./availability-error";
 import { isWithinBusinessHours, parseScheduleConfig, slotStartTimes, type ScheduleConfig } from "./config";
@@ -205,6 +206,13 @@ export async function findOwnAppointment(
 export async function createAppointment(input: CreateAppointmentInput) {
   const endsAt = new Date(input.startsAt.getTime() + input.durationMinutes * 60_000);
 
+  // Regra da campanha do lead (datas, horários, vagas): trava do backend.
+  // Vale para tudo que não é a equipe marcando à mão no painel — a equipe é
+  // justamente quem atende o lead que não pôde nas datas da campanha.
+  if (input.source !== "manual") {
+    await assertCampaignSlot({ tenantId: input.tenantId, leadId: input.leadId, startsAt: input.startsAt, timezone: input.timezone });
+  }
+
   const appointment = await prisma.appointment.create({
     data: {
       tenantId: input.tenantId,
@@ -343,12 +351,19 @@ export async function findLeadAppointment(tenantId: string, leadId: string, id: 
 /** Mantém o ID ativo e guarda o horário anterior na mesma transação. */
 export async function rescheduleAppointment(input: {
   tenantId: string; leadId: string; id: string; startsAt: Date; timezone: string;
+  /** Vaga de evento da campanha (já conferida): várias pessoas no mesmo horário. */
+  eventSlot?: boolean;
 }) {
   const previous = await findLeadAppointment(input.tenantId, input.leadId, input.id);
   if (!previous || previous.status !== "scheduled" || previous.startsAt <= new Date()) return { status: "unavailable" } as const;
   if (previous.startsAt.getTime() === input.startsAt.getTime()) return { status: "unchanged" } as const;
   const endsAt = new Date(input.startsAt.getTime() + previous.endsAt.getTime() - previous.startsAt.getTime());
-  if (await hasConflictAnywhere(input.tenantId, input.startsAt, endsAt, input.timezone, previous.id, previous.clinicorpAppointmentId ?? undefined)) {
+  // A regra da campanha do lead vale para remarcar como vale para marcar.
+  const slot = await checkCampaignSlot({
+    tenantId: input.tenantId, leadId: input.leadId, startsAt: input.startsAt, timezone: input.timezone, ignoreAppointmentId: previous.id,
+  });
+  if (slot.problem) return { status: "campaign_rule", reason: slot.problem } as const;
+  if (!slot.eventSlot && await hasConflictAnywhere(input.tenantId, input.startsAt, endsAt, input.timezone, previous.id, previous.clinicorpAppointmentId ?? undefined)) {
     return { status: "conflict" } as const;
   }
   const changedAt = new Date();

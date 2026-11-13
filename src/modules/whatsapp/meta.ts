@@ -473,6 +473,26 @@ export class MetaCloudProvider implements WhatsAppProvider {
     return data.messages?.[0]?.id ?? null;
   }
 
+  /** Mídia por link (a Meta baixa da CDN). Só dentro das 24h, como o texto livre. */
+  async sendMediaUrl(
+    externalId: string,
+    toPhone: string,
+    media: { url: string; kind: "image" | "video" | "pdf" | "audio"; fileName: string; mime: string },
+  ): Promise<string | null> {
+    const type = media.kind === "pdf" ? "document" : media.kind;
+    const body =
+      type === "document" ? { link: media.url, filename: media.fileName } : { link: media.url };
+    const res = await fetch(graphUrl(`${externalId}/messages`), {
+      method: "POST",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(30_000),
+      body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: toPhone, type, [type]: body }),
+    });
+    if (!res.ok) throw await metaError("Meta sendMediaUrl", res);
+    const data = (await res.json()) as { messages?: { id?: string }[] };
+    return data.messages?.[0]?.id ?? null;
+  }
+
   async sendAudio(
     externalId: string,
     toPhone: string,

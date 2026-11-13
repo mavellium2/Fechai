@@ -136,11 +136,23 @@ const REVERTIBLE_MODELS: Record<string, RevertibleModel> = {
     // sem `pausedAt`/`archivedAt`: pausar e arquivar são eventos próprios, não
     // revertíveis, e regravá-los por aqui reescreveria o status.
     delegate: "campaign",
-    fields: ["name", "objective", "startsAt", "endsAt"],
+    fields: [
+      "name",
+      "objectiveType",
+      "objective",
+      "description",
+      "goalValue",
+      "goalType",
+      "budgetCents",
+      "messageCostCents",
+      "keywords",
+      "startsAt",
+      "endsAt",
+    ],
     restorable: false,
     label: "campanha",
     gender: "f",
-    guard: { select: ["startsAt", "endsAt", "pausedAt", "archivedAt"], refuse: refuseCampaignRevert },
+    guard: { select: ["activatedAt", "startsAt", "endsAt", "pausedAt", "archivedAt"], refuse: refuseCampaignRevert },
   },
 };
 
@@ -159,6 +171,7 @@ const asDate = (value: unknown): Date | null => (value instanceof Date ? value :
  */
 function refuseCampaignRevert(current: Record<string, unknown>, data: Record<string, unknown>): string | null {
   const timeline = {
+    activatedAt: asDate(current.activatedAt),
     startsAt: asDate(current.startsAt),
     endsAt: asDate(current.endsAt),
     pausedAt: asDate(current.pausedAt),

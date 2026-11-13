@@ -103,7 +103,10 @@ export function NewBroadcastWizard({
   draft,
   initialTemplateId,
   notice,
+  campaignId,
 }: {
+  /** Disparo criado a partir de uma campanha: nasce vinculado a ela. */
+  campaignId?: string;
   displayPhone: string | null;
   defaultTestPhone: string;
   draft: Review | null;
@@ -319,6 +322,7 @@ export function NewBroadcastWizard({
               variables,
               nameless: { mode: namelessMode, templateId: altId },
               media: template.mediaFormat ? media : null,
+              campaignId,
             });
       if (r.ok) {
         // Sem toast de sucesso: a própria etapa seguinte é o retorno.
@@ -347,6 +351,7 @@ export function NewBroadcastWizard({
     const form = new FormData();
     form.set("name", name);
     form.set("templateId", t.id);
+    if (campaignId) form.set("campaignId", campaignId);
     form.set("file", file!);
     form.set("mapping", JSON.stringify(mapping));
     if (t.mediaFormat)

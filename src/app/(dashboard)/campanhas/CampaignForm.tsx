@@ -9,13 +9,45 @@ import { SidePanel } from "@/components/ui/side-panel";
 import { Textarea } from "@/components/ui/textarea";
 import { useActionToast } from "@/components/ui/toast";
 import { UnsavedForm, useUnsavedNavigation } from "@/components/ui/unsaved-changes";
-import { NAME_MAX, OBJECTIVE_MAX } from "@/modules/campaigns/limits";
+import { SelectMenu } from "@/components/ui/select-menu";
+import {
+  DESCRIPTION_MAX,
+  GOAL_TYPE_LABEL,
+  GOAL_TYPES,
+  NAME_MAX,
+  OBJECTIVE_MAX,
+  OBJECTIVE_TYPE_LABEL,
+  OBJECTIVE_TYPES,
+} from "@/modules/campaigns/limits";
 import type { CampaignActionResult } from "@/modules/campaigns/result";
 import type { CampaignView } from "@/modules/campaigns/view";
 import { createCampaign, updateCampaign } from "./actions";
 
 /** O que o formulário precisa para editar: os valores que já estão salvos. */
-export type EditableCampaign = Pick<CampaignView, "id" | "name" | "objective" | "startsOn" | "endsOn">;
+export type EditableCampaign = Pick<
+  CampaignView,
+  | "id"
+  | "name"
+  | "objectiveType"
+  | "objective"
+  | "description"
+  | "startsOn"
+  | "endsOn"
+  | "goalValue"
+  | "goalType"
+  | "budget"
+  | "messageCost"
+  | "keywords"
+>;
+
+const OBJECTIVE_OPTIONS = [
+  { value: "", label: "Escolha o objetivo" },
+  ...OBJECTIVE_TYPES.map((value) => ({ value, label: OBJECTIVE_TYPE_LABEL[value] })),
+];
+const GOAL_OPTIONS = [
+  { value: "", label: "Sem meta" },
+  ...GOAL_TYPES.map((value) => ({ value, label: GOAL_TYPE_LABEL[value] })),
+];
 
 /**
  * Painel lateral de criar e editar campanha (não há rota `/campanhas/nova`).
@@ -56,7 +88,7 @@ export function CampaignFormPanel({
       open={open}
       onClose={requestClose}
       title={campaign ? "Editar campanha" : "Nova campanha"}
-      subtitle={campaign ? campaign.name : "Dê um nome e, se já souber, o período."}
+      subtitle={campaign ? campaign.name : "Dados gerais. Anúncios, mídias, disparos e regras vêm nos próximos passos."}
     >
       <CampaignForm key={session} campaign={campaign} onCancel={requestClose} onSaved={onSaved} />
     </SidePanel>
@@ -114,7 +146,16 @@ function CampaignForm({
     starts: `${base}-inicio`,
     ends: `${base}-fim`,
     period: `${base}-periodo`,
+    objectiveType: `${base}-tipo`,
+    description: `${base}-descricao`,
+    goalValue: `${base}-meta`,
+    goalType: `${base}-meta-tipo`,
+    budget: `${base}-orcamento`,
+    messageCost: `${base}-custo-mensagem`,
+    keywords: `${base}-palavras`,
   };
+  const [objectiveType, setObjectiveType] = useState(campaign?.objectiveType ?? "");
+  const [goalType, setGoalType] = useState(campaign?.goalType ?? "");
 
   const [objectiveLength, setObjectiveLength] = useState(campaign?.objective?.length ?? 0);
 
@@ -152,6 +193,22 @@ function CampaignForm({
         />
       </Field>
 
+      <div>
+        <p id={`${ids.objectiveType}-rotulo`} className="mb-2 text-sm font-medium text-ink panel:text-white/90">
+          Tipo de objetivo
+        </p>
+        <SelectMenu
+          label="Tipo de objetivo"
+          labelledBy={`${ids.objectiveType}-rotulo`}
+          name="objectiveType"
+          value={objectiveType}
+          onChange={setObjectiveType}
+          options={OBJECTIVE_OPTIONS}
+          className="w-full"
+        />
+        {fieldErrors.objectiveType && <p className="mt-1 text-sm text-danger">{fieldErrors.objectiveType}</p>}
+      </div>
+
       <Field label="Objetivo" htmlFor={ids.objective} optional error={fieldErrors.objective}>
         <Textarea
           {...objectiveField}
@@ -167,6 +224,23 @@ function CampaignForm({
         <p id={`${ids.objective}-contador`} className="mt-1 text-right text-xs tabular-nums text-neutral panel:text-white/55">
           {objectiveLength}/{OBJECTIVE_MAX}
         </p>
+      </Field>
+
+      <Field
+        label="Descrição"
+        htmlFor={ids.description}
+        optional
+        error={fieldErrors.description}
+        hint="Contexto para a equipe e para a IA. Entra nas instruções do agente enquanto a campanha vale."
+      >
+        <Textarea
+          {...fieldProps(ids.description, { error: fieldErrors.description })}
+          name="description"
+          rows={4}
+          maxLength={DESCRIPTION_MAX}
+          placeholder="Ex.: Evento de implantes nos dias 18 e 19/11, com avaliação gratuita."
+          defaultValue={campaign?.description ?? ""}
+        />
       </Field>
 
       <div>
@@ -193,9 +267,88 @@ function CampaignForm({
           </Field>
         </div>
         <p id={ids.period} className="mt-2 text-sm text-neutral panel:text-white/55">
-          Datas no horário de Brasília. Sem data de início, a campanha fica como rascunho.
+          Datas no horário de Brasília. As regras do agente valem do início ao fim, depois que você ativar a campanha.
         </p>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Meta" htmlFor={ids.goalValue} optional error={fieldErrors.goalValue}>
+          <Input
+            {...fieldProps(ids.goalValue, { error: fieldErrors.goalValue })}
+            className="max-sm:h-11"
+            name="goalValue"
+            inputMode="numeric"
+            placeholder="Ex.: 40"
+            defaultValue={campaign?.goalValue ?? ""}
+          />
+        </Field>
+        <div>
+          <p id={`${ids.goalType}-rotulo`} className="mb-2 text-sm font-medium text-ink panel:text-white/90">
+            Meta de
+          </p>
+          <SelectMenu
+            label="Meta de"
+            labelledBy={`${ids.goalType}-rotulo`}
+            name="goalType"
+            value={goalType}
+            onChange={setGoalType}
+            options={GOAL_OPTIONS}
+            className="w-full"
+          />
+          {fieldErrors.goalType && <p className="mt-1 text-sm text-danger">{fieldErrors.goalType}</p>}
+        </div>
+      </div>
+
+      <Field
+        label="Investimento em mídia (R$)"
+        htmlFor={ids.budget}
+        optional
+        error={fieldErrors.budget}
+        hint="Usado para calcular o custo por lead, por agendamento e por comparecimento."
+      >
+        <Input
+          {...fieldProps(ids.budget, { error: fieldErrors.budget })}
+          className="max-sm:h-11"
+          name="budget"
+          inputMode="decimal"
+          placeholder="Ex.: 1.500,00"
+          defaultValue={campaign?.budget ?? ""}
+        />
+      </Field>
+
+      <Field
+        label="Custo por mensagem de disparo (R$)"
+        htmlFor={ids.messageCost}
+        optional
+        error={fieldErrors.messageCost}
+        hint="O valor que a Meta cobra por mensagem de marketing. O custo dos disparos é enviadas × este valor."
+      >
+        <Input
+          {...fieldProps(ids.messageCost, { error: fieldErrors.messageCost })}
+          className="max-sm:h-11"
+          name="messageCost"
+          inputMode="decimal"
+          placeholder="Ex.: 0,35"
+          defaultValue={campaign?.messageCost ?? ""}
+        />
+      </Field>
+
+      <Field
+        label="Palavras-chave"
+        htmlFor={ids.keywords}
+        optional
+        error={fieldErrors.keywords}
+        hint="Separadas por vírgula. Quem escrever uma delas na primeira mensagem entra na campanha (ex.: IMPLANTE)."
+      >
+        <Input
+          {...fieldProps(ids.keywords, { error: fieldErrors.keywords })}
+          className="max-sm:h-11"
+          name="keywords"
+          autoComplete="off"
+          placeholder="Ex.: implante, evento implante"
+          defaultValue={campaign?.keywords ?? ""}
+        />
+      </Field>
 
       <FormFeedback error={generalError} />
 

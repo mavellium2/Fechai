@@ -102,6 +102,7 @@ describe("trilha de auditoria das campanhas", () => {
     mocks.logClaim.mockResolvedValue({ count: 1 });
     mocks.campaignFindUnique.mockResolvedValue({
       id: "camp-1",
+      activatedAt: new Date("2026-10-20T12:00:00.000Z"),
       startsAt: START,
       endsAt: END,
       pausedAt: null,
@@ -129,7 +130,15 @@ describe("trilha de auditoria das campanhas", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.campaignUpdate).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", startsAt: START, endsAt: END, pausedAt: null, archivedAt: null },
+      where: {
+        id: "camp-1",
+        tenantId: "tenant-a",
+        activatedAt: new Date("2026-10-20T12:00:00.000Z"),
+        startsAt: START,
+        endsAt: END,
+        pausedAt: null,
+        archivedAt: null,
+      },
       data: { name: "Black Friday", endsAt: new Date("2026-12-01T02:59:59.000Z") },
     });
     const written = mocks.campaignUpdate.mock.calls[0][0].data;
@@ -143,7 +152,7 @@ describe("trilha de auditoria das campanhas", () => {
     await revert();
     expect(mocks.campaignFindUnique).toHaveBeenCalledWith({
       where: { id: "camp-1", tenantId: "tenant-a" },
-      select: { id: true, startsAt: true, endsAt: true, pausedAt: true, archivedAt: true },
+      select: { id: true, activatedAt: true, startsAt: true, endsAt: true, pausedAt: true, archivedAt: true },
     });
   });
 

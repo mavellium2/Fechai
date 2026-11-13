@@ -115,6 +115,7 @@ export async function recoverPendingAgentReply(
       replyMessageId: result.replyMessageId,
       incomingWasAudio: Boolean(pending.audioUrl),
       agent,
+      media: result.media,
     });
     await setConversationChannel(conversation, providerName, { onlyIfUnset: true });
     return { status: "sent" };
