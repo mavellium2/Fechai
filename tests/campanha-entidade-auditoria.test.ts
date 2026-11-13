@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 /**
  * CMP-01 — a trilha de auditoria das campanhas. As actions que gravam os
@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
  * os eventos existem, no grupo certo, e que nenhum é revertível: o card pede
  * auditoria de criar, editar e mudar o status, não desfazer.
  */
+
+vi.mock("@/modules/audit/log", () => ({ recordAudit: vi.fn(), recordChange: vi.fn() }));
+vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
 import { AUDIT_EVENTS, eventLabel, isRevertibleEvent, type AuditEventDef } from "@/modules/audit/events";
 import { isRevertibleTarget } from "@/modules/audit/revert";
