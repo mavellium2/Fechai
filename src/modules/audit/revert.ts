@@ -118,6 +118,17 @@ const REVERTIBLE_MODELS: Record<string, RevertibleModel> = {
     label: "integração de agenda",
     gender: "f",
   },
+  Campaign: {
+    // Só o que a edição altera. Sem `tenantId` (um undo nunca troca a conta
+    // dona), sem `timezone` (as datas voltam no fuso em que foram gravadas) e
+    // sem `pausedAt`/`archivedAt`: pausar e arquivar são eventos próprios, não
+    // revertíveis, e regravá-los por aqui reescreveria o status.
+    delegate: "campaign",
+    fields: ["name", "objective", "startsAt", "endsAt"],
+    restorable: false,
+    label: "campanha",
+    gender: "f",
+  },
 };
 
 export type RevertResult =
@@ -393,7 +404,7 @@ function coerce(key: string, value: unknown): unknown {
   return value;
 }
 
-const DATE_FIELDS = new Set(["trialEndsAt", "birthDate", "voiceCreatedAt", "scheduledAt"]);
+const DATE_FIELDS = new Set(["trialEndsAt", "birthDate", "voiceCreatedAt", "scheduledAt", "startsAt", "endsAt"]);
 
 type Delegate = {
   findUnique(args: { where: { id: string }; select?: object }): Promise<{ id: string } | null>;

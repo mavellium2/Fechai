@@ -43,6 +43,9 @@ const GUARDS = [
   // Encapsula requireProductAccess + tenant ativo + liberação Meta.
   // Comportamento executado em disparos-access.test.ts.
   "requireBroadcastAccess",
+  // Encapsula requireProductAccess e devolve tenant/usuário/`canEdit` da sessão.
+  // Comportamento executado em campanha-entidade-actions.test.ts.
+  "requireCampaignActor",
 ];
 
 /**

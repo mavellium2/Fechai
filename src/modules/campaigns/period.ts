@@ -1,4 +1,4 @@
-import { dayKeyInZone, parseLocalDateTime, timeInZone } from "@/modules/scheduling/time";
+import { dayKeyInZone, isKnownTimeZone, parseLocalDateTime, timeInZone } from "@/modules/scheduling/time";
 
 /**
  * Período da campanha: o DIA que a pessoa escolhe na tela vira instante UTC e
@@ -13,6 +13,15 @@ import { dayKeyInZone, parseLocalDateTime, timeInZone } from "@/modules/scheduli
  * escolhida quando o fuso da conta existir.
  */
 export const DEFAULT_CAMPAIGN_TIMEZONE = "America/Sao_Paulo";
+
+/**
+ * O fuso gravado na linha, ou Brasília se ele não existir para o `Intl` (linha
+ * editada à mão, nome de fuso do Windows). Uma campanha nunca deve quebrar a
+ * tela ou uma action por causa do texto de uma coluna.
+ */
+export function zoneOrDefault(timeZone: string | null | undefined): string {
+  return timeZone && isKnownTimeZone(timeZone) ? timeZone : DEFAULT_CAMPAIGN_TIMEZONE;
+}
 
 /** Ano mínimo e máximo aceitos: barra o `0001-01-01` digitado sem querer. */
 export const MIN_YEAR = 2000;

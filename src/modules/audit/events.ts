@@ -33,6 +33,7 @@ export const AUDIT_GROUPS = {
   agente: "Agente",
   conhecimento: "Base de conhecimento",
   contatos: "Contatos",
+  campanhas: "Campanhas",
   integracoes: "Integrações",
   admin: "Admin",
 } as const;
@@ -205,6 +206,22 @@ export const AUDIT_EVENTS = {
     kind: "update",
     group: "contatos",
   },
+
+  // ── campanhas (ações de marketing da conta) ───────────────────────────
+  "campaign.created": { label: "Criou uma campanha", kind: "create", group: "campanhas" },
+  "campaign.updated": {
+    label: "Alterou uma campanha",
+    kind: "update",
+    group: "campanhas",
+    revertible: true,
+  },
+  // Pausar, retomar, arquivar e desarquivar mudam o status (calculado a partir
+  // de datas) e não têm um "antes" para regravar além do que o próprio evento
+  // já diz — por isso não são revertíveis: o desfazer deles é o botão oposto.
+  "campaign.paused": { label: "Pausou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.resumed": { label: "Retomou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.archived": { label: "Arquivou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.unarchived": { label: "Desarquivou uma campanha", kind: "update", group: "campanhas" },
 
   // ── integrações ───────────────────────────────────────────────────────
   "whatsapp.connected": { label: "Conectou o WhatsApp", kind: "update", group: "integracoes" },
