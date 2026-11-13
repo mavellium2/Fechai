@@ -1,6 +1,10 @@
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
+import { loadReminderOverrides } from "@/modules/campaigns/active";
+import type { CampaignRules } from "@/modules/campaigns/rules";
+import { isReminderTypeAllowed, type ScheduleConfig } from "@/modules/scheduling/config";
 import { dayKeyInZone, timeInZone } from "@/modules/scheduling/time";
+import { loadAccountScheduleConfigs, remindersFor, staleReminders } from "../../../workers/follow-up-worker/reminders";
 import { resolveCampaignLeadMatches } from "./lead";
 
 /**
@@ -22,8 +26,31 @@ export type RescheduleRow = {
   time: string;
   origin: string;
   clinicorpAppointmentId: string | null;
-  reminderQueued: boolean;
+  reminder: ReminderPlan;
 };
+
+/** Há lembrete por sair? `unknown` = não deu para ler a config ou as campanhas (nunca vira "não"). */
+export type ReminderPlan = { status: "yes" | "no" | "unknown"; pending: number };
+
+/**
+ * Quantos disparos desta consulta ainda vão sair, pela MESMA regra do worker
+ * (`workers/follow-up-worker/reminders.ts`): os da consulta, senão os da campanha,
+ * senão os gerais da conta (`remindersFor`), menos `remindersSent` e menos os que
+ * já perderam a janela (`staleReminders`). Público do lembrete incluído.
+ */
+export function reminderPlan(
+  appt: { reminderOverride: unknown; remindersSent: number[]; serviceType: string | null; startsAt: Date; status: string },
+  cfg: ScheduleConfig | undefined,
+  campaign: CampaignRules | undefined,
+  now: Date,
+): ReminderPlan {
+  if (!cfg || !isReminderTypeAllowed(cfg, appt.serviceType)) return { status: "no", pending: 0 };
+  const rules = remindersFor(appt, cfg, campaign);
+  const expired = new Set(staleReminders(appt, rules, now, cfg.timezone).map((r) => r.minutesBefore));
+  const sent = new Set(appt.remindersSent);
+  const pending = rules.filter((r) => !sent.has(r.minutesBefore) && !expired.has(r.minutesBefore)).length;
+  return { status: pending > 0 ? "yes" : "no", pending };
+}
 
 /** Já está no encaixe do evento (um dos dias, na hora única)? Dia e hora locais, nunca UTC. */
 export function isInEventSlot(startsAt: Date, rules: { dates: string[]; time: string }, timeZone: string = RESCHEDULE_TIMEZONE): boolean {
@@ -45,6 +72,9 @@ export async function listRescheduleCandidates(
       leadId: true,
       patientName: true,
       clinicorpAppointmentId: true,
+      serviceType: true,
+      reminderOverride: true,
+      remindersSent: true,
       lead: { select: { name: true, phone: true } },
     },
     orderBy: { startsAt: "asc" },
@@ -61,22 +91,28 @@ export async function listRescheduleCandidates(
   });
   if (!outside.length) return [];
 
-  // Lembrete ainda na fila: a linha da consulta (id próprio ou do Clinicorp) para aquele horário.
-  const keysOf = (a: (typeof outside)[number]) => [`appointment:${a.id}`, ...(a.clinicorpAppointmentId ? [`clinicorp:${a.clinicorpAppointmentId}`] : [])];
-  const queued = await prisma.reminderDispatch.findMany({
-    where: { tenantId, state: "queued", sourceKey: { in: outside.flatMap(keysOf) } },
-    select: { sourceKey: true, startsAt: true },
-  });
-  const queuedSet = new Set(queued.map((r) => `${r.sourceKey}|${r.startsAt.getTime()}`));
+  // Lembretes: a config geral da conta e as campanhas que mexem neles, como o worker lê.
+  // Falha ao ler = "não sei" (nunca "não"); o resto da lista segue.
+  let cfg: ScheduleConfig | undefined;
+  let campaigns: Map<string, CampaignRules> | null = null;
+  let readable = true;
+  try {
+    cfg = (await loadAccountScheduleConfigs()).get(tenantId);
+    campaigns = await loadReminderOverrides([tenantId], now);
+  } catch (err) {
+    readable = false;
+    console.error("[campanha-override] não foi possível ler a configuração de lembretes", err instanceof Error ? err.message : "erro");
+  }
 
   return outside.map((a) => ({
-    name: a.lead?.name?.trim() || a.patientName?.trim() || "(sem nome)",
+    // O paciente da consulta (pode não ser quem escreveu); sem ele, o nome do contato.
+    name: a.patientName?.trim() || a.lead?.name?.trim() || "(sem nome)",
     phone: a.lead?.phone ?? "",
     date: dayKeyInZone(a.startsAt, timeZone),
     time: timeInZone(a.startsAt, timeZone),
     origin: matches.get(a.leadId as string)!.origin.label,
     clinicorpAppointmentId: a.clinicorpAppointmentId,
-    reminderQueued: keysOf(a).some((key) => queuedSet.has(`${key}|${a.startsAt.getTime()}`)),
+    reminder: readable ? reminderPlan(a, cfg, campaigns?.get(a.leadId as string), now) : { status: "unknown", pending: 0 },
   }));
 }
 
@@ -90,6 +126,12 @@ const COLUMNS: { header: string; key: keyof RescheduleRow | "reminder"; width: n
   { header: "Lembrete agendado", key: "reminder", width: 20 },
 ];
 
+export function reminderLabel(plan: ReminderPlan): string {
+  if (plan.status === "unknown") return "não sei";
+  if (plan.status === "no") return "não";
+  return `sim (${plan.pending} ${plan.pending === 1 ? "pendente" : "pendentes"})`;
+}
+
 /** Monta a planilha. Data em "dd/mm/aaaa" e telefone como texto (não vira número). */
 export function buildRescheduleWorkbook(rows: RescheduleRow[]): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
@@ -102,7 +144,7 @@ export function buildRescheduleWorkbook(rows: RescheduleRow[]): ExcelJS.Workbook
       ...row,
       date: `${day}/${month}/${year}`,
       clinicorpAppointmentId: row.clinicorpAppointmentId ?? "",
-      reminder: row.reminderQueued ? "sim" : "não",
+      reminder: reminderLabel(row.reminder),
     });
   }
   sheet.getColumn("phone").numFmt = "@";

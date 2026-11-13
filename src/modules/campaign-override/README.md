@@ -53,6 +53,18 @@ futuras (`status: "scheduled"`) de leads da campanha cujo dia local não é
 18 ou 19/11 ou cuja hora local não é 09:00. **Só leitura**: nada é alterado. A
 planilha tem nome e telefone e é só para a clínica; o terminal mostra a
 quantidade e o caminho. A auditoria (`campaign_override.reschedule_list_generated`)
-leva só a quantidade. "Lembrete agendado" é uma linha `ReminderDispatch` em
-`queued` para aquele horário: a linha só existe depois que o worker a toca, então
-"não" significa que ainda não há fila, não que nenhum lembrete sairá.
+leva só a quantidade. O nome da planilha é o do **paciente da consulta**
+(`patientName`; sem ele, o do contato) e o telefone é o do contato.
+
+**"Lembrete agendado"** usa a mesma regra do worker, sem duplicá-la
+(`remindersFor`, `staleReminders` e `loadAccountScheduleConfigs` de
+`workers/follow-up-worker/reminders.ts`): lembretes da consulta, senão os da
+campanha em vigor, senão os gerais da conta (agente principal com
+`schedule_meeting` ligada, respeitando o público), menos `remindersSent` e menos
+os que já perderam a janela. Sobrou algum: "sim (N pendentes)"; senão "não".
+Falha ao ler a config da conta ou as campanhas vira "não sei", nunca "não".
+
+## Quem assina (`--actor`)
+
+Nos dois scripts, `--actor` precisa ser superadmin ou usuário da conta de
+`--tenant` (`actor.ts`); qualquer outro é recusado antes de gravar ou gerar o arquivo.

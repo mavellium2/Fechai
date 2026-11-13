@@ -14,12 +14,17 @@ type Appt = {
   startsAt: Date;
   patientName: string | null;
   clinicorpAppointmentId: string | null;
+  serviceType: string | null;
+  reminderOverride: unknown;
+  remindersSent: number[];
   lead: { name: string | null; phone: string; isTest: boolean } | null;
 };
 
 const db = vi.hoisted(() => ({
   appointments: [] as unknown[],
-  reminders: [] as { tenantId: string; sourceKey: string; startsAt: Date; state: string }[],
+  config: null as unknown,
+  configFails: false,
+  campaignFails: false,
   writes: [] as string[],
   seen: [] as unknown[],
 }));
@@ -73,21 +78,32 @@ vi.mock("@/lib/prisma", () => {
           return (db.appointments as Appt[]).filter((a) => a.tenantId === where.tenantId);
         }),
       },
-      reminderDispatch: {
-        ...writes("reminderDispatch"),
-        findMany: vi.fn(async ({ where }: { where: { tenantId: string; state: string; sourceKey: { in: string[] } } }) =>
-          db.reminders.filter((r) => r.tenantId === where.tenantId && r.state === where.state && where.sourceKey.in.includes(r.sourceKey)),
-        ),
-      },
     },
   };
 });
 
+vi.mock("@/modules/campaigns/active", () => ({
+  loadReminderOverrides: vi.fn(async () => {
+    if (db.campaignFails) throw new Error("campanhas fora do ar");
+    return new Map();
+  }),
+}));
+// Só a leitura da config da conta é simulada: remindersFor e staleReminders são as do worker.
+vi.mock("../workers/follow-up-worker/reminders", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../workers/follow-up-worker/reminders")>()),
+  loadAccountScheduleConfigs: vi.fn(async () => {
+    if (db.configFails) throw new Error("banco fora do ar");
+    return new Map(db.config ? [["t1", db.config]] : []);
+  }),
+}));
+
 import ExcelJS from "exceljs";
+import { DEFAULT_SCHEDULE_CONFIG } from "@/modules/scheduling/config";
 import {
   buildRescheduleWorkbook,
   isInEventSlot,
   listRescheduleCandidates,
+  reminderLabel,
   rescheduleFileName,
 } from "@/modules/campaign-override/reschedule-list";
 
@@ -103,6 +119,9 @@ function appt(id: string, leadId: string, startsAtIso: string, patch: Partial<Ap
     startsAt: new Date(startsAtIso),
     patientName: null,
     clinicorpAppointmentId: null,
+    serviceType: null,
+    reminderOverride: null,
+    remindersSent: [],
     lead: { name: `Nome ${leadId}`, phone: `55149${leadId.length}`, isTest: false },
     ...patch,
   };
@@ -110,7 +129,12 @@ function appt(id: string, leadId: string, startsAtIso: string, patch: Partial<Ap
 
 beforeEach(() => {
   db.appointments = [];
-  db.reminders = [];
+  db.config = { ...DEFAULT_SCHEDULE_CONFIG, reminderEnabled: true, reminders: [
+    { minutesBefore: 1440, template: "x" },
+    { minutesBefore: 120, template: "x" },
+  ] };
+  db.configFails = false;
+  db.campaignFails = false;
   db.writes = [];
   db.seen = [];
 });
@@ -160,26 +184,72 @@ describe("listRescheduleCandidates", () => {
     expect(db.seen[0]).toMatchObject({ tenantId: TENANT, status: "scheduled", startsAt: { gt: NOW }, lead: { isTest: false } });
   });
 
-  it("traz ID do Clinicorp e se há lembrete na fila", async () => {
-    db.appointments = [
-      appt("a1", "camp-1", "2026-11-25T12:00:00Z", { clinicorpAppointmentId: "4791226171916288" }),
-      appt("a2", "camp-2", "2026-11-26T12:00:00Z"),
-      appt("a3", "camp-3", "2026-11-27T12:00:00Z"),
-    ];
-    db.reminders = [
-      { tenantId: TENANT, sourceKey: "clinicorp:4791226171916288", startsAt: new Date("2026-11-25T12:00:00Z"), state: "queued" },
-      // horário antigo da mesma consulta: não vale
-      { tenantId: TENANT, sourceKey: "appointment:a2", startsAt: new Date("2026-11-20T12:00:00Z"), state: "queued" },
-      { tenantId: TENANT, sourceKey: "appointment:a3", startsAt: new Date("2026-11-27T12:00:00Z"), state: "sent" },
-    ];
+  it("traz o ID do Clinicorp", async () => {
+    db.appointments = [appt("a1", "camp-1", "2026-11-25T12:00:00Z", { clinicorpAppointmentId: "4791226171916288" }), appt("a2", "camp-2", "2026-11-26T12:00:00Z")];
     const rows = await listRescheduleCandidates(TENANT, NOW);
-    expect(rows.map((r) => [r.clinicorpAppointmentId, r.reminderQueued])).toEqual([
-      ["4791226171916288", true],
-      [null, false],
-      [null, false],
-    ]);
+    expect(rows.map((r) => r.clinicorpAppointmentId)).toEqual(["4791226171916288", null]);
   });
 
+  it("o nome é o do paciente da consulta; sem ele, o do contato; o telefone é o do contato", async () => {
+    db.appointments = [
+      appt("a1", "camp-1", "2026-11-25T12:00:00Z", { patientName: " Paciente Real " }),
+      appt("a2", "camp-2", "2026-11-26T12:00:00Z", { patientName: "  " }),
+      appt("a3", "camp-3", "2026-11-27T12:00:00Z", { patientName: null, lead: { name: null, phone: "5514900", isTest: false } }),
+    ];
+    const rows = await listRescheduleCandidates(TENANT, NOW);
+    expect(rows.map((r) => r.name)).toEqual(["Paciente Real", "Nome camp-2", "(sem nome)"]);
+    expect(rows[0].phone).toBe("55149" + "6");
+  });
+});
+
+describe("lembrete agendado (mesma regra do worker)", () => {
+  const plan = async () => (await listRescheduleCandidates(TENANT, NOW)).map((r) => reminderLabel(r.reminder));
+
+  it("conta os disparos que ainda vão sair: config da conta menos os já enviados", async () => {
+    db.appointments = [
+      appt("a1", "camp-1", "2026-11-25T12:00:00Z"),
+      appt("a2", "camp-2", "2026-11-26T12:00:00Z", { remindersSent: [1440, 120] }),
+      appt("a3", "camp-3", "2026-11-27T12:00:00Z", { remindersSent: [1440] }),
+    ];
+    expect(await plan()).toEqual(["sim (2 pendentes)", "não", "sim (1 pendente)"]);
+  });
+
+  it("override da consulta vence a conta; lista vazia é 'esta não recebe'", async () => {
+    db.appointments = [
+      appt("a1", "camp-1", "2026-11-25T12:00:00Z", { reminderOverride: [] }),
+      appt("a2", "camp-2", "2026-11-26T12:00:00Z", { reminderOverride: [{ minutesBefore: 60, template: "x" }] }),
+    ];
+    expect(await plan()).toEqual(["não", "sim (1 pendente)"]);
+  });
+
+  it("disparo que já perdeu a janela não conta", async () => {
+    // 14:00 local de hoje: o de 1 dia antes já passou do dia previsto; o de 2h está na hora.
+    db.appointments = [appt("a1", "camp-1", "2026-11-13T17:00:00Z")];
+    expect(await plan()).toEqual(["sim (1 pendente)"]);
+  });
+
+  it("lembretes desligados, conta sem config ou público não atendido: não", async () => {
+    db.appointments = [appt("a1", "camp-1", "2026-11-25T12:00:00Z")];
+    db.config = { ...(db.config as object), reminderEnabled: false };
+    expect(await plan()).toEqual(["não"]);
+    db.config = null;
+    expect(await plan()).toEqual(["não"]);
+    db.config = { ...DEFAULT_SCHEDULE_CONFIG, reminderEnabled: true, reminderAudience: "selected_types", reminderTypes: ["Avaliação"], reminders: [{ minutesBefore: 60, template: "x" }] };
+    expect(await plan()).toEqual(["não"]);
+  });
+
+  it("falha ao ler a config ou as campanhas vira 'não sei', nunca 'não', e a lista segue", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    db.appointments = [appt("a1", "camp-1", "2026-11-25T12:00:00Z")];
+    db.configFails = true;
+    expect(await plan()).toEqual(["não sei"]);
+    db.configFails = false;
+    db.campaignFails = true;
+    expect(await plan()).toEqual(["não sei"]);
+  });
+});
+
+describe("listRescheduleCandidates — escrita", () => {
   it("não escreve em nenhuma tabela", async () => {
     db.appointments = [appt("a1", "camp-1", "2026-11-25T12:00:00Z")];
     await listRescheduleCandidates(TENANT, NOW);
@@ -197,7 +267,7 @@ describe("listRescheduleCandidates", () => {
 describe("planilha", () => {
   it("tem as colunas pedidas e o nome do arquivo não leva dado pessoal", async () => {
     const workbook = buildRescheduleWorkbook([
-      { name: "Maria", phone: "5514998586900", date: "2026-11-25", time: "09:30", origin: "anúncio AD27", clinicorpAppointmentId: null, reminderQueued: true },
+      { name: "Maria", phone: "5514998586900", date: "2026-11-25", time: "09:30", origin: "anúncio AD27", clinicorpAppointmentId: null, reminder: { status: "yes", pending: 2 } },
     ]);
     const sheet = workbook.getWorksheet("Reagendar")!;
     expect(sheet.getRow(1).values).toEqual([
@@ -211,7 +281,7 @@ describe("planilha", () => {
       "Lembrete agendado",
     ]);
     expect(sheet.getRow(2).getCell(3).value).toBe("25/11/2026");
-    expect(sheet.getRow(2).getCell(7).value).toBe("sim");
+    expect(sheet.getRow(2).getCell(7).value).toBe("sim (2 pendentes)");
     const buffer = await workbook.xlsx.writeBuffer();
     const reread = new ExcelJS.Workbook();
     await reread.xlsx.load(buffer as ArrayBuffer);
