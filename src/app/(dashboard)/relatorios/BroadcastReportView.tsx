@@ -101,7 +101,6 @@ export function BroadcastReportView({ report, sort, selected, hrefFor }: {
           ))}
         </dl>
       </ReportInsights>
-      <ReportInsights title="Custos"><p className="text-sm text-neutral panel:text-white/65">Ainda não medidos.</p></ReportInsights>
     </div>
   );
 }
