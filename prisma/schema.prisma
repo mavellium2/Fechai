@@ -170,6 +170,7 @@ model Tenant {
   satisfactionSettings      SatisfactionSurveySettings?
   satisfactionSurveys       SatisfactionSurvey[]
   leadAdOrigins             LeadAdOrigin[]
+  campaigns                 Campaign[]
   campaignReportSettings    CampaignReportSettings?
   serviceArea               TenantServiceArea?
   conversationInsights      ConversationInsight[]
@@ -338,6 +339,44 @@ model LeadAdOrigin {
 
   @@index([tenantId, firstAdAt])
   @@index([tenantId, code])
+}
+
+/// Uma ação de marketing da conta ("Black Friday", "Alinhadores — novembro"):
+/// nome, objetivo e período. É a entidade a que anúncios, regras do agente,
+/// disparos, leads e resultados vão apontar nos próximos cards.
+///
+/// **O status não é coluna.** Sai de `startsAt`, `endsAt`, `pausedAt` e
+/// `archivedAt` na leitura (`src/modules/campaigns/status.ts`): sem início é
+/// rascunho, passou de `endsAt` está terminada (sozinha, sem cron e sem
+/// gravar), e a pausa só vale dentro do período. Por isso nenhuma consulta de
+/// resultados filtra por status — campanha terminada continua nos relatórios.
+model Campaign {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String    @db.VarChar(80)
+  objective   String?   @db.VarChar(280)
+  /// Instantes UTC do dia escolhido na tela, convertido do fuso em `timezone`
+  /// (início 00:00 e fim 23:59:59 locais). Início nulo = rascunho.
+  startsAt    DateTime?
+  endsAt      DateTime?
+  /// Fuso em que as datas foram escolhidas. A conta ainda não tem fuso próprio,
+  /// então nasce `America/Sao_Paulo`; o campo já fica pronto para virar o fuso
+  /// da conta sem migrar linhas.
+  timezone    String    @default("America/Sao_Paulo")
+  /// Pausada em. Só vale dentro do período: antes do início é rascunho e depois
+  /// do fim está terminada, qualquer que seja a pausa.
+  pausedAt    DateTime?
+  /// Arquivada em. Ganha de todo o resto; desarquivar volta ao status das datas.
+  archivedAt  DateTime?
+  /// Quem criou. `SetNull`: remover o usuário não apaga a campanha da conta.
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, archivedAt])
+  @@index([tenantId, endsAt])
 }
 
 /// Pesquisa de satisfação pós-conversa, por conta. Sem linha = desligada, com
@@ -717,6 +756,9 @@ model User {
   googleLinkedAt DateTime?
 
   passwordResetTokens PasswordResetToken[]
+
+  /// Campanhas que esta pessoa criou (`Campaign.createdById`).
+  campaignsCreated Campaign[]
 
   // Programa de afiliados: presente só se a pessoa optou por ser afiliada
   // (no /cadastro ou ativando depois). Papel, não conta separada.
