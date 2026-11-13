@@ -413,9 +413,17 @@ describe("editar o período de uma campanha pausada", () => {
     expect(written()).not.toHaveProperty("pausedAt");
   });
 
-  it("campanha que não estava pausada nunca ganha pausedAt na edição", async () => {
+  it("início no futuro escreve pausedAt: null também numa campanha que a leitura viu sem pausa (inofensivo), sem registrar pauseCleared", async () => {
+    // Escrever null onde já é null não custa nada — e cobre quem pausou entre a leitura e a escrita.
     mocks.findFirst.mockResolvedValue(row());
     await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
+    expect(written()).toHaveProperty("pausedAt", null);
+    expect(mocks.change.mock.calls[0][0]).not.toHaveProperty("meta");
+  });
+
+  it("campanha que não estava pausada e continua começada nunca ganha pausedAt na edição", async () => {
+    mocks.findFirst.mockResolvedValue(row());
+    await edit({ startsOn: "2026-11-05", endsOn: "2026-11-30" });
     expect(written()).not.toHaveProperty("pausedAt");
   });
 
@@ -682,6 +690,23 @@ describe("concorrência — a escrita só vale no estado em que a leitura viu a 
     expect(db.read().name).toBe("Black Friday");
     expect(mocks.change).not.toHaveBeenCalled();
     expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+
+  it("pausada por outra pessoa entre a leitura e a escrita de uma edição que leva o início ao futuro: a pausa sai", async () => {
+    const db = database(row(PAUSED)); // já pausada no banco
+    mocks.findFirst.mockResolvedValue(row()); // a leitura ainda via a campanha ativa
+
+    const result = await updateCampaign(
+      null,
+      form({ id: "camp-1", ...FILLED, name: "Nome novo", startsOn: "2026-12-10", endsOn: "2026-12-31" }),
+    );
+
+    expect(result.ok).toBe(true);
+    // Nada de "Pausada" escondida para quando a data chegar.
+    expect(db.read().pausedAt).toBeNull();
+    expect(campaignStatus(db.read() as unknown as Parameters<typeof campaignStatus>[0], new Date("2026-12-20T15:00:00.000Z"))).toBe(
+      "active",
+    );
   });
 
   it("campanha de OUTRA conta continua 'não encontrada': a corrida não vaza que o id existe", async () => {

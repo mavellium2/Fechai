@@ -180,16 +180,20 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
   // A pausa só vale dentro do período. Se a edição faz a campanha deixar de ter
   // começado (sem início, ou início no futuro), uma pausa antiga ficaria
   // gravada e voltaria a valer quando a data chegasse: a campanha reapareceria
-  // "Pausada" sem ninguém ter pausado. Então ela sai junto. Com o início ainda
+  // "Pausada" sem ninguém ter pausado. Então `pausedAt: null` vai junto — SEMPRE
+  // que o início é nulo ou futuro, e não só quando a leitura viu a campanha
+  // pausada: se outra pessoa pausou entre a leitura e a escrita, a pausa dela
+  // também sai (escrever null onde já é null não custa nada). Com o início ainda
   // no passado a pausa fica — a campanha segue pausada. (O limite é o mesmo do
   // status: só é "futuro" o início depois de agora.)
-  const clearsPause = campaign.pausedAt !== null && (startsAt === null || startsAt.getTime() > now.getTime());
+  const startsLater = startsAt === null || startsAt.getTime() > now.getTime();
+  const clearsPause = startsLater && campaign.pausedAt !== null;
 
   const written = await attempt(() =>
     prisma.campaign.updateMany({
       // `archivedAt: null`: arquivada em outra aba no meio da edição não é editada.
       where: { id: campaign.id, tenantId: actor.tenantId, archivedAt: null },
-      data: clearsPause ? { ...after, pausedAt: null } : after,
+      data: startsLater ? { ...after, pausedAt: null } : after,
     }),
   );
   if (!written.ok) return serverError();
@@ -201,7 +205,8 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
     before,
     after,
     // A pausa não entra no antes/depois (desfazer a edição não a restaura, de
-    // propósito); o registro fica no contexto do evento.
+    // propósito); o registro fica no contexto do evento — só quando havia uma
+    // pausa para limpar.
     ...(clearsPause ? { meta: { pauseCleared: true } } : {}),
   });
 
