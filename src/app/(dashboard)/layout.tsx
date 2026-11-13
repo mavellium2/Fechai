@@ -25,6 +25,9 @@ const NAV_PRODUTO: NavItem[] = [
 /** Só para quem está no programa de afiliados. */
 const NAV_AFILIADO: NavItem = { href: "/afiliado", label: "Afiliado", icon: "HandCoins" };
 
+/** Campanhas: as ações de marketing da conta. É do produto e não depende da Meta (Disparos é que depende). */
+const NAV_CAMPANHAS: NavItem = { href: "/campanhas", label: "Campanhas", icon: "Megaphone" };
+
 /** Relatórios servem aos dois papéis (a aba de afiliados vive lá dentro). */
 const NAV_RELATORIOS: NavItem = { href: "/relatorios", label: "Relatórios", icon: "BarChart3" };
 
@@ -44,6 +47,7 @@ function navFor(roles: { usesProduct: boolean; isAffiliate: boolean }, metaEnabl
   if (roles.usesProduct) items.push(...NAV_PRODUTO);
   if (roles.usesProduct && metaEnabled) items.push({ href: "/disparos", label: "Disparos", icon: "Send" });
   if (roles.isAffiliate) items.push(NAV_AFILIADO);
+  if (roles.usesProduct) items.push(NAV_CAMPANHAS);
   items.push(NAV_RELATORIOS);
   if (roles.usesProduct) items.push({ href: "/integracoes", label: "Integrações", icon: "Plug" });
   items.push(NAV_CONFIG);

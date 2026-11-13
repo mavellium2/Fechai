@@ -16,6 +16,7 @@ export function FilterTabs({
   href,
   label,
   className,
+  itemClassName,
 }: {
   options: FilterOption[];
   active: string;
@@ -24,6 +25,8 @@ export function FilterTabs({
   /** Nome do grupo para leitores de tela (ex.: "Filtrar conversas"). */
   label: string;
   className?: string;
+  /** Ajuste de cada pílula (ex.: altura de toque no celular, sem quebra de linha). */
+  itemClassName?: string;
 }) {
   return (
     <nav aria-label={label} className={cn("flex flex-wrap gap-2", className)}>
@@ -41,6 +44,7 @@ export function FilterTabs({
               on
                 ? "bg-iris text-white"
                 : "bg-ink/5 text-neutral hover:text-ink panel:bg-white/10 panel:text-white/60 panel:hover:text-white",
+              itemClassName,
             )}
           >
             {o.label}

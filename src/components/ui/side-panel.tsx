@@ -53,11 +53,20 @@ export function SidePanel({
   return (
     <dialog
       ref={ref}
-      // `close` cobre TODOS os caminhos de fechamento — Esc, `el.close()` do
-      // efeito acima e o botão — então mantém o estado de quem chama em dia
-      // sozinho. Nada de `onCancel` junto: no Esc o navegador dispara `cancel`
-      // e logo depois `close`, e os dois ligados chamariam `onClose` em dobro.
+      // `close` cobre os caminhos que fecham o diálogo de fato — `el.close()` do
+      // efeito acima e o fechamento nativo — e mantém o estado de quem chama em
+      // dia sozinho.
       onClose={onClose}
+      // O Esc é o único caminho em que o navegador fecharia o painel ANTES de
+      // quem chama poder recusar (formulário com alteração não salva). Como no
+      // `Modal`, o fechamento nativo é impedido e `onClose` decide: quem fecha
+      // o painel o faz pondo `open` em falso, e o efeito acima fecha o diálogo.
+      // `onClose` ainda é chamado uma segunda vez pelo evento `close` desse
+      // fechamento — precisa ser idempotente, como já era com o botão X.
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
       // Clique no backdrop fecha: o alvo do clique é o próprio <dialog>
       // (o backdrop é pseudo-elemento dele), nunca o conteúdo interno.
       onClick={(e) => {
