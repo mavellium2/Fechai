@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { campaignStatus, isReadOnly } from "@/modules/campaigns/status";
 import { recordAudit } from "./log";
 import { eventDef, isRevertibleEvent } from "./events";
 import { containsRedacted, isTruncated } from "./redact";
@@ -38,6 +39,17 @@ type RevertibleModel = {
    * de sucesso parecer texto de máquina.
    */
   gender?: "f" | "m";
+  /**
+   * Conferência extra ANTES de regravar: o que ler do registro de hoje
+   * (`select`) e a regra que pode recusar o desfazer — devolve a frase da
+   * recusa, ou `null` para seguir. Existe para o que o registro tem de regra
+   * própria: uma campanha arquivada não aceita edição, e o desfazer não pode
+   * ser o atalho para editá-la. A recusa devolve o log ao estado de pendente.
+   */
+  guard?: {
+    select: readonly string[];
+    refuse: (current: Record<string, unknown>, data: Record<string, unknown>) => string | null;
+  };
 };
 
 /**
@@ -128,8 +140,45 @@ const REVERTIBLE_MODELS: Record<string, RevertibleModel> = {
     restorable: false,
     label: "campanha",
     gender: "f",
+    guard: { select: ["startsAt", "endsAt", "pausedAt", "archivedAt"], refuse: refuseCampaignRevert },
   },
 };
+
+const asDate = (value: unknown): Date | null => (value instanceof Date ? value : null);
+
+/**
+ * Desfazer a edição de uma campanha. Duas recusas:
+ *
+ * - **Arquivada ou terminada** (`isReadOnly`): ficam só para consulta, e a
+ *   edição e as actions já as recusam. O desfazer não pode ser a porta dos
+ *   fundos (nem para prorrogar o fim de quem terminou).
+ * - **Fim antes do início:** um evento antigo pode restaurar um início que já
+ *   ficou depois do fim de hoje (ou um fim anterior ao início de hoje). O
+ *   período resultante — o que sobra do registro atual mais o que o desfazer
+ *   escreve — precisa continuar existindo.
+ */
+function refuseCampaignRevert(current: Record<string, unknown>, data: Record<string, unknown>): string | null {
+  const timeline = {
+    startsAt: asDate(current.startsAt),
+    endsAt: asDate(current.endsAt),
+    pausedAt: asDate(current.pausedAt),
+    archivedAt: asDate(current.archivedAt),
+  };
+  const now = new Date();
+
+  if (isReadOnly(timeline, now)) {
+    return campaignStatus(timeline, now) === "archived"
+      ? "Esta campanha está arquivada e fica só para consulta — não dá para desfazer a alteração nela."
+      : "Esta campanha já terminou e fica só para consulta — não dá para desfazer a alteração nela.";
+  }
+
+  const startsAt = "startsAt" in data ? asDate(data.startsAt) : timeline.startsAt;
+  const endsAt = "endsAt" in data ? asDate(data.endsAt) : timeline.endsAt;
+  if (startsAt && endsAt && endsAt.getTime() < startsAt.getTime()) {
+    return "Desfazer deixaria o fim da campanha antes do início. Ajuste as datas na própria campanha.";
+  }
+  return null;
+}
 
 export type RevertResult =
   | { ok: true; info: string }
@@ -275,13 +324,17 @@ async function revertUpdate(
   }
 
   const delegate = delegateOf(model);
-  const exists = await delegate.findUnique({ where: { id: log.targetId! }, select: { id: true } });
-  if (!exists) {
+  const select = Object.fromEntries(["id", ...(model.guard?.select ?? [])].map((field) => [field, true]));
+  const current = await delegate.findUnique({ where: { id: log.targetId! }, select });
+  if (!current) {
     return {
       ok: false,
       error: `Este ${model.label} não existe mais — não há o que alterar de volta.`,
     };
   }
+
+  const refusal = model.guard?.refuse(current, data);
+  if (refusal) return { ok: false, error: refusal };
 
   await delegate.update({ where: { id: log.targetId! }, data });
 
@@ -407,7 +460,7 @@ function coerce(key: string, value: unknown): unknown {
 const DATE_FIELDS = new Set(["trialEndsAt", "birthDate", "voiceCreatedAt", "scheduledAt", "startsAt", "endsAt"]);
 
 type Delegate = {
-  findUnique(args: { where: { id: string }; select?: object }): Promise<{ id: string } | null>;
+  findUnique(args: { where: { id: string }; select?: object }): Promise<({ id: string } & Record<string, unknown>) | null>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
   create(args: { data: Record<string, unknown> }): Promise<unknown>;
 };
