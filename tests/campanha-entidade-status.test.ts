@@ -21,6 +21,17 @@ import {
   startOfDayUtc,
 } from "@/modules/campaigns/period";
 import { campaignFormSchema, parseCampaignForm } from "@/modules/campaigns/schema";
+import { toCampaignView } from "@/modules/campaigns/view";
+import {
+  EMPTY_FILTER,
+  FILTER_LABEL,
+  FILTER_ORDER,
+  readOnlyNotice,
+  STATUS_ICON,
+  STATUS_LABEL,
+  STATUS_TONE,
+  statusNote,
+} from "@/app/(dashboard)/campanhas/labels";
 
 /**
  * CMP-01 — o que decide o status de uma campanha e como o dia da tela vira
@@ -378,5 +389,96 @@ describe("formulário — o que a tela pode mandar", () => {
 
   it("o schema é o mesmo que a action usa (sem segunda cópia da regra)", () => {
     expect(campaignFormSchema.safeParse({ name: "ab", objective: "", startsOn: "", endsOn: "" }).success).toBe(true);
+  });
+});
+
+describe("textos da tela — o que cada status diz", () => {
+  const startsAt = startOfDayUtc("2026-11-01", SP);
+  const endsAt = endOfDayUtc("2026-11-30", SP);
+  const dated = { startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: SP };
+
+  it("todo status tem rótulo, tom e ícone próprios (estado nunca é só cor)", () => {
+    const labels = CAMPAIGN_STATUSES.map((status) => STATUS_LABEL[status]);
+    expect(new Set(labels).size).toBe(CAMPAIGN_STATUSES.length);
+    expect(labels).toEqual(["Rascunho", "Ativa", "Pausada", "Terminada", "Arquivada"]);
+    for (const status of CAMPAIGN_STATUSES) {
+      expect(STATUS_TONE[status], status).toBeTruthy();
+      expect(STATUS_ICON[status], status).toBeTruthy();
+    }
+    const icons = CAMPAIGN_STATUSES.map((status) => STATUS_ICON[status]);
+    expect(new Set(icons).size).toBe(CAMPAIGN_STATUSES.length);
+  });
+
+  it("as abas seguem a ordem do plano e todas têm nome e mensagem de vazio", () => {
+    expect(FILTER_ORDER.map((key) => FILTER_LABEL[key])).toEqual([
+      "Todas",
+      "Ativas",
+      "Rascunho",
+      "Pausadas",
+      "Terminadas",
+      "Arquivadas",
+    ]);
+    for (const key of FILTER_ORDER) {
+      expect(EMPTY_FILTER[key].title.length, key).toBeGreaterThan(0);
+      expect(EMPTY_FILTER[key].description.length, key).toBeGreaterThan(0);
+    }
+    expect(EMPTY_FILTER.paused.title).toBe("Nenhuma campanha pausada");
+  });
+
+  it("terminada e arquivada avisam que ficam só para consulta e seguem nos relatórios", () => {
+    expect(readOnlyNotice("finished", dated)).toBe(
+      "Campanha terminada em 30/11/2026. Fica só para consulta e segue nos relatórios.",
+    );
+    expect(readOnlyNotice("archived", dated)).toBe("Campanha arquivada. Fica só para consulta e segue nos relatórios.");
+    expect(readOnlyNotice("active", dated)).toBeNull();
+    expect(readOnlyNotice("draft", dated)).toBeNull();
+    expect(readOnlyNotice("paused", dated)).toBeNull();
+  });
+
+  it("o resumo explica o rascunho com início no futuro e o sem início", () => {
+    expect(statusNote("draft", { ...dated, startsAt: startOfDayUtc("2026-12-01", SP) })).toBe(
+      "Começa em 01/12/2026. Até lá ela fica como rascunho.",
+    );
+    expect(statusNote("draft", { ...dated, startsAt: null, endsAt: null })).toBe(
+      "Sem data de início, a campanha fica como rascunho.",
+    );
+  });
+
+  it("o resumo diz quando termina, desde quando está pausada e quando foi arquivada", () => {
+    expect(statusNote("active", dated)).toBe("Termina em 30/11/2026.");
+    expect(statusNote("active", { ...dated, endsAt: null })).toMatch(/Sem data de fim/);
+    expect(statusNote("paused", { ...dated, pausedAt: at("2026-11-10T15:30:00Z") })).toBe(
+      "Pausada em 10/11/2026 às 12:30. Retome quando quiser.",
+    );
+    expect(statusNote("finished", dated)).toBe("Terminou em 30/11/2026.");
+    expect(statusNote("archived", { ...dated, archivedAt: at("2026-11-12T12:00:00Z") })).toBe(
+      "Arquivada em 12/11/2026 às 09:00.",
+    );
+  });
+
+  it("a campanha chega à tela como texto e booleanos: status, ações permitidas e datas do formulário", () => {
+    const view = toCampaignView(
+      { id: "c1", name: "Black Friday", objective: null, startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: SP },
+      at("2026-11-15T15:00:00Z"),
+    );
+    expect(view).toEqual({
+      id: "c1",
+      name: "Black Friday",
+      objective: null,
+      status: "active",
+      allowed: { edit: true, pause: true, resume: false, archive: true, unarchive: false },
+      period: "01/11 a 30/11/2026",
+      startsOn: "2026-11-01",
+      endsOn: "2026-11-30",
+    });
+  });
+
+  it("fuso inválido na linha não derruba a tela: cai em Brasília", () => {
+    const view = toCampaignView(
+      { id: "c1", name: "X1", objective: null, startsAt, endsAt, pausedAt: null, archivedAt: null, timezone: "Nao/Existe" },
+      at("2026-11-15T15:00:00Z"),
+    );
+    expect(view.startsOn).toBe("2026-11-01");
+    expect(view.period).toBe("01/11 a 30/11/2026");
   });
 });

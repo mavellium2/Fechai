@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * CMP-01 — as actions e as consultas de campanha, com o Prisma trocado por
@@ -44,6 +44,15 @@ vi.mock("@/modules/campaigns/access", async (importOriginal) => {
 });
 vi.mock("@/lib/rate-limit", () => ({ payloadTooLarge: mocks.tooLarge }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
+// As páginas chamam `notFound()` e os componentes de cliente importam `useRouter`
+// (só importam: aqui nada é renderizado).
+vi.mock("next/navigation", () => ({
+  notFound: () => {
+    throw new Error("NOT_FOUND");
+  },
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/campanhas",
+}));
 vi.mock("@/modules/audit/log", () => ({ recordAudit: mocks.audit, recordChange: mocks.change }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -510,6 +519,85 @@ describe("acesso e permissão", () => {
     mocks.product.mockRejectedValue(new Error("REDIRECT:/afiliado"));
     await expect(requireCampaignActor()).rejects.toThrow("REDIRECT:/afiliado");
     expect(mocks.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("páginas — guarda do produto e conta da sessão", () => {
+  const redirecting = () => mocks.product.mockRejectedValue(new Error("REDIRECT:/afiliado"));
+
+  // Importadas uma vez, com folga: as páginas puxam os componentes de UI, e o
+  // primeiro import não pode estourar o tempo de um teste qualquer.
+  let Layout: typeof import("@/app/(dashboard)/campanhas/layout").default;
+  let ListPage: typeof import("@/app/(dashboard)/campanhas/page").default;
+  let DetailPage: typeof import("@/app/(dashboard)/campanhas/[id]/page").default;
+  beforeAll(async () => {
+    [Layout, ListPage, DetailPage] = await Promise.all([
+      import("@/app/(dashboard)/campanhas/layout").then((m) => m.default),
+      import("@/app/(dashboard)/campanhas/page").then((m) => m.default),
+      import("@/app/(dashboard)/campanhas/[id]/page").then((m) => m.default),
+    ]);
+  }, 30_000);
+
+  it("o layout bloqueia (quem só é afiliado vai para o painel de afiliado)", async () => {
+    redirecting();
+    await expect(Layout({ children: null })).rejects.toThrow("REDIRECT:/afiliado");
+    // Com acesso, o layout deixa passar.
+    mocks.product.mockResolvedValue({ session: { user: { tenantId: "tenant-a", id: "user-a" } } });
+    await expect(Layout({ children: null })).resolves.toBeTruthy();
+  });
+
+  it("a lista bloqueia antes de consultar qualquer coisa", async () => {
+    redirecting();
+    await expect(ListPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT:/afiliado");
+    expect(mocks.findMany).not.toHaveBeenCalled();
+    expect(mocks.count).not.toHaveBeenCalled();
+  });
+
+  it("o detalhe bloqueia antes de consultar qualquer coisa", async () => {
+    redirecting();
+    await expect(DetailPage({ params: Promise.resolve({ id: "camp-1" }) })).rejects.toThrow("REDIRECT:/afiliado");
+    expect(mocks.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("a lista consulta pelo tenant da sessão e pelo filtro da URL", async () => {
+    await ListPage({ searchParams: Promise.resolve({ status: "paused" }) });
+    expect(mocks.findMany.mock.calls[0][0].where).toMatchObject({ tenantId: "tenant-a", pausedAt: { not: null } });
+    for (const [args] of mocks.count.mock.calls) expect(args.where.tenantId).toBe("tenant-a");
+  });
+
+  it("filtro inválido na URL cai em 'todas' (sem arquivadas), nunca num erro", async () => {
+    await ListPage({ searchParams: Promise.resolve({ status: "qualquer-coisa" }) });
+    expect(mocks.findMany.mock.calls[0][0].where).toEqual({ tenantId: "tenant-a", archivedAt: null });
+  });
+
+  it("o detalhe de campanha de OUTRA conta é 404, igual a um id que não existe", async () => {
+    mocks.findFirst.mockResolvedValue(null);
+    await expect(DetailPage({ params: Promise.resolve({ id: "camp-de-outra-conta" }) })).rejects.toThrow("NOT_FOUND");
+    expect(mocks.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "camp-de-outra-conta", tenantId: "tenant-a" } }),
+    );
+  });
+
+  it("o detalhe da própria campanha abre (e `canEdit` falso esconde os botões)", async () => {
+    mocks.findFirst.mockResolvedValue({ ...row(), createdBy: { name: "Dono", email: "dono@example.test" } });
+    const open = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    expect(open.props).toMatchObject({ canEdit: true, notice: null, campaign: { id: "camp-1", status: "active" } });
+
+    mocks.canEdit.value = false;
+    const readOnly = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    expect(readOnly.props.canEdit).toBe(false);
+  });
+
+  it("terminada e arquivada abrem com o aviso de 'só para consulta' e sem ações de edição", async () => {
+    mocks.findFirst.mockResolvedValue({ ...row(FINISHED), createdBy: null });
+    const finished = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    expect(finished.props.notice).toBe("Campanha terminada em 09/11/2026. Fica só para consulta e segue nos relatórios.");
+    expect(finished.props.campaign.allowed).toMatchObject({ edit: false, pause: false, resume: false, archive: true });
+
+    mocks.findFirst.mockResolvedValue({ ...row(ARCHIVED), createdBy: null });
+    const archived = await DetailPage({ params: Promise.resolve({ id: "camp-1" }) });
+    expect(archived.props.notice).toBe("Campanha arquivada. Fica só para consulta e segue nos relatórios.");
+    expect(archived.props.campaign.allowed).toMatchObject({ edit: false, archive: false, unarchive: true });
   });
 });
 

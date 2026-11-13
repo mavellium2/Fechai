@@ -1,18 +1,17 @@
 import { z } from "zod";
+import { NAME_MAX, NAME_MIN, OBJECTIVE_MAX } from "./limits";
 import { isAcceptableDay, MAX_YEAR, MIN_YEAR } from "./period";
 
 /**
- * Validação do formulário de campanha — a mesma regra no cliente (limites que
- * a tela mostra) e no servidor (o que de fato decide).
+ * Validação do formulário de campanha — a regra que decide no servidor (a tela
+ * só espelha os limites, vindos de `limits.ts`).
  *
  * Nada aqui fala de banco nem de fuso: as datas chegam como dia
  * `YYYY-MM-DD` (o valor de `<input type="date">`) e viram instante UTC em
  * `period.ts`.
  */
 
-export const NAME_MIN = 2;
-export const NAME_MAX = 80;
-export const OBJECTIVE_MAX = 280;
+export { NAME_MAX, NAME_MIN, OBJECTIVE_MAX };
 
 export type CampaignField = "name" | "objective" | "startsOn" | "endsOn";
 export type CampaignFieldErrors = Partial<Record<CampaignField, string>>;
