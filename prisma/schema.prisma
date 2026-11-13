@@ -171,6 +171,7 @@ model Tenant {
   satisfactionSurveys       SatisfactionSurvey[]
   leadAdOrigins             LeadAdOrigin[]
   campaigns                 Campaign[]
+  campaignOverrides         CampaignOverride[]
   campaignReportSettings    CampaignReportSettings?
   serviceArea               TenantServiceArea?
   conversationInsights      ConversationInsight[]
@@ -418,6 +419,39 @@ model Campaign {
 
   @@index([tenantId, archivedAt])
   @@index([tenantId, endsAt])
+}
+
+/// Regra PROVISÓRIA de campanha por conta, para a campanha de implantes
+/// (18 e 19/11/2026): enquanto o modelo `Campaign` (CMP-04) não decide quais
+/// leads valem, esta linha diz quais são — anúncios (código ou id), disparos e
+/// leads marcados à mão. Vale de `startsAt` até `endsAt`, com corte rígido, e
+/// morre depois. Ver `src/modules/campaign-override/README.md`.
+model CampaignOverride {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Nome estável da regra ("implantes-2026-11"): uma por conta e chave.
+  key                  String   @db.VarChar(60)
+  /// Códigos de anúncio escritos pelo gestor ("AD27"), sem diferença de maiúsculas.
+  adCodes              String[] @default([])
+  /// Ids de anúncio da Meta (`LeadAdOrigin.sourceId`).
+  adSourceIds          String[] @default([])
+  /// Disparos (`BroadcastCampaign.id`) cujos destinatários são leads da campanha.
+  broadcastCampaignIds String[] @default([])
+  /// Leads marcados à mão (valem também no chat de teste, para validar).
+  leadIds              String[] @default([])
+  startsAt             DateTime
+  /// Fim rígido: passou deste instante, ninguém mais é lead da campanha.
+  endsAt               DateTime
+  /// `{ dates: ["2026-11-18","2026-11-19"], time: "09:00", capacityPerDay?, offerText? }`,
+  /// lido por `parseOverrideRules`, que nunca lança.
+  rules                Json
+  createdById          String?
+  updatedById          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([tenantId, key])
 }
 
 /// Anúncio da Meta ligado a uma campanha: o lead que chega por ele entra na
