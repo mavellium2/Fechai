@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { diffFields, hasChanges } from "@/modules/audit/diff";
@@ -22,9 +23,14 @@ import {
  *
  * - O `tenantId` vem da SESSÃO (`requireCampaignActor`), nunca do formulário:
  *   um `tenantId` no corpo da requisição é ignorado.
- * - Toda escrita é `updateMany({ where: { id, tenantId } })` e `count === 0`
- *   vira "não encontrada" — id de outra conta é indistinguível de id que não
- *   existe.
+ * - Toda escrita é `updateMany` por `{ id, tenantId }` MAIS a condição de estado
+ *   em que a leitura viu a campanha (ex.: pausar só casa quem não está pausada
+ *   nem arquivada). Assim, duas abas ou duas pessoas agindo ao mesmo tempo não
+ *   se atropelam: quem chega depois não escreve nada.
+ * - Id de outra conta e id que não existe são a MESMA resposta ("não
+ *   encontrada"): a leitura já filtra pelo `tenantId` da sessão. Só quando a
+ *   leitura achou a campanha e o `updateMany` não casou ninguém (o estado mudou
+ *   no meio) a resposta é "o status mudou" — sem escrever e sem auditar.
  * - O guarda repete em cada action: layout e menu não autorizam uma mutação.
  * - Terminada e arquivada ficam só para leitura (a tabela é `allowedActions`,
  *   a mesma que a tela usa para mostrar ou esconder o botão).
@@ -42,6 +48,11 @@ const forbidden = (): Result => ({
 });
 const notFound = (): Result => ({ ok: false, error: "Campanha não encontrada." });
 const refused = (error: string): Result => ({ ok: false, error });
+/** A leitura achou a campanha, mas o estado mudou antes da escrita (outra aba, outra pessoa). */
+const statusChanged = (): Result => ({
+  ok: false,
+  error: "O status da campanha mudou. Atualize a página e tente de novo.",
+});
 const serverError = (): Result => ({
   ok: false,
   code: "server",
@@ -176,12 +187,13 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
 
   const written = await attempt(() =>
     prisma.campaign.updateMany({
-      where: { id: campaign.id, tenantId: actor.tenantId },
+      // `archivedAt: null`: arquivada em outra aba no meio da edição não é editada.
+      where: { id: campaign.id, tenantId: actor.tenantId, archivedAt: null },
       data: clearsPause ? { ...after, pausedAt: null } : after,
     }),
   );
   if (!written.ok) return serverError();
-  if (written.value.count === 0) return notFound();
+  if (written.value.count === 0) return statusChanged();
 
   await recordChange({
     event: "campaign.updated",
@@ -212,6 +224,8 @@ const TRANSITIONS: Record<
     event: AuditEvent;
     needs: keyof CampaignAllowed;
     info: string;
+    /** O estado em que a escrita ainda vale — vai no `where` do `updateMany`. */
+    onlyIf: Prisma.CampaignWhereInput;
     data: (now: Date) => StateDates;
     refusal: (status: CampaignStatus) => string;
   }
@@ -220,6 +234,7 @@ const TRANSITIONS: Record<
     event: "campaign.paused",
     needs: "pause",
     info: "Campanha pausada.",
+    onlyIf: { archivedAt: null, pausedAt: null },
     data: (now) => ({ pausedAt: now }),
     refusal: (status) =>
       ({
@@ -234,6 +249,7 @@ const TRANSITIONS: Record<
     event: "campaign.resumed",
     needs: "resume",
     info: "Campanha retomada.",
+    onlyIf: { archivedAt: null, pausedAt: { not: null } },
     data: () => ({ pausedAt: null }),
     refusal: (status) =>
       ({
@@ -248,6 +264,7 @@ const TRANSITIONS: Record<
     event: "campaign.archived",
     needs: "archive",
     info: "Campanha arquivada.",
+    onlyIf: { archivedAt: null },
     data: (now) => ({ archivedAt: now }),
     refusal: () => "Esta campanha já está arquivada.",
   },
@@ -255,6 +272,7 @@ const TRANSITIONS: Record<
     event: "campaign.unarchived",
     needs: "unarchive",
     info: "Campanha desarquivada.",
+    onlyIf: { archivedAt: { not: null } },
     data: () => ({ archivedAt: null }),
     refusal: () => "Esta campanha não está arquivada.",
   },
@@ -274,10 +292,10 @@ async function transition(kind: TransitionKind, id: string): Promise<Result> {
 
   const data = rule.data(now);
   const written = await attempt(() =>
-    prisma.campaign.updateMany({ where: { id: campaign.id, tenantId: actor.tenantId }, data }),
+    prisma.campaign.updateMany({ where: { id: campaign.id, tenantId: actor.tenantId, ...rule.onlyIf }, data }),
   );
   if (!written.ok) return serverError();
-  if (written.value.count === 0) return notFound();
+  if (written.value.count === 0) return statusChanged();
 
   // O status depois é o que as datas passam a mandar: desarquivar uma campanha
   // vencida, por exemplo, volta como "terminada", não como "ativa".

@@ -238,8 +238,9 @@ describe("editar campanha", () => {
 
     expect(result).toEqual({ ok: true, id: "camp-1" });
     expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" } });
+    // O `archivedAt: null` é a condição de estado: arquivada no meio da edição não é editada.
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a" },
+      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null },
       data: { name: "Black Friday 2026", objective: "Encher a agenda de novembro", startsAt: START, endsAt: END },
     });
   });
@@ -285,11 +286,13 @@ describe("editar campanha", () => {
     expect(mocks.audit).not.toHaveBeenCalled();
   });
 
-  it("updateMany sem nenhuma linha (sumiu no meio) também é 'não encontrada', sem auditoria", async () => {
+  it("achou a campanha mas o updateMany não casou (o estado mudou no meio): 'o status mudou', sem auditoria", async () => {
     mocks.updateMany.mockResolvedValue({ count: 0 });
     const result = await edit();
-    expect(result).toEqual({ ok: false, error: "Campanha não encontrada." });
+    expect(result).toEqual({ ok: false, error: "O status da campanha mudou. Atualize a página e tente de novo." });
     expect(mocks.change).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
   });
 
   it("id ausente ou que não é texto nunca chega ao banco", async () => {
@@ -357,7 +360,7 @@ describe("editar o período de uma campanha pausada", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a" },
+      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null },
       data: {
         name: "Black Friday 2026",
         objective: "Encher a agenda de novembro",
@@ -434,26 +437,31 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
     run: (id: string) => ReturnType<typeof pauseCampaign>;
     event: string;
     from: Record<string, unknown>;
+    /** A condição de estado que o `updateMany` leva além de id e tenantId. */
+    onlyIf: Record<string, unknown>;
     data: Record<string, unknown>;
     statusBefore: string;
     statusAfter: string;
   };
 
   const cases: Case[] = [
-    { name: "pausar", run: pauseCampaign, event: "campaign.paused", from: {}, data: { pausedAt: NOW }, statusBefore: "active", statusAfter: "paused" },
-    { name: "retomar", run: resumeCampaign, event: "campaign.resumed", from: PAUSED, data: { pausedAt: null }, statusBefore: "paused", statusAfter: "active" },
-    { name: "arquivar", run: archiveCampaign, event: "campaign.archived", from: {}, data: { archivedAt: NOW }, statusBefore: "active", statusAfter: "archived" },
-    { name: "desarquivar", run: unarchiveCampaign, event: "campaign.unarchived", from: ARCHIVED, data: { archivedAt: null }, statusBefore: "archived", statusAfter: "active" },
+    { name: "pausar", run: pauseCampaign, event: "campaign.paused", from: {}, onlyIf: { archivedAt: null, pausedAt: null }, data: { pausedAt: NOW }, statusBefore: "active", statusAfter: "paused" },
+    { name: "retomar", run: resumeCampaign, event: "campaign.resumed", from: PAUSED, onlyIf: { archivedAt: null, pausedAt: { not: null } }, data: { pausedAt: null }, statusBefore: "paused", statusAfter: "active" },
+    { name: "arquivar", run: archiveCampaign, event: "campaign.archived", from: {}, onlyIf: { archivedAt: null }, data: { archivedAt: NOW }, statusBefore: "active", statusAfter: "archived" },
+    { name: "desarquivar", run: unarchiveCampaign, event: "campaign.unarchived", from: ARCHIVED, onlyIf: { archivedAt: { not: null } }, data: { archivedAt: null }, statusBefore: "archived", statusAfter: "active" },
   ];
 
-  it.each(cases)("$name: escreve pelo id E pelo tenant da sessão e audita $event", async (c) => {
+  it.each(cases)("$name: escreve pelo id, pelo tenant da sessão e pelo estado em que leu, e audita $event", async (c) => {
     mocks.findFirst.mockResolvedValue(row(c.from));
     const result = await c.run("camp-1");
 
     expect(result.ok).toBe(true);
     expect(result.id).toBe("camp-1");
     expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" } });
-    expect(mocks.updateMany).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" }, data: c.data });
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "camp-1", tenantId: "tenant-a", ...c.onlyIf },
+      data: c.data,
+    });
     expect(mocks.audit).toHaveBeenCalledTimes(1);
     expect(mocks.audit).toHaveBeenCalledWith({
       event: c.event,
@@ -473,10 +481,13 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
     expect(mocks.audit).not.toHaveBeenCalled();
   });
 
-  it.each(cases)("$name: updateMany sem nenhuma linha é 'não encontrada', sem auditoria", async (c) => {
+  it.each(cases)("$name: achou a campanha mas o updateMany não casou (estado mudou no meio): 'o status mudou', sem auditoria", async (c) => {
     mocks.findFirst.mockResolvedValue(row(c.from));
     mocks.updateMany.mockResolvedValue({ count: 0 });
-    expect(await c.run("camp-1")).toEqual({ ok: false, error: "Campanha não encontrada." });
+    expect(await c.run("camp-1")).toEqual({
+      ok: false,
+      error: "O status da campanha mudou. Atualize a página e tente de novo.",
+    });
     expect(mocks.audit).not.toHaveBeenCalled();
     expect(mocks.revalidate).not.toHaveBeenCalled();
   });
@@ -535,7 +546,10 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
     ])("arquiva campanha %s (terminada também: é como se tira da lista)", async (_label, over) => {
       mocks.findFirst.mockResolvedValue(row(over));
       expect((await archiveCampaign("camp-1")).ok).toBe(true);
-      expect(mocks.updateMany).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" }, data: { archivedAt: NOW } });
+      expect(mocks.updateMany).toHaveBeenCalledWith({
+        where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null },
+        data: { archivedAt: NOW },
+      });
     });
 
     it("recusa arquivar duas vezes e desarquivar o que não está arquivado", async () => {
@@ -559,6 +573,128 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
       await unarchiveCampaign("camp-1");
       expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ after: { status: "paused" } }));
     });
+  });
+});
+
+/**
+ * Corrida entre duas escritas. O banco de mentira abaixo aplica o `where` do
+ * `updateMany` de verdade (igualdade e `null`/`{ not: null }`) sobre a linha
+ * que está "gravada" — enquanto a LEITURA devolve a foto antiga, como quem leu
+ * antes de a outra aba escrever. Sem a condição de estado no `where`, a
+ * segunda escrita passaria por cima da primeira.
+ */
+describe("concorrência — a escrita só vale no estado em que a leitura viu a campanha", () => {
+  type Stored = Record<string, unknown>;
+
+  function rowMatches(where: Record<string, unknown>, stored: Stored): boolean {
+    return Object.entries(where).every(([key, condition]) => {
+      const value = stored[key] ?? null;
+      if (condition === null) return value === null;
+      if (typeof condition === "object" && condition !== null && "not" in condition) return value !== null;
+      return value === condition;
+    });
+  }
+
+  /** A linha "no banco", e o updateMany que só escreve se o where casar com ela. */
+  function database(initial: Stored) {
+    let stored = { ...initial };
+    mocks.updateMany.mockImplementation(async ({ where, data }: { where: Record<string, unknown>; data: Stored }) => {
+      if (!rowMatches(where, stored)) return { count: 0 };
+      stored = { ...stored, ...data };
+      return { count: 1 };
+    });
+    return { read: () => stored };
+  }
+
+  const CHANGED = { ok: false, error: "O status da campanha mudou. Atualize a página e tente de novo." };
+
+  it("duas pessoas pausam ao mesmo tempo: uma pausa, a outra é avisada, e só uma auditoria", async () => {
+    const db = database(row());
+    mocks.findFirst.mockResolvedValue(row()); // as duas leram a campanha ativa
+
+    const [first, second] = await Promise.all([pauseCampaign("camp-1"), pauseCampaign("camp-1")]);
+
+    expect([first.ok, second.ok].sort()).toEqual([false, true]);
+    expect([first, second].find((r) => !r.ok)).toEqual(CHANGED);
+    expect(db.read().pausedAt).toEqual(NOW);
+    expect(mocks.audit).toHaveBeenCalledTimes(1);
+  });
+
+  it("arquivada em outra aba antes de pausar: a pausa não é gravada na arquivada", async () => {
+    const db = database(row(ARCHIVED));
+    mocks.findFirst.mockResolvedValue(row()); // a leitura ainda via a campanha ativa
+
+    expect(await pauseCampaign("camp-1")).toEqual(CHANGED);
+    expect(db.read().pausedAt).toBeNull();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("duas pessoas retomam ao mesmo tempo: uma retoma, a outra é avisada", async () => {
+    const db = database(row(PAUSED));
+    mocks.findFirst.mockResolvedValue(row(PAUSED));
+
+    const [first, second] = await Promise.all([resumeCampaign("camp-1"), resumeCampaign("camp-1")]);
+
+    expect([first.ok, second.ok].sort()).toEqual([false, true]);
+    expect(db.read().pausedAt).toBeNull();
+    expect(mocks.audit).toHaveBeenCalledTimes(1);
+  });
+
+  it("retomar uma campanha que acabou de ser arquivada não mexe nela", async () => {
+    const db = database(row({ ...PAUSED, ...ARCHIVED }));
+    mocks.findFirst.mockResolvedValue(row(PAUSED)); // leu antes do arquivamento
+
+    expect(await resumeCampaign("camp-1")).toEqual(CHANGED);
+    expect(db.read().pausedAt).toEqual(PAUSED.pausedAt);
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("duas pessoas arquivam ao mesmo tempo: fica a data da primeira, e só uma auditoria", async () => {
+    const db = database(row());
+    mocks.findFirst.mockResolvedValue(row());
+
+    const [first, second] = await Promise.all([archiveCampaign("camp-1"), archiveCampaign("camp-1")]);
+
+    expect([first.ok, second.ok].sort()).toEqual([false, true]);
+    expect(db.read().archivedAt).toEqual(NOW);
+    expect(mocks.audit).toHaveBeenCalledTimes(1);
+  });
+
+  it("desarquivada em outra aba antes de desarquivar de novo: nada é escrito", async () => {
+    const db = database(row());
+    mocks.findFirst.mockResolvedValue(row(ARCHIVED)); // leu a campanha ainda arquivada
+
+    expect(await unarchiveCampaign("camp-1")).toEqual(CHANGED);
+    expect(db.read().archivedAt).toBeNull();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("arquivada em outra aba no meio de uma edição: a edição não é gravada", async () => {
+    const db = database(row(ARCHIVED));
+    mocks.findFirst.mockResolvedValue(row()); // abriu a edição com a campanha ativa
+
+    const result = await updateCampaign(null, form({ id: "camp-1", ...FILLED, name: "Nome novo" }));
+
+    expect(result).toEqual(CHANGED);
+    expect(db.read().name).toBe("Black Friday");
+    expect(mocks.change).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+
+  it("campanha de OUTRA conta continua 'não encontrada': a corrida não vaza que o id existe", async () => {
+    database(row({ tenantId: "tenant-b" }));
+    // A leitura filtra pelo tenant da sessão: de outra conta, nem chega ao updateMany.
+    mocks.findFirst.mockResolvedValue(null);
+
+    for (const run of [pauseCampaign, resumeCampaign, archiveCampaign, unarchiveCampaign]) {
+      expect(await run("camp-1")).toEqual({ ok: false, error: "Campanha não encontrada." });
+    }
+    expect(await updateCampaign(null, form({ id: "camp-1", ...FILLED }))).toEqual({
+      ok: false,
+      error: "Campanha não encontrada.",
+    });
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
   });
 });
 
