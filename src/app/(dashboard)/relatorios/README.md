@@ -16,11 +16,19 @@ resumo entra no relatório mensal (bloco + 2ª página do PDF).
 
 ### Campanhas (`?visao=campanhas`, rótulo "Campanhas")
 
-`CampaignView` mostra, por anúncio de origem, os leads novos do período e quantos
-agendaram: um gráfico de barras em largura cheia (10 maiores anúncios, "Outros N
-anúncios" e "Sem anúncio identificado" por último; a soma é o total de leads) e a
-tabela abaixo (Anúncio, Leads, Agendaram, Taxa, com linha Total). Depois vêm o
-histórico de anúncios, a prévia do PDF semanal e a configuração do envio. Captura, regras de agrupamento,
+**Disparos** aparece para contas ativas com Meta liberada. A coorte é a data de
+confirmação do disparo no período. O funil, os KPIs e `/disparos/[id]` usam
+`broadcastFunnel`, com destinatários de teste fora. Comparecimento consulta os
+agendamentos atribuídos na conta e exige presença registrada. Respostas podem
+superar leituras confirmadas porque o recibo de leitura é opcional. Período
+anterior sem disparo mostra “Sem base”. Custos e detalhamento de descadastros,
+bloqueios e números inválidos aguardam a REL-03b.
+
+**Anúncios** mostra os leads novos por anúncio de origem, agendamentos,
+comparecimentos e a mediana entre a criação do lead e o primeiro agendamento
+válido. Cada lead conta uma vez em cada medida. O gráfico mantém os 10 maiores
+anúncios, “Outros N anúncios” e “Sem anúncio identificado”. A prévia do PDF e o
+envio ficam em **Configurar relatório semanal**. Captura, regras de agrupamento,
 envio ao grupo ou número e importação do histórico em
 [`campaign-reports/README.md`](../../../modules/campaign-reports/README.md). O mesmo
 recorte entra no relatório mensal como bloco opcional da parte 04.

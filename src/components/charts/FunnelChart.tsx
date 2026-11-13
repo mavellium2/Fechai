@@ -33,7 +33,7 @@ export function FunnelChart({ steps, className }: { steps: FunnelStep[]; classNa
         const pct = first > 0 ? (step.count / first) * 100 : 0;
         const prevCount = i > 0 ? steps[i - 1].count : null;
         const dropPct = prevCount && prevCount > 0 ? Math.round((step.count / prevCount) * 100) : null;
-        const opacity = 1 - i * 0.18;
+        const opacity = Math.max(0.25, 1 - i * 0.18);
 
         return (
           <div key={step.name} className="relative">
@@ -56,7 +56,7 @@ export function FunnelChart({ steps, className }: { steps: FunnelStep[]; classNa
             >
               <div
                 className="h-full rounded-control bg-iris transition-[width]"
-                style={{ width: `${Math.max(2, pct)}%`, opacity }}
+                style={{ width: `${Math.min(100, Math.max(2, pct))}%`, opacity }}
               />
             </button>
             {active === i && (

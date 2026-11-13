@@ -34,12 +34,14 @@ export function RangePicker({
   de,
   ate,
   visao,
+  secao,
 }: {
   active: PeriodKey | "custom";
   de?: string;
   ate?: string;
   /** Mantém a visão atual (Operacional/Financeiro) ao trocar o período. */
   visao?: string;
+  secao?: string;
 }) {
   const custom = active === "custom";
   const summaryLabel = custom
@@ -48,7 +50,10 @@ export function RangePicker({
       : `desde ${shortDate(de ?? "")}`
     : (PRESETS.find((p) => p.key === active)?.label ?? "");
 
-  const viewQs = visao ? `&visao=${visao}` : "";
+  const query = new URLSearchParams();
+  if (visao) query.set("visao", visao);
+  if (secao) query.set("secao", secao);
+  const viewQs = query.size ? `&${query}` : "";
 
   return (
     <details className="group relative">
@@ -104,6 +109,7 @@ export function RangePicker({
           </p>
           <form method="get" action="/relatorios" className="mt-2 grid grid-cols-2 gap-2">
             {visao && <input type="hidden" name="visao" value={visao} />}
+            {secao && <input type="hidden" name="secao" value={secao} />}
             <label className="flex flex-col gap-1">
               <span className="font-mono text-micro uppercase tracking-wide text-neutral panel:text-white/55">
                 De
@@ -121,7 +127,7 @@ export function RangePicker({
                 Aplicar intervalo
               </Button>
               {custom && (
-                <ButtonLink href={`/relatorios${viewQs}`} variant="ghost" size="sm">
+                <ButtonLink href={query.size ? `/relatorios?${query}` : "/relatorios"} variant="ghost" size="sm">
                   Limpar
                 </ButtonLink>
               )}
