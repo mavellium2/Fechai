@@ -387,7 +387,7 @@ describe("editar o período de uma campanha pausada", () => {
   it("o registro fica na trilha, no contexto do evento — fora do antes/depois que o desfazer usa", async () => {
     await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
     const call = mocks.change.mock.calls[0][0];
-    expect(call.meta).toEqual({ pausaRemovida: true });
+    expect(call.meta).toEqual({ pauseCleared: true });
     expect(call.before).not.toHaveProperty("pausedAt");
     expect(call.after).not.toHaveProperty("pausedAt");
   });

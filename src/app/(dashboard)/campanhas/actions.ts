@@ -202,7 +202,7 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
     after,
     // A pausa não entra no antes/depois (desfazer a edição não a restaura, de
     // propósito); o registro fica no contexto do evento.
-    ...(clearsPause ? { meta: { pausaRemovida: true } } : {}),
+    ...(clearsPause ? { meta: { pauseCleared: true } } : {}),
   });
 
   revalidateCampaign(campaign.id);
