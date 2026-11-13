@@ -11,22 +11,16 @@ import { CampaignFormPanel } from "./CampaignForm";
  * pessoa vai para a página da campanha — é lá que anúncios, regras e resultados
  * vão morar, e a lista só mostraria a linha nova.
  *
- * `variant` existe porque a tela pode ter dois (o do cabeçalho e o do estado
- * vazio) e só um leva o destaque de conversão.
+ * É a ação primária da tela e, no painel, a ação primária é `iris`
+ * (`variant="default"`): `signal` (`cta`) é das telas de conversão.
  */
-export function NewCampaignButton({
-  label = "Nova campanha",
-  variant = "cta",
-}: {
-  label?: string;
-  variant?: "cta" | "default" | "outline";
-}) {
+export function NewCampaignButton({ label = "Nova campanha" }: { label?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <Button type="button" variant={variant} className="max-sm:h-11" onClick={() => setOpen(true)}>
+      <Button type="button" className="max-sm:h-11" onClick={() => setOpen(true)}>
         <Plus size={16} aria-hidden />
         {label}
       </Button>

@@ -69,7 +69,7 @@ export function CampaignsOverview({
                 ? "Crie uma campanha para juntar anúncios, mensagens e resultados num lugar só."
                 : "Quando alguém com permissão criar uma campanha, ela aparece aqui."
             }
-            action={canEdit ? <NewCampaignButton variant="default" /> : undefined}
+            action={canEdit ? <NewCampaignButton /> : undefined}
           />
         </Card>
       ) : campaigns.length === 0 ? (

@@ -43,4 +43,29 @@ describe("telas de campanha — convenções de UI", () => {
     const form = files.find((f) => f.name === "CampaignForm.tsx")!;
     expect(form.code).toContain("Datas no horário de Brasília. Sem data de início, a campanha fica como rascunho.");
   });
+
+  it("a ação primária é iris (variant padrão): nenhum botão das telas usa o destaque de conversão (cta)", () => {
+    for (const { name, code } of files) expect(code, name).not.toMatch(/variant=["']cta["']|variant:\s*["']cta["']/);
+  });
+
+  it("'Nova campanha' é o botão padrão do produto, no cabeçalho e no estado vazio", () => {
+    const button = files.find((f) => f.name === "NewCampaignButton.tsx")!;
+    expect(button.code).not.toMatch(/variant=/);
+    const overview = files.find((f) => f.name === "CampaignsOverview.tsx")!;
+    expect(overview.code.match(/<NewCampaignButton\s*\/>/g)?.length).toBe(2);
+  });
+
+  it("pausar, retomar, arquivar e desarquivar são reversíveis e não pedem confirmação", () => {
+    for (const { name, code } of files) {
+      expect(code, name).not.toContain("ConfirmButton");
+      expect(code, name).not.toContain("confirm-dialog");
+    }
+  });
+
+  it("cada ação de status mostra o próprio carregando e trava as outras enquanto roda", () => {
+    const actions = files.find((f) => f.name === "CampaignActions.tsx")!;
+    expect(actions.code).toMatch(/loading=\{busy === kind\}/);
+    expect(actions.code).toMatch(/disabled=\{save\.saving\}/);
+    expect(actions.code).toMatch(/loadingLabel=\{loadingLabel\}/);
+  });
 });
