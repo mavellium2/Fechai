@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getBroadcastWorkerHealth } from "./health";
+import { broadcastFunnel, broadcastFunnelSelect, loadBroadcastAttendance } from "./funnel";
 import type { BroadcastTemplate } from "./template";
 import { parseLocalDateTime } from "@/modules/scheduling/time";
 
@@ -47,13 +48,7 @@ const summarySelect = {
   template: true,
   recipients: {
     where: { isTest: false },
-    select: {
-      status: true,
-      deliveryStatus: true,
-      repliedAt: true,
-      qualifiedAt: true,
-      appointmentId: true,
-    },
+    select: broadcastFunnelSelect,
   },
 } satisfies Prisma.BroadcastCampaignSelect;
 
@@ -71,9 +66,7 @@ function summarize({
   finishedAt,
   template,
   ...campaign
-}: CampaignRow) {
-  const count = (test: (r: (typeof recipients)[number]) => boolean) =>
-    recipients.filter(test).length;
+}: CampaignRow, attended?: ReadonlySet<string>) {
   return {
     ...campaign,
     templateName: (template as BroadcastTemplate | null)?.name ?? "",
@@ -82,20 +75,7 @@ function summarize({
     nextAttemptAt: nextAttemptAt.toISOString(),
     confirmedAt: confirmedAt?.toISOString() ?? null,
     finishedAt: finishedAt?.toISOString() ?? null,
-    total: recipients.length,
-    pending: count((r) => r.status === "pending" || r.status === "sending"),
-    sent: count((r) => r.status === "sent"),
-    failed: count((r) => r.status === "failed"),
-    unknown: count((r) => r.status === "unknown"),
-    skipped: count((r) => r.status === "skipped" || r.status === "cancelled"),
-    delivered: count((r) =>
-      ["delivered", "read"].includes(r.deliveryStatus ?? ""),
-    ),
-    read: count((r) => r.deliveryStatus === "read"),
-    deliveryFailed: count((r) => r.deliveryStatus === "failed"),
-    replies: count((r) => Boolean(r.repliedAt)),
-    opportunities: count((r) => Boolean(r.qualifiedAt)),
-    appointments: count((r) => Boolean(r.appointmentId)),
+    ...broadcastFunnel(recipients, attended),
   };
 }
 
@@ -142,7 +122,7 @@ export async function listBroadcastPage(
     getBroadcastWorkerHealth(),
     prisma.broadcastCampaign.count({ where: { tenantId, status: "queued" } }),
   ]);
-  return { items: campaigns.map(summarize), page, pages, total, health, active };
+  return { items: campaigns.map((campaign) => summarize(campaign)), page, pages, total, health, active };
 }
 
 /** Um disparo da conta, com as mesmas contagens da lista. */
@@ -151,7 +131,8 @@ export async function getBroadcastSummary(tenantId: string, id: string) {
     where: { id, tenantId },
     select: summarySelect,
   });
-  return campaign ? summarize(campaign) : null;
+  if (!campaign) return null;
+  return summarize(campaign, await loadBroadcastAttendance(tenantId, campaign.recipients));
 }
 
 export async function listBroadcasts(tenantId: string) {

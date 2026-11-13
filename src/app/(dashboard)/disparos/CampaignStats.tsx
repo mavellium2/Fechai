@@ -95,9 +95,10 @@ export function CampaignStats({
             {problems > 0 && (
               <span className="text-warn">{problems} com problema</span>
             )}
-            {(c.opportunities > 0 || c.appointments > 0) && (
+            {(c.opportunities > 0 || c.appointments > 0 || (!compact && c.attended > 0)) && (
               <span className="text-success">
                 {c.opportunities} oportunidades · {c.appointments} agendamentos
+                {!compact && ` · ${c.attended} compareceram`}
               </span>
             )}
           </p>

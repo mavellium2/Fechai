@@ -38,6 +38,8 @@ import { SatisfactionView } from "./SatisfactionView";
 import { loadSatisfaction } from "@/modules/satisfaction/queries";
 import { getSurveySettings } from "@/modules/satisfaction/settings-store";
 import { CampaignView } from "./CampaignView";
+import { BroadcastReportView } from "./BroadcastReportView";
+import { loadBroadcastCampaignReport } from "@/modules/reports/broadcast-campaigns";
 import { loadCampaignReport } from "@/modules/campaign-reports/queries";
 import { getCampaignSettings } from "@/modules/campaign-reports/settings-store";
 import { parseGapSettings } from "@/modules/knowledge-gaps/settings";
@@ -52,11 +54,11 @@ type View = (typeof VIEWS)[number];
 export default async function RelatoriosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ periodo?: string; de?: string; ate?: string; visao?: string; mes?: string; nota?: string; agente?: string }>;
+  searchParams: Promise<{ periodo?: string; de?: string; ate?: string; visao?: string; mes?: string; nota?: string; agente?: string; secao?: string; ordem?: string; disparo?: string }>;
 }) {
   const { tenantId } = await requireTenant();
   const session = await requireOwner();
-  const { periodo, de, ate, visao, mes, nota, agente } = await searchParams;
+  const { periodo, de, ate, visao, mes, nota, agente, secao, ordem, disparo } = await searchParams;
   const period = (PERIODS as string[]).includes(periodo ?? "") ? (periodo as PeriodKey) : "30";
 
   // O afiliado é do USUÁRIO, não do tenant: a mesma pessoa pode ser cliente e
@@ -108,16 +110,24 @@ export default async function RelatoriosPage({
         ])
       : [null, null];
 
-  // Campanhas: leads por anúncio no período, mais o envio semanal (grupo ou número).
+  const campaignTenant = view === "campanhas" ? await prisma.tenant.findUnique({
+    where: { id: tenantId }, select: { status: true, metaWhatsappEnabled: true },
+  }) : null;
+  const showBroadcasts = campaignTenant?.status === "active" && campaignTenant.metaWhatsappEnabled;
+  const campaignSection = showBroadcasts && secao !== "anuncios" ? "disparos" : "anuncios";
+  const broadcastReport = view === "campanhas" && campaignSection === "disparos"
+    ? await loadBroadcastCampaignReport(tenantId, range) : null;
+
   const [campaigns, campaignSettings, campaignGroup] =
-    view === "campanhas"
+    view === "campanhas" && campaignSection === "anuncios"
       ? await Promise.all([
           // "Tudo" não tem início: a conta toda, desde sempre.
-          loadCampaignReport(tenantId, { from: range.from ?? new Date(0), to: new Date(range.to.getTime() + 1) }),
+          loadCampaignReport(tenantId, { from: range.from ?? new Date(0), to: new Date(range.to.getTime() + 1) }, { appointmentDetails: true }),
           getCampaignSettings(tenantId),
           prisma.knowledgeGapSettings.findUnique({ where: { tenantId }, select: { groupId: true, groupName: true } }),
         ])
       : [null, null, null];
+  const { groupId, groupName } = parseGapSettings(campaignGroup);
 
   const [hasAnyData, report, financial, leadQuality, affiliateOverview] = await Promise.all([
     affiliateOnly ? 1 : prisma.lead.count({ where: { tenantId, isTest: false } }),
@@ -133,7 +143,7 @@ export default async function RelatoriosPage({
   // A aba de afiliados escapa dessa saída de propósito: os ganhos não dependem
   // de a conta ter conversas — um afiliado que nunca usou o agente ainda
   // precisa ver o que indicou.
-  if (hasAnyData === 0 && publishedMonths.length === 0 && view !== "afiliados" && view !== "mensal") {
+  if (hasAnyData === 0 && publishedMonths.length === 0 && view !== "afiliados" && view !== "mensal" && view !== "campanhas") {
     return (
       <div className="w-full space-y-8">
         <PageHeader
@@ -155,14 +165,23 @@ export default async function RelatoriosPage({
 
   const prev = report?.kpis.prev ?? null;
 
-  const viewHref = (key: string) => {
+  const viewQuery = (key: string) => {
     const qs = new URLSearchParams();
     if (de) qs.set("de", de);
     if (ate) qs.set("ate", ate);
     if (!de) qs.set("periodo", period);
     qs.set("visao", key);
     if (month) qs.set("mes", month);
-    return `/relatorios?${qs.toString()}`;
+    return qs;
+  };
+  const viewHref = (key: string) => `/relatorios?${viewQuery(key)}`;
+
+  const campaignHref = (section: string, options: { sort?: string; selected?: string } = {}) => {
+    const query = viewQuery("campanhas");
+    query.set("secao", section);
+    if (options.sort) query.set("ordem", options.sort);
+    if (options.selected) query.set("disparo", options.selected);
+    return `/relatorios?${query}`;
   };
 
   // Filtros da lista de satisfação; mantém visão e período.
@@ -197,7 +216,9 @@ export default async function RelatoriosPage({
             : view === "leads"
               ? `De onde vêm os leads, o que perguntam e por que não fecham — ${range.label}.`
             : view === "campanhas"
-              ? `De qual anúncio vieram os leads e o que aconteceu com eles — ${range.label}.`
+              ? campaignSection === "disparos"
+                ? `Envios, respostas e agendamentos dos disparos confirmados no período — ${range.label}.`
+                : `De qual anúncio vieram os leads e o que aconteceu com eles — ${range.label}.`
             : view === "satisfacao"
               ? `O que os contatos acharam do atendimento — ${range.label}.`
               : `Acompanhe a evolução da conta — ${range.label}.`
@@ -227,7 +248,8 @@ export default async function RelatoriosPage({
               então um seletor de período aqui prometeria um recorte que o
               gráfico não faz. */}
           {view !== "afiliados" && view !== "mensal" && (
-            <RangePicker active={de ? "custom" : period} de={de} ate={ate} visao={view} />
+            <RangePicker active={de ? "custom" : period} de={de} ate={ate} visao={view}
+              secao={view === "campanhas" ? campaignSection : undefined} />
           )}
         </div>
         {view === "operacional" && (
@@ -424,14 +446,23 @@ export default async function RelatoriosPage({
         <FadeIn>
           <LeadQualityView quality={leadQuality} period={range.label} />
         </FadeIn>
-      ) : view === "campanhas" && campaigns && campaignSettings ? (
+      ) : view === "campanhas" ? (
         <FadeIn>
-          <CampaignView
-            report={campaigns}
-            settings={campaignSettings}
-            questionsGroup={{ id: parseGapSettings(campaignGroup).groupId, name: parseGapSettings(campaignGroup).groupName }}
-            period={range.label}
-          />
+          <div className="min-w-0 space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {showBroadcasts && <FilterTabs label="Seções do relatório de campanhas" active={campaignSection}
+                options={[{ key: "disparos", label: "Disparos" }, { key: "anuncios", label: "Anúncios" }]}
+                href={(section) => campaignHref(section)} />}
+              <ButtonLink href="/campanhas" variant="outline" size="sm">Gerenciar campanhas</ButtonLink>
+            </div>
+            {broadcastReport ? (
+              <BroadcastReportView report={broadcastReport} sort={ordem} selected={disparo}
+                hrefFor={(options) => campaignHref("disparos", options)} />
+            ) : campaigns && campaignSettings && (
+              <CampaignView report={campaigns} settings={campaignSettings}
+                questionsGroup={{ id: groupId, name: groupName }} period={range.label} />
+            )}
+          </div>
         </FadeIn>
       ) : view === "satisfacao" && satisfaction && surveySettings ? (
         <FadeIn>
