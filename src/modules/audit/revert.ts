@@ -177,6 +177,7 @@ function refuseCampaignRevert(current: Record<string, unknown>, data: Record<str
   if (startsAt && endsAt && endsAt.getTime() < startsAt.getTime()) {
     return "Desfazer deixaria o fim da campanha antes do início. Ajuste as datas na própria campanha.";
   }
+  if ("startsAt" in data && (!startsAt || startsAt > now)) data.pausedAt = null;
   return null;
 }
 
@@ -306,7 +307,7 @@ type Outcome =
 
 /** Alteração: regrava os campos de `before` na linha que ainda existe. */
 async function revertUpdate(
-  log: { targetId: string | null; targetType: string | null; before: unknown; targetLabel: string | null },
+  log: { targetId: string | null; targetType: string | null; before: unknown; targetLabel: string | null; tenantId: string | null },
   model: RevertibleModel,
 ): Promise<Outcome> {
   const before = asRecord(log.before);
@@ -325,7 +326,9 @@ async function revertUpdate(
 
   const delegate = delegateOf(model);
   const select = Object.fromEntries(["id", ...(model.guard?.select ?? [])].map((field) => [field, true]));
-  const current = await delegate.findUnique({ where: { id: log.targetId! }, select });
+  if (model.guard && !log.tenantId) return { ok: false, error: "O evento não identifica a conta da campanha." };
+  const where = { id: log.targetId!, ...(model.guard && log.tenantId ? { tenantId: log.tenantId } : {}) };
+  const current = await delegate.findUnique({ where, select });
   if (!current) {
     return {
       ok: false,
@@ -336,7 +339,15 @@ async function revertUpdate(
   const refusal = model.guard?.refuse(current, data);
   if (refusal) return { ok: false, error: refusal };
 
-  await delegate.update({ where: { id: log.targetId! }, data });
+  if (model.guard) {
+    const snapshot = Object.fromEntries(model.guard.select.map((field) => [field, current[field]]));
+    const result = await delegate.updateMany({ where: { ...where, ...snapshot }, data });
+    if (result.count === 0) {
+      return { ok: false, error: "A campanha mudou durante o desfazer. Atualize a página e tente de novo." };
+    }
+  } else {
+    await delegate.update({ where, data });
+  }
 
   return {
     ok: true,
@@ -460,8 +471,9 @@ function coerce(key: string, value: unknown): unknown {
 const DATE_FIELDS = new Set(["trialEndsAt", "birthDate", "voiceCreatedAt", "scheduledAt", "startsAt", "endsAt"]);
 
 type Delegate = {
-  findUnique(args: { where: { id: string }; select?: object }): Promise<({ id: string } & Record<string, unknown>) | null>;
+  findUnique(args: { where: { id: string; tenantId?: string | null }; select?: object }): Promise<({ id: string } & Record<string, unknown>) | null>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
   create(args: { data: Record<string, unknown> }): Promise<unknown>;
 };
 

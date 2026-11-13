@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/modules/audit/log", () => ({ recordAudit: mocks.audit, recordChange: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    campaign: { findUnique: mocks.campaignFindUnique, update: mocks.campaignUpdate },
+    campaign: { findUnique: mocks.campaignFindUnique, updateMany: mocks.campaignUpdate },
     agent: { findUnique: mocks.agentFind, update: mocks.agentUpdate },
     auditLog: {
       findUnique: mocks.logFind,
@@ -108,7 +108,7 @@ describe("trilha de auditoria das campanhas", () => {
       archivedAt: null,
       ...current,
     });
-    mocks.campaignUpdate.mockResolvedValue({});
+    mocks.campaignUpdate.mockResolvedValue({ count: 1 });
     mocks.logFindFirst.mockResolvedValue(null);
     mocks.logUpdate.mockResolvedValue({});
   }
@@ -129,7 +129,7 @@ describe("trilha de auditoria das campanhas", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.campaignUpdate).toHaveBeenCalledWith({
-      where: { id: "camp-1" },
+      where: { id: "camp-1", tenantId: "tenant-a", startsAt: START, endsAt: END, pausedAt: null, archivedAt: null },
       data: { name: "Black Friday", endsAt: new Date("2026-12-01T02:59:59.000Z") },
     });
     const written = mocks.campaignUpdate.mock.calls[0][0].data;
@@ -142,9 +142,30 @@ describe("trilha de auditoria das campanhas", () => {
     revertSetup({ name: "Black Friday" });
     await revert();
     expect(mocks.campaignFindUnique).toHaveBeenCalledWith({
-      where: { id: "camp-1" },
+      where: { id: "camp-1", tenantId: "tenant-a" },
       select: { id: true, startsAt: true, endsAt: true, pausedAt: true, archivedAt: true },
     });
+  });
+
+  it("devolve o log à fila se a campanha muda entre a leitura e a reversão", async () => {
+    revertSetup({ name: "Black Friday" });
+    mocks.campaignUpdate.mockResolvedValue({ count: 0 });
+
+    expect(await revert()).toEqual({ ok: false, error: expect.stringContaining("mudou durante o desfazer") });
+    expect(mocks.logUpdate).toHaveBeenCalledWith({
+      where: { id: "log-1" },
+      data: { revertedAt: null, revertedById: null, revertedByEmail: null },
+    });
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("limpa a pausa ao desfazer uma edição que trouxe o início para o passado", async () => {
+    revertSetup({ startsAt: "2026-11-20T03:00:00.000Z" }, PAUSED);
+
+    expect((await revert()).ok).toBe(true);
+    expect(mocks.campaignUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: { startsAt: new Date("2026-11-20T03:00:00.000Z"), pausedAt: null },
+    }));
   });
 
   describe("recusas do desfazer", () => {

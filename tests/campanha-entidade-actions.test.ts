@@ -223,9 +223,8 @@ describe("editar campanha", () => {
 
     expect(result).toEqual({ ok: true, id: "camp-1" });
     expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" } });
-    // O `archivedAt: null` é a condição de estado: arquivada no meio da edição não é editada.
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null },
+      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null, name: "Black Friday", objective: FILLED.objective, startsAt: START, endsAt: END },
       data: { name: "Black Friday 2026", objective: "Encher a agenda de novembro", startsAt: START, endsAt: END },
     });
   });
@@ -345,7 +344,7 @@ describe("editar o período de uma campanha pausada", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null },
+      where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null, name: "Black Friday", objective: FILLED.objective, startsAt: START, endsAt: END },
       data: {
         name: "Black Friday 2026",
         objective: "Encher a agenda de novembro",
@@ -430,18 +429,16 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
     run: (id: string) => ReturnType<typeof pauseCampaign>;
     event: string;
     from: Record<string, unknown>;
-    /** A condição de estado que o `updateMany` leva além de id e tenantId. */
-    onlyIf: Record<string, unknown>;
     data: Record<string, unknown>;
     statusBefore: string;
     statusAfter: string;
   };
 
   const cases: Case[] = [
-    { name: "pausar", run: pauseCampaign, event: "campaign.paused", from: {}, onlyIf: { archivedAt: null, pausedAt: null }, data: { pausedAt: NOW }, statusBefore: "active", statusAfter: "paused" },
-    { name: "retomar", run: resumeCampaign, event: "campaign.resumed", from: PAUSED, onlyIf: { archivedAt: null, pausedAt: { not: null } }, data: { pausedAt: null }, statusBefore: "paused", statusAfter: "active" },
-    { name: "arquivar", run: archiveCampaign, event: "campaign.archived", from: {}, onlyIf: { archivedAt: null }, data: { archivedAt: NOW }, statusBefore: "active", statusAfter: "archived" },
-    { name: "desarquivar", run: unarchiveCampaign, event: "campaign.unarchived", from: ARCHIVED, onlyIf: { archivedAt: { not: null } }, data: { archivedAt: null }, statusBefore: "archived", statusAfter: "active" },
+    { name: "pausar", run: pauseCampaign, event: "campaign.paused", from: {}, data: { pausedAt: NOW }, statusBefore: "active", statusAfter: "paused" },
+    { name: "retomar", run: resumeCampaign, event: "campaign.resumed", from: PAUSED, data: { pausedAt: null }, statusBefore: "paused", statusAfter: "active" },
+    { name: "arquivar", run: archiveCampaign, event: "campaign.archived", from: {}, data: { archivedAt: NOW }, statusBefore: "active", statusAfter: "archived" },
+    { name: "desarquivar", run: unarchiveCampaign, event: "campaign.unarchived", from: ARCHIVED, data: { archivedAt: null }, statusBefore: "archived", statusAfter: "active" },
   ];
 
   it.each(cases)("$name: escreve pelo id, pelo tenant da sessão e pelo estado em que leu, e audita $event", async (c) => {
@@ -452,7 +449,7 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
     expect(result.id).toBe("camp-1");
     expect(mocks.findFirst).toHaveBeenCalledWith({ where: { id: "camp-1", tenantId: "tenant-a" } });
     expect(mocks.updateMany).toHaveBeenCalledWith({
-      where: { id: "camp-1", tenantId: "tenant-a", ...c.onlyIf },
+      where: { id: "camp-1", tenantId: "tenant-a", startsAt: START, endsAt: END, pausedAt: null, archivedAt: null, ...c.from },
       data: c.data,
     });
     expect(mocks.audit).toHaveBeenCalledTimes(1);
@@ -540,7 +537,7 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
       mocks.findFirst.mockResolvedValue(row(over));
       expect((await archiveCampaign("camp-1")).ok).toBe(true);
       expect(mocks.updateMany).toHaveBeenCalledWith({
-        where: { id: "camp-1", tenantId: "tenant-a", archivedAt: null },
+        where: { id: "camp-1", tenantId: "tenant-a", startsAt: START, endsAt: END, pausedAt: null, archivedAt: null, ...over },
         data: { archivedAt: NOW },
       });
     });
@@ -571,7 +568,7 @@ describe("pausar, retomar, arquivar e desarquivar", () => {
 
 /**
  * Corrida entre duas escritas. O banco de mentira abaixo aplica o `where` do
- * `updateMany` de verdade (igualdade e `null`/`{ not: null }`) sobre a linha
+ * `updateMany` de verdade sobre a linha
  * que está "gravada" — enquanto a LEITURA devolve a foto antiga, como quem leu
  * antes de a outra aba escrever. Sem a condição de estado no `where`, a
  * segunda escrita passaria por cima da primeira.
@@ -582,8 +579,7 @@ describe("concorrência — a escrita só vale no estado em que a leitura viu a 
   function rowMatches(where: Record<string, unknown>, stored: Stored): boolean {
     return Object.entries(where).every(([key, condition]) => {
       const value = stored[key] ?? null;
-      if (condition === null) return value === null;
-      if (typeof condition === "object" && condition !== null && "not" in condition) return value !== null;
+      if (condition instanceof Date && value instanceof Date) return condition.getTime() === value.getTime();
       return value === condition;
     });
   }
@@ -616,6 +612,15 @@ describe("concorrência — a escrita só vale no estado em que a leitura viu a 
   it("arquivada em outra aba antes de pausar: a pausa não é gravada na arquivada", async () => {
     const db = database(row(ARCHIVED));
     mocks.findFirst.mockResolvedValue(row()); // a leitura ainda via a campanha ativa
+
+    expect(await pauseCampaign("camp-1")).toEqual(CHANGED);
+    expect(db.read().pausedAt).toBeNull();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("recusa a pausa se outra edição já devolveu a campanha a rascunho", async () => {
+    const db = database(row(DRAFT));
+    mocks.findFirst.mockResolvedValue(row());
 
     expect(await pauseCampaign("camp-1")).toEqual(CHANGED);
     expect(db.read().pausedAt).toBeNull();
