@@ -85,7 +85,7 @@ import {
 } from "@/app/(dashboard)/campanhas/actions";
 import { requireCampaignActor } from "@/modules/campaigns/access";
 import { countCampaigns, getCampaign, hasMetaBroadcasts, listCampaigns } from "@/modules/campaigns/queries";
-import { CAMPAIGN_STATUS_FILTERS, CAMPAIGN_STATUSES } from "@/modules/campaigns/status";
+import { CAMPAIGN_STATUS_FILTERS, CAMPAIGN_STATUSES, campaignStatus } from "@/modules/campaigns/status";
 import { AUDIT_EVENTS, eventLabel, isRevertibleEvent, type AuditEventDef } from "@/modules/audit/events";
 import { isRevertibleTarget, revertAuditLog } from "@/modules/audit/revert";
 
@@ -335,6 +335,96 @@ describe("editar campanha", () => {
     expect(result).toEqual({ ok: true, id: "camp-1", info: "Nenhuma alteração para salvar." });
     expect(mocks.updateMany).not.toHaveBeenCalled();
     expect(mocks.change).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A pausa só vale dentro do período. Editar uma campanha pausada para que ela
+ * deixe de ter começado não pode deixar a pausa gravada: quando a data chegasse
+ * a campanha reapareceria "Pausada" sem ninguém ter pausado.
+ */
+describe("editar o período de uma campanha pausada", () => {
+  const edit = (over: Record<string, string>) =>
+    updateCampaign(null, form({ id: "camp-1", ...FILLED, name: "Black Friday 2026", ...over }));
+  const written = () => mocks.updateMany.mock.calls[0][0].data as Record<string, unknown>;
+
+  beforeEach(() => {
+    mocks.findFirst.mockResolvedValue(row(PAUSED));
+  });
+
+  it("início no futuro: a pausa sai junto com a edição (pausedAt: null)", async () => {
+    const result = await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: { id: "camp-1", tenantId: "tenant-a" },
+      data: {
+        name: "Black Friday 2026",
+        objective: "Encher a agenda de novembro",
+        startsAt: new Date("2026-12-10T03:00:00.000Z"),
+        endsAt: new Date("2027-01-01T02:59:59.000Z"),
+        pausedAt: null,
+      },
+    });
+  });
+
+  it("sem data de início: a campanha volta a ser rascunho e a pausa sai", async () => {
+    await edit({ startsOn: "", endsOn: "" });
+    expect(written()).toMatchObject({ startsAt: null, endsAt: null, pausedAt: null });
+  });
+
+  it("início amanhã já é futuro: a pausa sai", async () => {
+    await edit({ startsOn: "2026-11-16" });
+    expect(written()).toHaveProperty("pausedAt", null);
+  });
+
+  it("o registro fica na trilha, no contexto do evento — fora do antes/depois que o desfazer usa", async () => {
+    await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
+    const call = mocks.change.mock.calls[0][0];
+    expect(call.meta).toEqual({ pausaRemovida: true });
+    expect(call.before).not.toHaveProperty("pausedAt");
+    expect(call.after).not.toHaveProperty("pausedAt");
+  });
+
+  it("início que continua no passado: a pausa é mantida (nenhum pausedAt é escrito)", async () => {
+    await edit({ startsOn: "2026-11-05", endsOn: "2026-11-30" });
+    expect(mocks.updateMany).toHaveBeenCalledTimes(1);
+    expect(written()).not.toHaveProperty("pausedAt");
+    expect(mocks.change.mock.calls[0][0]).not.toHaveProperty("meta");
+  });
+
+  it("início hoje já começou: a pausa é mantida", async () => {
+    await edit({ startsOn: "2026-11-15" });
+    expect(written()).not.toHaveProperty("pausedAt");
+  });
+
+  it("mudar só o nome ou o fim não mexe na pausa", async () => {
+    await edit({});
+    expect(written()).not.toHaveProperty("pausedAt");
+
+    mocks.updateMany.mockClear();
+    await edit({ endsOn: "2026-12-15" });
+    expect(written()).not.toHaveProperty("pausedAt");
+  });
+
+  it("campanha que não estava pausada nunca ganha pausedAt na edição", async () => {
+    mocks.findFirst.mockResolvedValue(row());
+    await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
+    expect(written()).not.toHaveProperty("pausedAt");
+  });
+
+  it("o efeito que importa: depois de editar, a campanha NÃO reaparece pausada quando o início chega", async () => {
+    const before = row(PAUSED);
+    mocks.findFirst.mockResolvedValue(before);
+    await edit({ startsOn: "2026-12-10", endsOn: "2026-12-31" });
+
+    const stored = { ...before, ...written() } as unknown as Parameters<typeof campaignStatus>[0];
+    // Hoje (15/11) ela voltou a ser rascunho...
+    expect(campaignStatus(stored, NOW)).toBe("draft");
+    // ...e no meio da campanha nova está ativa, não pausada.
+    expect(campaignStatus(stored, new Date("2026-12-20T15:00:00.000Z"))).toBe("active");
+    // Sem a limpeza, o mesmo dia mostraria "paused".
+    expect(campaignStatus({ ...stored, pausedAt: PAUSED.pausedAt }, new Date("2026-12-20T15:00:00.000Z"))).toBe("paused");
   });
 });
 

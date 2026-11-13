@@ -144,7 +144,8 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
   const campaign = await loadOwned(actor.tenantId, formData.get("id"));
   if (!campaign) return notFound();
 
-  const status = campaignStatus(campaign, new Date());
+  const now = new Date();
+  const status = campaignStatus(campaign, now);
   if (!allowedActions(status).edit) {
     return refused(
       status === "archived"
@@ -165,8 +166,19 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
     return { ok: true, id: campaign.id, info: "Nenhuma alteração para salvar." };
   }
 
+  // A pausa só vale dentro do período. Se a edição faz a campanha deixar de ter
+  // começado (sem início, ou início no futuro), uma pausa antiga ficaria
+  // gravada e voltaria a valer quando a data chegasse: a campanha reapareceria
+  // "Pausada" sem ninguém ter pausado. Então ela sai junto. Com o início ainda
+  // no passado a pausa fica — a campanha segue pausada. (O limite é o mesmo do
+  // status: só é "futuro" o início depois de agora.)
+  const clearsPause = campaign.pausedAt !== null && (startsAt === null || startsAt.getTime() > now.getTime());
+
   const written = await attempt(() =>
-    prisma.campaign.updateMany({ where: { id: campaign.id, tenantId: actor.tenantId }, data: after }),
+    prisma.campaign.updateMany({
+      where: { id: campaign.id, tenantId: actor.tenantId },
+      data: clearsPause ? { ...after, pausedAt: null } : after,
+    }),
   );
   if (!written.ok) return serverError();
   if (written.value.count === 0) return notFound();
@@ -176,6 +188,9 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
     target: { type: AUDIT_TYPE, id: campaign.id, label: after.name },
     before,
     after,
+    // A pausa não entra no antes/depois (desfazer a edição não a restaura, de
+    // propósito); o registro fica no contexto do evento.
+    ...(clearsPause ? { meta: { pausaRemovida: true } } : {}),
   });
 
   revalidateCampaign(campaign.id);
