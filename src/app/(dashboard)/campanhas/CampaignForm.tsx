@@ -193,7 +193,7 @@ function CampaignForm({
           </Field>
         </div>
         <p id={ids.period} className="mt-2 text-sm text-neutral panel:text-white/55">
-          Datas no fuso da clínica (America/Sao_Paulo). Sem data de início, a campanha fica como rascunho.
+          Datas no horário de Brasília. Sem data de início, a campanha fica como rascunho.
         </p>
       </div>
 
