@@ -50,6 +50,35 @@ extensão depois do fim para quem já agendou.
 - **Transbordo:** com `outside: "handoff"` e sem `handoff_human` ligado no
   agente, o turno ganha `campaign_handoff` (mesmo `transferToHuman`).
 
+## Agente da campanha (`agent-routing.ts`)
+
+`Campaign.agentId` atende os leads da campanha **enquanto ela vale** (mesma
+regra de `findLeadCampaign`), no lugar do agente da conversa. O caminho
+recomendado é a **cópia** (`copyAgentForCampaign`: `buildAgentPackage` +
+`createAgentFromPackage`, nasce ligada e não principal), ajustada em
+`/agentes/<id>` sem mexer no original (`baseAgentId`). Regras do roteamento:
+
+- o chat de teste não é roteado (lá se escolhe o agente que se quer testar);
+- agente desligado, arquivado ou apagado = o lead segue com o de sempre;
+- o agente da campanha **não vira dono da conversa** (`Conversation.agentId`
+  recebe o original): terminada a campanha, o lead volta sozinho;
+- trocar de agente desfaz o vínculo cópia ↔ original.
+
+**Levar o aprendizado** (`mergeCampaignLearning`): os documentos que entraram
+na base da cópia depois de `agentCopiedAt` (inclusive as perguntas aprovadas em
+`/perguntas`, que viram documento da cópia) aparecem para a pessoa marcar; só o
+marcado vai para a base do original, uma vez (`mergedDocIds`). Persona e
+regras da campanha nunca voltam sozinhas.
+
+## Tela
+
+Quatro abas: Resultados, Leads, Configuração, Histórico. A Configuração é um
+roteiro de passos (`STEPS` em `labels.ts`: o básico, quem atende, agenda, de
+onde vêm os leads, arquivos, revisar e ativar), cada um com situação e resumo
+de uma linha; rascunho abre nela, no primeiro passo que falta. O guia "Como
+funciona" (`CampaignGuide.tsx`) tem o passo a passo com exemplo. Endereços
+antigos (`?aba=regras`…) caem no passo certo.
+
 ## Anúncios, mídias e disparos
 
 - `CampaignAd`: id do anúncio/conjunto/campanha da Meta e/ou código. Não há

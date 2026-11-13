@@ -89,23 +89,50 @@ export const EMPTY_FILTER: Record<CampaignStatusFilter, { title: string; descrip
   },
 };
 
-/** Abas da página da campanha, na ordem em que aparecem. */
+/** Abas da página da campanha. Rascunho abre em Configuração. */
 export const SECTIONS = [
-  { id: "visao-geral", label: "Visão geral" },
-  { id: "dados", label: "Dados gerais" },
-  { id: "anuncios", label: "Anúncios e mídias" },
-  { id: "disparos", label: "Disparos" },
-  { id: "regras", label: "Regras do agente" },
+  { id: "resultados", label: "Resultados" },
   { id: "leads", label: "Leads" },
+  { id: "configuracao", label: "Configuração" },
   { id: "historico", label: "Histórico" },
-  { id: "revisao", label: "Revisão" },
 ] as const;
 
 export type SectionId = (typeof SECTIONS)[number]["id"];
 
-export function parseSection(value: unknown): SectionId | null {
+/** Endereços antigos (`?aba=regras`…) caem na aba nova certa. */
+const LEGACY_SECTION: Record<string, { section: SectionId; step?: StepId }> = {
+  "visao-geral": { section: "resultados" },
+  dados: { section: "configuracao", step: "basico" },
+  anuncios: { section: "configuracao", step: "origem" },
+  disparos: { section: "configuracao", step: "origem" },
+  regras: { section: "configuracao", step: "agenda" },
+  revisao: { section: "configuracao", step: "revisao" },
+};
+
+export function parseSection(value: unknown): { section: SectionId; step?: StepId } | null {
   const first = Array.isArray(value) ? value[0] : value;
-  return SECTIONS.some((section) => section.id === first) ? (first as SectionId) : null;
+  if (SECTIONS.some((s) => s.id === first)) return { section: first as SectionId };
+  return typeof first === "string" && LEGACY_SECTION[first] ? LEGACY_SECTION[first] : null;
+}
+
+/**
+ * Os passos da configuração, na ordem em que se monta uma campanha. Cada um
+ * diz para que serve numa frase — é o "tutorial" embutido na própria tela.
+ */
+export const STEPS = [
+  { id: "basico", title: "O básico", purpose: "Nome, objetivo, período e meta da campanha." },
+  { id: "agente", title: "Quem atende", purpose: "Qual agente conversa com os leads da campanha e o que ele fala sobre ela." },
+  { id: "agenda", title: "Agenda da campanha", purpose: "Em que dias e horários o agente pode marcar, e se manda lembrete." },
+  { id: "origem", title: "De onde vêm os leads", purpose: "Anúncios, palavras-chave e disparos que colocam o contato na campanha." },
+  { id: "arquivos", title: "Arquivos", purpose: "Imagens, vídeos e PDFs que o agente pode mandar na conversa." },
+  { id: "revisao", title: "Revisar e ativar", purpose: "Confira tudo e ative. Antes disso nada muda no atendimento." },
+] as const;
+
+export type StepId = (typeof STEPS)[number]["id"];
+
+export function parseStep(value: unknown): StepId | null {
+  const first = Array.isArray(value) ? value[0] : value;
+  return STEPS.some((s) => s.id === first) ? (first as StepId) : null;
 }
 
 type DatedCampaign = {
@@ -127,8 +154,8 @@ export function statusNote(status: CampaignStatus, campaign: DatedCampaign): str
   switch (status) {
     case "draft":
       return campaign.startsAt
-        ? "Rascunho: nada vale para os leads até você ativar na aba Revisão."
-        : "Rascunho sem data de início. Defina o período e ative na aba Revisão.";
+        ? "Rascunho: nada vale para os leads até você ativar no último passo."
+        : "Rascunho sem data de início. Defina o período e ative no último passo.";
     case "scheduled":
       return campaign.startsAt
         ? `Ativada. Começa em ${formatDay(dayOf(campaign.startsAt, zone))}; até lá as regras não valem.`

@@ -9,18 +9,16 @@ import { loadCampaignResults } from "@/modules/campaigns/results";
 import { parseCampaignRules } from "@/modules/campaigns/rules";
 import { toCampaignView } from "@/modules/campaigns/view";
 import { CampaignDetail } from "../CampaignDetail";
-import { parseSection, readOnlyNotice, statusNote, type SectionId } from "../labels";
+import { parseSection, parseStep, readOnlyNotice, statusNote } from "../labels";
 
 export const metadata: Metadata = { title: "Campanha" };
-
-const RULE_EVENTS = ["campaign.rules_updated"];
 
 export default async function CampanhaPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ aba?: string | string[] }>;
+  searchParams: Promise<{ aba?: string | string[]; passo?: string | string[] }>;
 }) {
   const actor = await requireCampaignActor();
   const { id } = await params;
@@ -31,29 +29,39 @@ export default async function CampanhaPage({
 
   const now = new Date();
   const view = toCampaignView(campaign, now);
-  const section: SectionId = parseSection((await searchParams).aba) ?? (view.status === "draft" ? "dados" : "visao-geral");
+  const query = await searchParams;
+  const parsed = parseSection(query.aba);
+  // Rascunho abre na configuração (é o passo a passo); as outras, nos resultados.
+  const section = parsed?.section ?? (view.status === "draft" ? "configuracao" : "resultados");
+  const step = parseStep(query.passo) ?? parsed?.step ?? null;
   const zone = zoneOrDefault(campaign.timezone);
   const rules = parseCampaignRules(campaign.rules);
   // `updatedAt` nasce junto com a linha; só conta como "alterada" se andou depois.
   const edited = campaign.updatedAt.getTime() - campaign.createdAt.getTime() > 1000;
 
-  const needsResults = section === "visao-geral" || section === "leads" || section === "disparos";
-  const needsSetup = section === "anuncios" || section === "revisao";
-  const [results, ads, assets, capturedAds, availableBroadcasts, history, linkedBroadcasts] = await Promise.all([
-    needsResults ? loadCampaignResults(actor.tenantId, campaign, now) : null,
-    needsSetup
-      ? prisma.campaignAd.findMany({ where: { campaignId: campaign.id, tenantId: actor.tenantId }, orderBy: { createdAt: "asc" } })
+  const config = section === "configuracao";
+  const tenantId = actor.tenantId;
+  const copy = campaign.agentId && campaign.baseAgentId && campaign.agentCopiedAt ? campaign : null;
+  const [results, ads, assets, capturedAds, availableBroadcasts, history, agents, learned] = await Promise.all([
+    section !== "historico" ? loadCampaignResults(tenantId, campaign, now) : null,
+    config ? prisma.campaignAd.findMany({ where: { campaignId: campaign.id, tenantId }, orderBy: { createdAt: "asc" } }) : null,
+    config ? prisma.campaignAsset.findMany({ where: { campaignId: campaign.id, tenantId }, orderBy: { createdAt: "asc" } }) : null,
+    config && step === "origem" ? listCapturedAds(tenantId) : null,
+    config && step === "origem" ? listAvailableBroadcasts(tenantId) : null,
+    section === "historico" ? listCampaignHistory(tenantId, campaign.id) : null,
+    config || section === "resultados"
+      ? prisma.agent.findMany({
+          where: { tenantId, archived: false },
+          select: { id: true, name: true, enabled: true, isPrimary: true, objective: true },
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+        })
       : null,
-    needsSetup
-      ? prisma.campaignAsset.findMany({ where: { campaignId: campaign.id, tenantId: actor.tenantId }, orderBy: { createdAt: "asc" } })
-      : null,
-    section === "anuncios" ? listCapturedAds(actor.tenantId) : null,
-    section === "disparos" ? listAvailableBroadcasts(actor.tenantId) : null,
-    section === "historico" || section === "regras"
-      ? listCampaignHistory(actor.tenantId, campaign.id, section === "regras" ? { events: RULE_EVENTS, take: 20 } : {})
-      : null,
-    section === "revisao"
-      ? prisma.broadcastCampaign.findMany({ where: { tenantId: actor.tenantId, campaignId: campaign.id }, select: { id: true, name: true } })
+    copy && (config || section === "resultados")
+      ? prisma.knowledgeDocument.findMany({
+          where: { tenantId, agentId: copy.agentId!, createdAt: { gt: copy.agentCopiedAt! } },
+          select: { id: true, title: true, createdAt: true },
+          orderBy: { createdAt: "asc" },
+        })
       : null,
   ]);
 
@@ -61,6 +69,7 @@ export default async function CampanhaPage({
     <CampaignDetail
       campaign={view}
       section={section}
+      step={step}
       canEdit={actor.canEdit}
       metaEnabled={metaEnabled}
       notice={readOnlyNotice(view.status, campaign)}
@@ -80,12 +89,22 @@ export default async function CampanhaPage({
         updatedAt: edited ? formatDateTime(campaign.updatedAt, zone) : null,
         updatedBy: campaign.updatedBy?.name ?? campaign.updatedBy?.email ?? null,
       }}
+      agentSetup={{
+        agentId: campaign.agentId,
+        baseAgentId: campaign.baseAgentId,
+        agents: agents ?? [],
+        learned: (learned ?? []).map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          createdAt: formatDateTime(doc.createdAt, zone),
+          merged: campaign.mergedDocIds.includes(doc.id),
+        })),
+      }}
       results={results}
       ads={ads}
       assets={assets}
       capturedAds={capturedAds}
       availableBroadcasts={availableBroadcasts}
-      linkedBroadcasts={linkedBroadcasts}
       history={history}
     />
   );

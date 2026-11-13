@@ -4,7 +4,7 @@ import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ExternalLink, FileText, Image as ImageIcon, Images, Mic, Trash2, Upload, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardTitle } from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field } from "@/components/ui/field";
 import { SelectMenu } from "@/components/ui/select-menu";
@@ -48,8 +48,8 @@ export function CampaignMediaPanel({ campaignId, editable, assets }: { campaignI
   }
 
   return (
-    <Card className="p-4 sm:p-6">
-      <CardTitle hint="Arquivos com uso “Agente” podem ser enviados pela IA na conversa com leads da campanha, seguindo a instrução de cada um.">
+    <section className="space-y-4">
+      <CardTitle as="h3" hint="Arquivos com uso “Agente” podem ser enviados pela IA na conversa com leads da campanha, seguindo a instrução de cada um.">
         Mídias
       </CardTitle>
 
@@ -129,7 +129,7 @@ export function CampaignMediaPanel({ campaignId, editable, assets }: { campaignI
           </Button>
         </form>
       )}
-    </Card>
+    </section>
   );
 }
 

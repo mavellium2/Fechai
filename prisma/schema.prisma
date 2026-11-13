@@ -388,6 +388,18 @@ model Campaign {
   messageCostCents Int?
   /// Termos que atribuem o lead pela primeira mensagem (sem acento, minúsculas).
   keywords    String[]  @default([])
+  /// Agente que atende os leads da campanha enquanto ela vale. Null = o
+  /// agente que já atende a conversa. Ver `modules/campaigns/agent-routing.ts`.
+  agentId     String?
+  agent       Agent?    @relation("CampaignAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  /// Agente de onde `agentId` foi copiado (o "original"): é para ele que o
+  /// aprendizado volta no fim. Sem relação: o original pode sumir depois.
+  baseAgentId String?
+  /// Quando a cópia foi criada: o que entrou na base dela depois disto é o
+  /// aprendizado da campanha.
+  agentCopiedAt DateTime?
+  /// Documentos da cópia já levados para o original (não repetir).
+  mergedDocIds String[] @default([])
   /// Regras do agente (datas, horários, chegada, lembretes, oferta, instruções).
   /// Json lido por `parseCampaignRules`, que nunca lança. Ver `modules/campaigns/rules.ts`.
   rules       Json?
@@ -911,6 +923,8 @@ model Agent {
   /// Agente que atende o número de WhatsApp da conta. Enquanto o WhatsApp for
   /// um por conta (ver CHANGELOG), exatamente um agente é o principal.
   isPrimary           Boolean   @default(false)
+  /// Campanhas atendidas por este agente (`Campaign.agentId`).
+  campaignsServed     Campaign[] @relation("CampaignAgent")
   /// Chave geral do agente. `false` = ele para de responder aos CLIENTES
   /// (WhatsApp e widget do site) sem perder persona, base nem ações. Existe
   /// porque a única forma de calar um agente era excluí-lo ou desligar o

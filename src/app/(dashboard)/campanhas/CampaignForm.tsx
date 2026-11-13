@@ -37,7 +37,6 @@ export type EditableCampaign = Pick<
   | "goalType"
   | "budget"
   | "messageCost"
-  | "keywords"
 >;
 
 const OBJECTIVE_OPTIONS = [
@@ -152,7 +151,6 @@ function CampaignForm({
     goalType: `${base}-meta-tipo`,
     budget: `${base}-orcamento`,
     messageCost: `${base}-custo-mensagem`,
-    keywords: `${base}-palavras`,
   };
   const [objectiveType, setObjectiveType] = useState(campaign?.objectiveType ?? "");
   const [goalType, setGoalType] = useState(campaign?.goalType ?? "");
@@ -333,22 +331,6 @@ function CampaignForm({
         />
       </Field>
 
-      <Field
-        label="Palavras-chave"
-        htmlFor={ids.keywords}
-        optional
-        error={fieldErrors.keywords}
-        hint="Separadas por vírgula. Quem escrever uma delas na primeira mensagem entra na campanha (ex.: IMPLANTE)."
-      >
-        <Input
-          {...fieldProps(ids.keywords, { error: fieldErrors.keywords })}
-          className="max-sm:h-11"
-          name="keywords"
-          autoComplete="off"
-          placeholder="Ex.: implante, evento implante"
-          defaultValue={campaign?.keywords ?? ""}
-        />
-      </Field>
 
       <FormFeedback error={generalError} />
 

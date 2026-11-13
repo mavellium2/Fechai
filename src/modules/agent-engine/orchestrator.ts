@@ -32,6 +32,7 @@ import { INJECTION_GUARD } from "./injection-guard";
 import { unansweredRule, type Retrieved } from "./unanswered-rule";
 import { leadInsightRule } from "@/modules/lead-insights/tool";
 import { findLeadCampaign, type LeadCampaign } from "@/modules/campaigns/active";
+import { campaignAgentFor } from "@/modules/campaigns/agent-routing";
 import { attributeByKeyword } from "@/modules/campaigns/attribution";
 import { campaignRulesPrompt, restrictsSchedule } from "@/modules/campaigns/rules";
 import { campaignHandoffSchema, sendCampaignMediaSchema } from "@/modules/campaigns/agent";
@@ -153,7 +154,7 @@ export async function runAgentTurn(input: {
   // montar contexto para um turno que não vai gerar resposta.
   const paused = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { agentPaused: true },
+    select: { agentPaused: true, isTest: true },
   });
   if (paused?.agentPaused) {
     return { reply: "", toolsUsed: [], status: "human_handling" };
@@ -174,7 +175,17 @@ export async function runAgentTurn(input: {
     }
   }
 
-  const agent = await resolveAgent(tenantId, input.agentId);
+  // Campanha em vigor para o lead: as regras dela entram no prompt e nas
+  // ferramentas de agenda, e o agente da campanha (quando há um) atende no
+  // lugar do de sempre — só enquanto ela vale. Falha de leitura não derruba o
+  // turno; a trava do backend (`createAppointment`) continua valendo.
+  const leadCampaign: LeadCampaign | null | undefined = await findLeadCampaign(tenantId, leadId).catch((err) => {
+    console.error("[orchestrator] campanha do lead indisponível", err);
+    return undefined;
+  });
+  // O chat de teste escolhe o agente que quer testar: a campanha não troca.
+  const campaignAgentId = !paused?.isTest ? await campaignAgentFor(tenantId, leadCampaign) : null;
+  const agent = await resolveAgent(tenantId, campaignAgentId ?? input.agentId);
 
   if (!agent) {
     await prisma.conversation
@@ -211,9 +222,12 @@ export async function runAgentTurn(input: {
 
   // Registra quem atendeu — /conversas mostra isso, e sem o vínculo não há
   // como saber depois qual agente respondeu o quê.
-  if (agent) {
+  // O agente da campanha não vira o dono da conversa: terminada a campanha, o
+  // lead volta ao de sempre (o original de onde a cópia saiu, ou o principal).
+  const owner = campaignAgentId ? leadCampaign?.campaign.baseAgentId ?? null : agent?.id ?? null;
+  if (owner) {
     await prisma.conversation
-      .updateMany({ where: { id: conversationId, agentId: null }, data: { agentId: agent.id } })
+      .updateMany({ where: { id: conversationId, agentId: null }, data: { agentId: owner } })
       .catch(() => {});
   }
 
@@ -252,15 +266,6 @@ export async function runAgentTurn(input: {
       })
     : {};
 
-  // Campanha em vigor para o lead: as regras dela entram no prompt e nas
-  // ferramentas de agenda. Falha de leitura não derruba o turno — mas aí a
-  // trava do backend (`createAppointment`) continua valendo.
-  const leadCampaign: LeadCampaign | null | undefined = agent
-    ? await findLeadCampaign(tenantId, leadId, now).catch((err) => {
-        console.error("[orchestrator] campanha do lead indisponível", err);
-        return undefined;
-      })
-    : null;
   const handoffEnabled = actions.some((a) => a.key === "handoff_human");
   const pendingAssets = leadCampaign
     ? leadCampaign.assets.filter((asset) => !leadCampaign.sentAssetIds.includes(asset.id))

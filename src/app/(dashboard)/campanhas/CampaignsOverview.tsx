@@ -11,6 +11,8 @@ import type { CampaignStatusFilter } from "@/modules/campaigns/status";
 import { CampaignList, type ListedCampaign } from "./CampaignList";
 import { EMPTY_FILTER, FILTER_LABEL, FILTER_ORDER } from "./labels";
 import { NewCampaignButton } from "./NewCampaignButton";
+import { CampaignGuideButton, CampaignIntro } from "./CampaignGuide";
+import { PeriodSelect } from "./PeriodSelect";
 import { TAB_ITEM_CLASS, TAB_ROW_CLASS, TabScroller } from "./TabScroller";
 
 export type PeriodFilter = "todos" | "mes" | "trimestre" | "ano";
@@ -62,8 +64,15 @@ export function CampaignsOverview({
         eyebrow="campanhas"
         title="Campanhas"
         description="Cada ação de marketing da clínica, com período e resultado."
-        actions={canEdit ? <NewCampaignButton /> : undefined}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <CampaignGuideButton />
+            {canEdit && <NewCampaignButton />}
+          </div>
+        }
       />
+
+      <CampaignIntro />
 
       {special.length > 0 && (
         <Alert tone="warn" title="Regra especial em vigor">
@@ -117,16 +126,11 @@ export function CampaignsOverview({
               itemClassName={TAB_ITEM_CLASS}
             />
           </TabScroller>
-          <TabScroller>
-            <FilterTabs
-              label="Filtrar campanhas por período"
-              options={(Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => ({ key, label: PERIOD_LABEL[key] }))}
-              active={period}
-              href={(key) => query({ period: key as PeriodFilter })}
-              className={TAB_ROW_CLASS}
-              itemClassName={TAB_ITEM_CLASS}
-            />
-          </TabScroller>
+          <PeriodSelect
+            value={period}
+            options={(Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => ({ value: key, label: PERIOD_LABEL[key] }))}
+            hrefFor={Object.fromEntries((Object.keys(PERIOD_LABEL) as PeriodFilter[]).map((key) => [key, query({ period: key })]))}
+          />
         </>
       )}
 

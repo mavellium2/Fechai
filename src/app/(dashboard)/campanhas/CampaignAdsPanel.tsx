@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MousePointerClick, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardTitle } from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -64,8 +64,8 @@ export function CampaignAdsPanel({
   }
 
   return (
-    <Card className="p-4 sm:p-6">
-      <CardTitle hint="O lead que chega por um anúncio vinculado entra na campanha sozinho, com origem “anúncio”. Quem já veio dele durante a campanha entra ao vincular.">
+    <section className="space-y-4">
+      <CardTitle as="h3" hint="O lead que chega por um anúncio vinculado entra na campanha sozinho, com origem “anúncio”. Quem já veio dele durante a campanha entra ao vincular.">
         Anúncios
       </CardTitle>
 
@@ -231,6 +231,6 @@ export function CampaignAdsPanel({
           </form>
         </div>
       )}
-    </Card>
+    </section>
   );
 }

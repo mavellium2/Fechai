@@ -509,10 +509,10 @@ describe("textos da tela — o que cada status diz", () => {
 
   it("o resumo explica o rascunho (com e sem início) e a agendada", () => {
     expect(statusNote("draft", { ...dated, activatedAt: null })).toBe(
-      "Rascunho: nada vale para os leads até você ativar na aba Revisão.",
+      "Rascunho: nada vale para os leads até você ativar no último passo.",
     );
     expect(statusNote("draft", { ...dated, activatedAt: null, startsAt: null, endsAt: null })).toBe(
-      "Rascunho sem data de início. Defina o período e ative na aba Revisão.",
+      "Rascunho sem data de início. Defina o período e ative no último passo.",
     );
     expect(statusNote("scheduled", { ...dated, startsAt: startOfDayUtc("2026-12-01", SP) })).toBe(
       "Ativada. Começa em 01/12/2026; até lá as regras não valem.",

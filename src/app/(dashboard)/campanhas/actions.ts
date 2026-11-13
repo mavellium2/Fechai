@@ -201,7 +201,11 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
     startsAt: campaign.startsAt,
     endsAt: campaign.endsAt,
   };
-  const after = { ...formFields(parsed.data), startsAt, endsAt };
+  // As palavras-chave são editadas no passo "De onde vêm os leads": um
+  // formulário sem o campo não as apaga.
+  const fields = formFields(parsed.data);
+  if (!formData.has("keywords")) fields.keywords = campaign.keywords;
+  const after = { ...fields, startsAt, endsAt };
   const scalarBefore = Object.fromEntries(Object.entries(before).filter(([key]) => key !== "keywords"));
 
   // Nada mudou: não grava (não mexe em `updatedAt`) e não enche a trilha.

@@ -28,7 +28,7 @@ const DAY_MS = 86_400_000;
 const MAX_GRACE_DAYS = 30;
 
 export type LeadCampaign = {
-  campaign: Pick<Campaign, "id" | "name" | "objective" | "description" | "timezone" | "startsAt" | "endsAt">;
+  campaign: Pick<Campaign, "id" | "name" | "objective" | "description" | "timezone" | "startsAt" | "endsAt" | "agentId" | "baseAgentId">;
   rules: CampaignRules;
   assets: Pick<CampaignAsset, "id" | "name" | "kind" | "url" | "mime" | "instruction" | "usage">[];
   sentAssetIds: string[];
@@ -93,6 +93,8 @@ export async function findLeadCampaign(tenantId: string, leadId: string, now = n
           timezone: true,
           startsAt: true,
           endsAt: true,
+          agentId: true,
+          baseAgentId: true,
           rules: true,
           assets: {
             where: { usage: { in: ["agent", "both"] } },

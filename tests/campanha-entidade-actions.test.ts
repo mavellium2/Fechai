@@ -59,6 +59,8 @@ vi.mock("@/lib/prisma", () => ({
       count: mocks.count,
     },
     tenant: { findUnique: mocks.tenantFind },
+    // A aba Histórico só lê a trilha da campanha.
+    auditLog: { findMany: async () => [] },
   },
 }));
 
@@ -818,7 +820,7 @@ describe("páginas — guarda do produto e conta da sessão", () => {
 
   it("o detalhe bloqueia antes de consultar qualquer coisa", async () => {
     redirecting();
-    await expect(DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) })).rejects.toThrow("REDIRECT:/afiliado");
+    await expect(DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "historico" }) })).rejects.toThrow("REDIRECT:/afiliado");
     expect(mocks.findFirst).not.toHaveBeenCalled();
   });
 
@@ -843,22 +845,22 @@ describe("páginas — guarda do produto e conta da sessão", () => {
 
   it("o detalhe da própria campanha abre (e `canEdit` falso esconde os botões)", async () => {
     mocks.findFirst.mockResolvedValue({ ...row(), createdBy: { name: "Dono", email: "dono@example.test" } });
-    const open = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
+    const open = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "historico" }) });
     expect(open.props).toMatchObject({ canEdit: true, notice: null, campaign: { id: "camp-1", status: "active" } });
 
     mocks.canEdit.value = false;
-    const readOnly = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
+    const readOnly = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "historico" }) });
     expect(readOnly.props.canEdit).toBe(false);
   });
 
   it("terminada e arquivada abrem com o aviso de 'só para consulta' e sem ações de edição", async () => {
     mocks.findFirst.mockResolvedValue({ ...row(FINISHED), createdBy: null });
-    const finished = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
+    const finished = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "historico" }) });
     expect(finished.props.notice).toBe("Campanha terminada em 09/11/2026. Fica só para consulta e segue nos relatórios.");
     expect(finished.props.campaign.allowed).toMatchObject({ edit: false, pause: false, resume: false, archive: true });
 
     mocks.findFirst.mockResolvedValue({ ...row(ARCHIVED), createdBy: null });
-    const archived = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "dados" }) });
+    const archived = await DetailPage({ params: Promise.resolve({ id: "camp-1" }), searchParams: Promise.resolve({ aba: "historico" }) });
     expect(archived.props.notice).toBe("Campanha arquivada. Fica só para consulta e segue nos relatórios.");
     expect(archived.props.campaign.allowed).toMatchObject({ edit: false, archive: false, unarchive: true });
   });

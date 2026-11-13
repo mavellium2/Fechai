@@ -220,6 +220,9 @@ export const AUDIT_EVENTS = {
   // já diz — por isso não são revertíveis: o desfazer deles é o botão oposto.
   "campaign.activated": { label: "Ativou uma campanha", kind: "update", group: "campanhas" },
   "campaign.finished": { label: "Encerrou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.agent_changed": { label: "Trocou o agente de uma campanha", kind: "update", group: "campanhas" },
+  "campaign.agent_copied": { label: "Criou uma cópia de agente para uma campanha", kind: "create", group: "campanhas" },
+  "campaign.learning_merged": { label: "Levou o aprendizado de uma campanha para o agente", kind: "update", group: "campanhas" },
   "campaign.rules_updated": { label: "Alterou as regras do agente de uma campanha", kind: "update", group: "campanhas" },
   "campaign.ad_linked": { label: "Vinculou um anúncio a uma campanha", kind: "create", group: "campanhas" },
   "campaign.ad_unlinked": { label: "Desvinculou um anúncio de uma campanha", kind: "delete", group: "campanhas" },

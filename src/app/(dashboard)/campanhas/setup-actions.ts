@@ -9,6 +9,10 @@ import { attributeLead } from "@/modules/campaigns/attribution";
 import type { CampaignActionResult } from "@/modules/campaigns/result";
 import { parseCampaignRules, validateCampaignRules } from "@/modules/campaigns/rules";
 import { allowedActions, campaignStatus } from "@/modules/campaigns/status";
+import { parseKeywords } from "@/modules/campaigns/schema";
+import { KEYWORD_MAX, KEYWORDS_MAX } from "@/modules/campaigns/limits";
+import { buildAgentPackage, createAgentFromPackage } from "@/modules/agent-engine/transfer";
+import { ingestDocument } from "@/modules/knowledge-base/repository";
 
 /**
  * Actions das seções da campanha: regras do agente, anúncios, mídias,
@@ -82,7 +86,10 @@ export async function saveCampaignRules(campaignId: string, raw: unknown): Promi
   const { campaign } = found;
 
   if (!raw || typeof raw !== "object") return { ok: false, code: "validation", error: "Regras inválidas." };
-  const rules = parseCampaignRules(raw);
+  // Cada passo da tela salva só a parte dele (agenda, ou o que o agente fala):
+  // o resto das regras gravadas fica como está.
+  const merged = { ...parseCampaignRules(campaign.rules), ...(raw as Record<string, unknown>) };
+  const rules = parseCampaignRules(merged);
   const problem = validateCampaignRules(rules, raw as { times?: unknown; dates?: unknown });
   if (problem) return { ok: false, code: "validation", error: problem };
 
@@ -458,4 +465,164 @@ export async function removeLeadFromCampaign(campaignId: string, leadId: string)
   revalidate(found.campaign.id);
   revalidatePath("/conversas");
   return { ok: true, info: "Contato tirado da campanha. As regras dela deixam de valer para ele." };
+}
+
+// ─── Palavras-chave ────────────────────────────────────────────────────────
+
+export async function saveCampaignKeywords(campaignId: string, value: string): Promise<Result> {
+  const actor = await requireCampaignActor();
+  if (!actor.canEdit) return forbidden();
+  const found = await editable(actor, campaignId);
+  if (!found.ok) return found.error;
+  const keywords = parseKeywords(typeof value === "string" ? value : "");
+  if (keywords.length > KEYWORDS_MAX) return { ok: false, code: "validation", error: `Use até ${KEYWORDS_MAX} palavras-chave.` };
+  if (keywords.some((k) => k.length > KEYWORD_MAX)) {
+    return { ok: false, code: "validation", error: `Cada palavra-chave pode ter até ${KEYWORD_MAX} caracteres.` };
+  }
+  const before = found.campaign.keywords;
+  if (JSON.stringify(before) === JSON.stringify(keywords)) return { ok: true, info: "Nenhuma alteração para salvar." };
+  await prisma.campaign.updateMany({ where: { id: found.campaign.id, tenantId: actor.tenantId }, data: { keywords, updatedById: actor.userId } });
+  await recordChange({
+    event: "campaign.updated",
+    target: { type: AUDIT_TYPE, id: found.campaign.id, label: found.campaign.name },
+    before: { keywords: before },
+    after: { keywords },
+  });
+  revalidate(found.campaign.id);
+  return { ok: true, info: "Palavras-chave salvas." };
+}
+
+// ─── Agente da campanha ────────────────────────────────────────────────────
+
+/**
+ * Quem atende os leads da campanha. `null` = o agente que já atende cada
+ * conversa. Escolher outro agente não mexe em nenhum agente: só diz quem
+ * responde aos leads da campanha enquanto ela vale.
+ */
+export async function setCampaignAgent(campaignId: string, agentId: string | null): Promise<Result> {
+  const actor = await requireCampaignActor();
+  if (!actor.canEdit) return forbidden();
+  const found = await editable(actor, campaignId);
+  if (!found.ok) return found.error;
+  const { campaign } = found;
+  let next: string | null = null;
+  if (agentId) {
+    if (!validId(agentId)) return { ok: false, error: "Agente não encontrado." };
+    const agent = await prisma.agent.findFirst({ where: { id: agentId, tenantId: actor.tenantId, archived: false }, select: { id: true } });
+    if (!agent) return { ok: false, error: "Agente não encontrado." };
+    next = agent.id;
+  }
+  if (next === campaign.agentId) return { ok: true, info: "Nenhuma alteração para salvar." };
+  // Trocar de agente desfaz o vínculo "cópia ↔ original": o aprendizado a
+  // levar de volta é só o da cópia criada para esta campanha.
+  await prisma.campaign.updateMany({
+    where: { id: campaign.id, tenantId: actor.tenantId },
+    data: { agentId: next, baseAgentId: null, agentCopiedAt: null, mergedDocIds: [], updatedById: actor.userId },
+  });
+  await recordChange({
+    event: "campaign.agent_changed",
+    target: { type: AUDIT_TYPE, id: campaign.id, label: campaign.name },
+    before: { agentId: campaign.agentId },
+    after: { agentId: next },
+  });
+  revalidate(campaign.id);
+  return { ok: true, info: next ? "Agente da campanha definido." : "Os leads da campanha seguem com o agente de sempre." };
+}
+
+/**
+ * Cria uma cópia do agente escolhido só para a campanha (mesma persona, base,
+ * habilidades e agenda) e a deixa como agente da campanha. A cópia nasce
+ * ligada mas não é a principal: só atende os leads da campanha.
+ */
+export async function copyAgentForCampaign(campaignId: string, sourceAgentId: string): Promise<Result> {
+  const actor = await requireCampaignActor();
+  if (!actor.canEdit) return forbidden();
+  const found = await editable(actor, campaignId);
+  if (!found.ok) return found.error;
+  const { campaign } = found;
+  if (!validId(sourceAgentId)) return { ok: false, error: "Agente não encontrado." };
+  const source = await prisma.agent.findFirst({
+    where: { id: sourceAgentId, tenantId: actor.tenantId, archived: false },
+    select: { id: true, name: true },
+  });
+  if (!source) return { ok: false, error: "Agente não encontrado." };
+
+  const pkg = await buildAgentPackage(source.id, actor.tenantId);
+  if (!pkg) return { ok: false, error: "Agente não encontrado." };
+  const name = `${source.name} – ${campaign.name}`.slice(0, 60);
+  const created = await createAgentFromPackage({ tenantId: actor.tenantId, package: pkg, name });
+  if (!created.ok) {
+    return {
+      ok: false,
+      error: created.error.includes("limite")
+        ? `${created.error.replace("A empresa de destino", "A conta")} Escolha um agente que já existe ou arquive um que não usa.`
+        : created.error,
+    };
+  }
+  const copiedAt = new Date();
+  await prisma.agent.updateMany({ where: { id: created.agentId, tenantId: actor.tenantId }, data: { enabled: true } });
+  await prisma.campaign.updateMany({
+    where: { id: campaign.id, tenantId: actor.tenantId },
+    data: { agentId: created.agentId, baseAgentId: source.id, agentCopiedAt: copiedAt, mergedDocIds: [], updatedById: actor.userId },
+  });
+  await recordAudit({
+    event: "campaign.agent_copied",
+    target: { type: AUDIT_TYPE, id: campaign.id, label: campaign.name },
+    after: { agentId: created.agentId, agentName: created.name, baseAgentId: source.id, baseAgentName: source.name },
+  });
+  revalidate(campaign.id);
+  revalidatePath("/agentes");
+  return {
+    ok: true,
+    info: `Cópia “${created.name}” criada. Ajuste o jeito de falar e a base dela; a ${source.name} não muda.`,
+  };
+}
+
+/**
+ * Leva para o agente original o que a cópia aprendeu (documentos que entraram
+ * na base dela depois da cópia, incluindo as perguntas respondidas em
+ * Perguntas). Só o que a pessoa marcou; cada documento vai uma vez.
+ */
+export async function mergeCampaignLearning(campaignId: string, docIds: string[]): Promise<Result> {
+  const actor = await requireCampaignActor();
+  if (!actor.canEdit) return forbidden();
+  if (!validId(campaignId)) return notFound();
+  const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, tenantId: actor.tenantId } });
+  if (!campaign || campaign.archivedAt) return notFound();
+  if (!campaign.agentId || !campaign.baseAgentId || !campaign.agentCopiedAt) {
+    return { ok: false, error: "Esta campanha não usa uma cópia de agente." };
+  }
+  const base = await prisma.agent.findFirst({ where: { id: campaign.baseAgentId, tenantId: actor.tenantId, archived: false }, select: { id: true, name: true } });
+  if (!base) return { ok: false, error: "O agente original não existe mais." };
+  const wanted = (Array.isArray(docIds) ? docIds : []).filter(validId).filter((id) => !campaign.mergedDocIds.includes(id));
+  if (!wanted.length) return { ok: false, code: "validation", error: "Marque pelo menos um item para levar." };
+  const docs = await prisma.knowledgeDocument.findMany({
+    where: { id: { in: wanted }, tenantId: actor.tenantId, agentId: campaign.agentId, createdAt: { gt: campaign.agentCopiedAt } },
+    select: { id: true, title: true, content: true },
+  });
+  if (!docs.length) return { ok: false, error: "Nada encontrado para levar." };
+  const merged: string[] = [];
+  for (const doc of docs) {
+    try {
+      await ingestDocument({ tenantId: actor.tenantId, agentId: base.id, title: doc.title, content: doc.content });
+      merged.push(doc.id);
+    } catch (err) {
+      console.error("[campanhas] documento não levado ao agente original", doc.id, err);
+    }
+  }
+  if (merged.length) {
+    await prisma.campaign.updateMany({
+      where: { id: campaign.id, tenantId: actor.tenantId },
+      data: { mergedDocIds: { push: merged }, updatedById: actor.userId },
+    });
+    await recordAudit({
+      event: "campaign.learning_merged",
+      target: { type: AUDIT_TYPE, id: campaign.id, label: campaign.name },
+      after: { baseAgentId: base.id, documents: docs.filter((d) => merged.includes(d.id)).map((d) => d.title) },
+    });
+  }
+  revalidate(campaign.id);
+  return merged.length === docs.length
+    ? { ok: true, info: `${merged.length} item(ns) levado(s) para a base da ${base.name}.` }
+    : { ok: false, error: `Só ${merged.length} de ${docs.length} itens foram levados. Tente de novo os que faltaram.` };
 }

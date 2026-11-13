@@ -10,9 +10,17 @@ import type { CampaignView } from "@/modules/campaigns/view";
 import { CampaignActions } from "./CampaignActions";
 import { CampaignSections, type CampaignSummary } from "./CampaignSections";
 import { CampaignStatusBadge } from "./CampaignStatusBadge";
-import type { SectionId } from "./labels";
+import { CampaignGuideButton } from "./CampaignGuide";
+import type { SectionId, StepId } from "./labels";
 
 export type AvailableBroadcast = { id: string; name: string; status: string; createdAt: Date; confirmedAt: Date | null };
+
+export type AgentSetup = {
+  agentId: string | null;
+  baseAgentId: string | null;
+  agents: { id: string; name: string; enabled: boolean; isPrimary: boolean; objective: string }[];
+  learned: { id: string; title: string; createdAt: string; merged: boolean }[];
+};
 
 /**
  * A página `/campanhas/[id]` já com os dados na mão: voltar, título com situação
@@ -26,7 +34,9 @@ export type AvailableBroadcast = { id: string; name: string; status: string; cre
 export function CampaignDetail(props: {
   campaign: CampaignView;
   section: SectionId;
+  step: StepId | null;
   summary: CampaignSummary;
+  agentSetup: AgentSetup;
   /** "Campanha terminada em…": só para consulta. `null` quando a campanha é editável. */
   notice: string | null;
   metaEnabled: boolean;
@@ -39,7 +49,6 @@ export function CampaignDetail(props: {
   assets: CampaignAsset[] | null;
   capturedAds: CapturedAd[] | null;
   availableBroadcasts: AvailableBroadcast[] | null;
-  linkedBroadcasts: { id: string; name: string }[] | null;
   history: CampaignHistoryEntry[] | null;
 }) {
   const { campaign, canEdit, notice } = props;
@@ -68,7 +77,12 @@ export function CampaignDetail(props: {
             <span>{campaign.period}</span>
           </span>
         }
-        actions={canEdit ? <CampaignActions campaign={campaign} /> : undefined}
+        actions={
+          <div className="flex flex-wrap items-start gap-2">
+            <CampaignGuideButton />
+            {canEdit && <CampaignActions campaign={campaign} />}
+          </div>
+        }
       />
 
       {!canEdit && (

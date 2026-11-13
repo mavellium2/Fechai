@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Send, Trash2 } from "lucide-react";
 import { Button, ButtonLink } from "@/components/ui/button";
-import { Card, CardTitle } from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SelectMenu } from "@/components/ui/select-menu";
@@ -78,21 +78,21 @@ export function CampaignBroadcastsPanel({
 
   if (!metaEnabled && !broadcasts.length) {
     return (
-      <Card className="p-4 sm:p-6">
-        <CardTitle>Disparos</CardTitle>
+      <section className="space-y-4">
+        <CardTitle as="h3">Disparos</CardTitle>
         <EmptyState
           icon={Send}
           title="Disparos usam a API oficial da Meta"
           description="Quando a conta tiver a Meta liberada, os disparos da campanha aparecem aqui."
           className="px-4 py-6"
         />
-      </Card>
+      </section>
     );
   }
 
   return (
-    <Card className="p-4 sm:p-6">
-      <CardTitle
+    <section className="space-y-4">
+      <CardTitle as="h3"
         hint="Quem responde a um disparo vinculado entra na campanha. Um disparo pertence a no máximo uma campanha."
         action={
           editable && metaEnabled ? (
@@ -210,6 +210,6 @@ export function CampaignBroadcastsPanel({
           )}
         </div>
       )}
-    </Card>
+    </section>
   );
 }

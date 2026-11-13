@@ -20,6 +20,7 @@ const db = vi.hoisted(() => ({
   appointment: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), create: vi.fn(), update: vi.fn(), count: vi.fn() },
   conversation: { update: vi.fn(), updateMany: vi.fn() },
   lead: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  agent: { findFirst: vi.fn() },
 }));
 const mirrors = vi.hoisted(() => ({
   googlePush: vi.fn(),
@@ -53,7 +54,8 @@ vi.mock("@/modules/agent-engine/handoff", async (importOriginal) => ({
 }));
 
 import { runToolHandler, type ToolContext } from "@/modules/agent-engine/tools";
-import { inRulesWindow, pickCampaign } from "@/modules/campaigns/active";
+import { findLeadCampaign, inRulesWindow, pickCampaign } from "@/modules/campaigns/active";
+import { campaignAgentFor } from "@/modules/campaigns/agent-routing";
 import { messageHasKeyword } from "@/modules/campaigns/attribution";
 import {
   campaignRulesPrompt,
@@ -284,5 +286,34 @@ describe("agenda do lead da campanha — a trava do backend", () => {
   it("campanha pausada não está em vigor (o banco já filtra; a regra não chega ao turno)", async () => {
     db.campaignLead.findMany.mockResolvedValue([]);
     expect(await schedule("2026-11-20", "10:00")).toContain("Agendado para");
+  });
+});
+
+describe("agente da campanha", () => {
+  it("atende o lead da campanha só se existir, estiver ligado e não arquivado", async () => {
+    db.campaignLead.findMany.mockResolvedValue([campaignLink(SORRISO, { agentId: "paula-implantes", baseAgentId: "paula" })]);
+    const campaign = await findLeadCampaign(ctx.tenantId, ctx.leadId);
+    db.agent.findFirst.mockResolvedValue({ id: "paula-implantes" });
+    expect(await campaignAgentFor(ctx.tenantId, campaign)).toBe("paula-implantes");
+    expect(db.agent.findFirst).toHaveBeenCalledWith({
+      where: { id: "paula-implantes", tenantId: ctx.tenantId, archived: false, enabled: true },
+      select: { id: true },
+    });
+    // Cópia desligada ou apagada: o lead segue com o agente de sempre.
+    db.agent.findFirst.mockResolvedValue(null);
+    expect(await campaignAgentFor(ctx.tenantId, campaign)).toBeNull();
+  });
+
+  it("sem campanha em vigor, ou campanha sem agente, não troca ninguém", async () => {
+    expect(await campaignAgentFor(ctx.tenantId, null)).toBeNull();
+    db.campaignLead.findMany.mockResolvedValue([campaignLink(SORRISO, { agentId: null })]);
+    expect(await campaignAgentFor(ctx.tenantId, await findLeadCampaign(ctx.tenantId, ctx.leadId))).toBeNull();
+    expect(db.agent.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("depois do fim a campanha não é devolvida, e o agente dela deixa de atender", async () => {
+    vi.setSystemTime(new Date("2026-11-25T12:00:00Z"));
+    db.campaignLead.findMany.mockResolvedValue([campaignLink(SORRISO, { agentId: "paula-implantes" })]);
+    expect(await campaignAgentFor(ctx.tenantId, await findLeadCampaign(ctx.tenantId, ctx.leadId))).toBeNull();
   });
 });
