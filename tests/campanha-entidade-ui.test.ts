@@ -41,7 +41,9 @@ describe("telas de campanha — convenções de UI", () => {
 
   it("o formulário diz o horário em português simples", () => {
     const form = files.find((f) => f.name === "CampaignForm.tsx")!;
-    expect(form.code).toContain("Datas no horário de Brasília. Sem data de início, a campanha fica como rascunho.");
+    expect(form.code).toContain(
+      "Datas no horário de Brasília. As regras do agente valem do início ao fim, depois que você ativar a campanha.",
+    );
   });
 
   it("a ação primária é iris (variant padrão): nenhum botão das telas usa o destaque de conversão (cta)", () => {
@@ -56,7 +58,9 @@ describe("telas de campanha — convenções de UI", () => {
   });
 
   it("pausar, retomar, arquivar e desarquivar são reversíveis e não pedem confirmação", () => {
-    for (const { name, code } of files) {
+    // Encerrar é a única ação de status sem volta (o fim vira "agora" e terminada
+    // não reabre): só ela confirma, no próprio componente.
+    for (const { name, code } of files.filter((f) => f.name !== "FinishCampaignButton.tsx")) {
       expect(code, name).not.toContain("ConfirmButton");
       expect(code, name).not.toContain("confirm-dialog");
     }

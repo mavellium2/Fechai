@@ -2,16 +2,17 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, ArchiveRestore, Ellipsis, Pause, Pencil, Play, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Pause, Pencil, Play, Rocket, type LucideIcon } from "lucide-react";
+import { FinishCampaignButton } from "./FinishCampaignButton";
 import { Button } from "@/components/ui/button";
 import { useSaveFeedback } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { CampaignActionResult } from "@/modules/campaigns/result";
 import type { CampaignView } from "@/modules/campaigns/view";
-import { archiveCampaign, pauseCampaign, resumeCampaign, unarchiveCampaign } from "./actions";
+import { activateCampaign, archiveCampaign, finishCampaign, pauseCampaign, resumeCampaign, unarchiveCampaign } from "./actions";
 import { CampaignFormPanel } from "./CampaignForm";
 
-type Kind = "pause" | "resume" | "archive" | "unarchive";
+type Kind = "activate" | "pause" | "resume" | "finish" | "archive" | "unarchive";
 
 /**
  * Ações da página da campanha: Editar, Pausar ou Retomar, Arquivar ou
@@ -41,7 +42,7 @@ export function CampaignActions({ campaign }: { campaign: CampaignView }) {
   const menuId = useId();
 
   const { allowed } = campaign;
-  const count = [allowed.edit, allowed.pause, allowed.resume, allowed.archive, allowed.unarchive].filter(Boolean).length;
+  const count = [allowed.edit, allowed.activate, allowed.pause, allowed.resume, allowed.finish, allowed.archive, allowed.unarchive].filter(Boolean).length;
   const collapsible = count > 1;
 
   // Menu aberto: clique fora e Esc fecham. O Esc de um diálogo aberto (o painel
@@ -78,6 +79,7 @@ export function CampaignActions({ campaign }: { campaign: CampaignView }) {
   }
 
   const statusActions: { kind: Kind; shown: boolean; Icon: LucideIcon; label: string; loadingLabel: string; task: () => Promise<CampaignActionResult> }[] = [
+    { kind: "activate", shown: allowed.activate, Icon: Rocket, label: "Ativar", loadingLabel: "Ativando a campanha", task: () => activateCampaign(campaign.id) },
     { kind: "pause", shown: allowed.pause, Icon: Pause, label: "Pausar", loadingLabel: "Pausando a campanha", task: () => pauseCampaign(campaign.id) },
     { kind: "resume", shown: allowed.resume, Icon: Play, label: "Retomar", loadingLabel: "Retomando a campanha", task: () => resumeCampaign(campaign.id) },
     { kind: "archive", shown: allowed.archive, Icon: Archive, label: "Arquivar", loadingLabel: "Arquivando a campanha", task: () => archiveCampaign(campaign.id) },
@@ -153,6 +155,13 @@ export function CampaignActions({ campaign }: { campaign: CampaignView }) {
               {label}
             </Button>
           ))}
+        {allowed.finish && (
+          <FinishCampaignButton
+            className={item}
+            disabled={save.saving}
+            onFinish={() => run("finish", () => finishCampaign(campaign.id))}
+          />
+        )}
       </div>
 
       {/* Fora do menu de propósito: um `<dialog>` dentro de um contêiner

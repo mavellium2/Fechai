@@ -2,10 +2,10 @@ import { FunnelChart, type FunnelStep } from "@/components/charts/FunnelChart";
 import { Card, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 
-export function ReportFunnel({ steps, description }: { steps: FunnelStep[]; description: string }) {
+export function ReportFunnel({ steps, description, title = "Funil dos disparos" }: { steps: FunnelStep[]; description: string; title?: string }) {
   return (
     <Card>
-      <CardTitle hint={description} hintInline>Funil dos disparos</CardTitle>
+      <CardTitle hint={description} hintInline>{title}</CardTitle>
       {steps[0]?.count > 0 && <FunnelChart steps={steps} />}
       <details className="mt-4 text-sm">
         <summary className="min-h-11 cursor-pointer py-3 font-medium text-ink focus-visible:outline-iris panel:text-white">Ver etapas em tabela</summary>

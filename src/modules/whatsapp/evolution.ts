@@ -287,6 +287,41 @@ export class EvolutionProvider implements WhatsAppProvider {
     return data.key?.id ?? null;
   }
 
+  async sendMediaUrl(
+    externalId: string,
+    toPhone: string,
+    media: { url: string; kind: "image" | "video" | "pdf" | "audio"; fileName: string; mime: string },
+  ): Promise<string | null> {
+    if (!/^\d{10,15}$/.test(toPhone)) throw new Error("Destino da mídia inválido.");
+    // Áudio vai como mensagem de voz (`sendWhatsAppAudio`), o resto pelo
+    // `sendMedia` com o link: a Evolution baixa o arquivo da CDN.
+    const audio = media.kind === "audio";
+    const res = await this.fetchWithTimeout(
+      `${this.baseUrl}/message/${audio ? "sendWhatsAppAudio" : "sendMedia"}/${externalId}`,
+      {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(
+          audio
+            ? { number: toPhone, audio: media.url }
+            : {
+                number: toPhone,
+                mediatype: media.kind === "pdf" ? "document" : media.kind,
+                mimetype: media.mime,
+                media: media.url,
+                fileName: media.fileName,
+              },
+        ),
+      },
+      30_000,
+    );
+    if (!res.ok) {
+      throw new Error(`Evolution sendMedia falhou (${res.status}): ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    }
+    const data = (await res.json()) as { key?: { id?: string } };
+    return data.key?.id ?? null;
+  }
+
   async listGroups(externalId: string): Promise<WhatsAppGroup[]> {
     // `getParticipants=false` é obrigatório na v2 e deixa a resposta leve: com
     // participantes, uma conta com muitos grupos grandes demora dezenas de

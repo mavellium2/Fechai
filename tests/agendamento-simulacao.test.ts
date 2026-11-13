@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Simulação (chat de teste): validações e leituras rodam, mas nada grava nem
 // espelha. Mesmo esqueleto de mocks de agendamento-tools.test.ts.
 const db = vi.hoisted(() => ({
+  // Sem campanha: o lead segue a agenda normal (ver modules/campaigns/active.ts).
+  campaignLead: { findMany: async () => [] },
   $transaction: vi.fn(),
   appointmentReschedule: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn() },
   tenantAction: { findFirst: vi.fn(), findUnique: vi.fn() },

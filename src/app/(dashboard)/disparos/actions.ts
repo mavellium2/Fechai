@@ -169,7 +169,10 @@ export async function prepareBroadcast(form: FormData) {
           : "Não foi possível ler o arquivo.",
     };
   }
-  return saveDraft(tenantId, name, connection.phoneNumberId, template, parsed, draftId, null, 0, media);
+  return saveDraft(
+    tenantId, name, connection.phoneNumberId, template, parsed, draftId, null, 0, media,
+    await ownCampaignId(tenantId, form.get("campaignId")),
+  );
 }
 
 /**
@@ -177,6 +180,17 @@ export async function prepareBroadcast(form: FormData) {
  * Com `draftId`, atualiza o mesmo rascunho (voltar e ajustar não cria outro);
  * os testes já enviados ficam, porque são mensagens reais.
  */
+/**
+ * A campanha (`Campaign`) a que o disparo nasce ligado, vinda de
+ * "Novo disparo para esta campanha". Só vale campanha DESTA conta e não
+ * arquivada; qualquer outra coisa vira "sem campanha", nunca erro.
+ */
+async function ownCampaignId(tenantId: string, raw: unknown): Promise<string | null> {
+  if (typeof raw !== "string" || !raw || raw.length > 64) return null;
+  const campaign = await prisma.campaign.findFirst({ where: { id: raw, tenantId, archivedAt: null }, select: { id: true } });
+  return campaign?.id ?? null;
+}
+
 async function saveDraft(
   tenantId: string,
   name: string,
@@ -187,6 +201,7 @@ async function saveDraft(
   namelessTemplate: BroadcastTemplate | null = null,
   skippedNameless = 0,
   media: CampaignMedia | null = null,
+  campaignId: string | null = null,
 ) {
   // Nunca descarta erros silenciosamente nem envia só parte de uma lista inválida.
   if (parsed.issues.length)
@@ -210,6 +225,7 @@ async function saveDraft(
           template,
           namelessTemplate: namelessTemplate ?? Prisma.DbNull,
           media: media ?? Prisma.DbNull,
+          ...(campaignId ? { campaignId } : {}),
         },
       });
       if (updated.count) {
@@ -230,6 +246,7 @@ async function saveDraft(
         template,
         namelessTemplate: namelessTemplate ?? Prisma.DbNull,
         media: media ?? Prisma.DbNull,
+        campaignId,
         recipients: { createMany: { data: parsed.recipients } },
       },
       select: { id: true },
@@ -267,6 +284,8 @@ export async function prepareBroadcastFromList(input: {
   nameless?: { mode: NamelessMode; templateId?: string };
   /** Arquivo do topo, quando a mensagem tem mídia (`uploadBroadcastMedia`). */
   media?: unknown;
+  /** Campanha a que o disparo nasce ligado ("Novo disparo para esta campanha"). */
+  campaignId?: string;
 }) {
   const tenantId = await requireBroadcastAccess();
   const name = typeof input?.name === "string" ? input.name.trim() : "";
@@ -371,6 +390,7 @@ export async function prepareBroadcastFromList(input: {
     namelessTemplate,
     skipped,
     media,
+    await ownCampaignId(tenantId, input.campaignId),
   );
 }
 

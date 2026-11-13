@@ -209,15 +209,24 @@ export const AUDIT_EVENTS = {
 
   // ── campanhas (ações de marketing da conta) ───────────────────────────
   "campaign.created": { label: "Criou uma campanha", kind: "create", group: "campanhas" },
-  "campaign.updated": {
-    label: "Alterou uma campanha",
-    kind: "update",
-    group: "campanhas",
-    revertible: true,
-  },
-  // Pausar, retomar, arquivar e desarquivar mudam o status (calculado a partir
-  // de datas) e não têm um "antes" para regravar além do que o próprio evento
-  // já diz — por isso não são revertíveis: o desfazer deles é o botão oposto.
+  // Nenhum evento de campanha é revertível: o desfazer de pausar, retomar,
+  // arquivar e desarquivar é o botão oposto, e editar se corrige editando.
+  "campaign.updated": { label: "Alterou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.activated": { label: "Ativou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.finished": { label: "Encerrou uma campanha", kind: "update", group: "campanhas" },
+  "campaign.agent_changed": { label: "Trocou o agente de uma campanha", kind: "update", group: "campanhas" },
+  "campaign.agent_copied": { label: "Criou uma cópia de agente para uma campanha", kind: "create", group: "campanhas" },
+  "campaign.learning_merged": { label: "Levou o aprendizado de uma campanha para o agente", kind: "update", group: "campanhas" },
+  "campaign.rules_updated": { label: "Alterou as regras do agente de uma campanha", kind: "update", group: "campanhas" },
+  "campaign.ad_linked": { label: "Vinculou um anúncio a uma campanha", kind: "create", group: "campanhas" },
+  "campaign.ad_unlinked": { label: "Desvinculou um anúncio de uma campanha", kind: "delete", group: "campanhas" },
+  "campaign.asset_added": { label: "Adicionou uma mídia a uma campanha", kind: "create", group: "campanhas" },
+  "campaign.asset_updated": { label: "Alterou uma mídia de uma campanha", kind: "update", group: "campanhas" },
+  "campaign.asset_removed": { label: "Removeu uma mídia de uma campanha", kind: "delete", group: "campanhas" },
+  "campaign.broadcast_linked": { label: "Vinculou um disparo a uma campanha", kind: "update", group: "campanhas" },
+  "campaign.broadcast_unlinked": { label: "Desvinculou um disparo de uma campanha", kind: "update", group: "campanhas" },
+  "campaign.lead_added": { label: "Adicionou um lead a uma campanha", kind: "create", group: "campanhas" },
+  "campaign.lead_removed": { label: "Tirou um lead de uma campanha", kind: "delete", group: "campanhas" },
   "campaign.paused": { label: "Pausou uma campanha", kind: "update", group: "campanhas" },
   "campaign.resumed": { label: "Retomou uma campanha", kind: "update", group: "campanhas" },
   "campaign.archived": { label: "Arquivou uma campanha", kind: "update", group: "campanhas" },

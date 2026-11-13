@@ -43,6 +43,12 @@ export function isAcceptableDay(day: string): boolean {
   return year >= MIN_YEAR && year <= MAX_YEAR;
 }
 
+/** `day` + `n` dias, em "YYYY-MM-DD". Aritmética de calendário pura: não depende de fuso. */
+export function shiftDay(day: string, n: number): string {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, date + n)).toISOString().slice(0, 10);
+}
+
 /** Dia seguinte, em "YYYY-MM-DD". Aritmética de calendário pura: não depende de fuso. */
 function nextDay(day: string): string {
   const [year, month, date] = day.split("-").map(Number);

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { attributeByAd } from "@/modules/campaigns/attribution";
 import type { AdOrigin } from "@/modules/whatsapp/ad-origin";
 
 export type AdOriginVia = "webhook" | "history";
@@ -41,6 +42,8 @@ export async function recordLeadAdOrigin(input: {
       ],
       skipDuplicates: true,
     });
+    // Anúncio vinculado a uma campanha: o lead entra nela (nunca lança).
+    await attributeByAd({ tenantId, leadId, origin, at });
     if (created.count) return { status: "created" };
 
     if (origin.code && origin.sourceId) {

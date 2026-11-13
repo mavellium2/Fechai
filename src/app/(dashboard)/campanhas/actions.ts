@@ -9,7 +9,7 @@ import { recordAudit, recordChange } from "@/modules/audit/log";
 import { requireCampaignActor } from "@/modules/campaigns/access";
 import { DEFAULT_CAMPAIGN_TIMEZONE, periodToUtc, zoneOrDefault } from "@/modules/campaigns/period";
 import type { CampaignActionResult } from "@/modules/campaigns/result";
-import { parseCampaignForm, type CampaignFieldErrors } from "@/modules/campaigns/schema";
+import { parseCampaignForm, type CampaignFieldErrors, type ParsedCampaignForm } from "@/modules/campaigns/schema";
 import {
   allowedActions,
   campaignStatus,
@@ -83,13 +83,35 @@ function revalidateCampaign(id: string) {
   revalidatePath(`/campanhas/${id}`);
 }
 
-/** Só os quatro campos do formulário são lidos. */
+/** Só os campos do formulário são lidos. */
 function readForm(formData: FormData) {
   return {
     name: formData.get("name"),
+    objectiveType: formData.get("objectiveType"),
     objective: formData.get("objective"),
+    description: formData.get("description"),
     startsOn: formData.get("startsOn"),
     endsOn: formData.get("endsOn"),
+    goalValue: formData.get("goalValue"),
+    goalType: formData.get("goalType"),
+    budget: formData.get("budget"),
+    messageCost: formData.get("messageCost"),
+    keywords: formData.get("keywords"),
+  };
+}
+
+/** Os campos da campanha que o formulário grava (o período vem à parte, em UTC). */
+function formFields(data: ParsedCampaignForm) {
+  return {
+    name: data.name,
+    objectiveType: data.objectiveType,
+    objective: data.objective,
+    description: data.description,
+    goalValue: data.goalValue,
+    goalType: data.goalValue === null ? null : data.goalType,
+    budgetCents: data.budget,
+    messageCostCents: data.messageCost,
+    keywords: data.keywords,
   };
 }
 
@@ -110,16 +132,17 @@ export async function createCampaign(_prev: Result | null, formData: FormData): 
   const timezone = DEFAULT_CAMPAIGN_TIMEZONE;
   const { startsAt, endsAt } = periodToUtc(parsed.data.startsOn, parsed.data.endsOn, timezone);
 
+  const fields = formFields(parsed.data);
   const created = await attempt(() =>
     prisma.campaign.create({
       data: {
         tenantId: actor.tenantId,
-        name: parsed.data.name,
-        objective: parsed.data.objective,
+        ...fields,
         startsAt,
         endsAt,
         timezone,
         createdById: actor.userId,
+        updatedById: actor.userId,
       },
     }),
   );
@@ -129,7 +152,7 @@ export async function createCampaign(_prev: Result | null, formData: FormData): 
   await recordAudit({
     event: "campaign.created",
     target: { type: AUDIT_TYPE, id: campaign.id, label: campaign.name },
-    after: { name: campaign.name, objective: campaign.objective, startsAt, endsAt, timezone },
+    after: { ...fields, startsAt, endsAt, timezone },
   });
 
   revalidatePath("/campanhas");
@@ -165,8 +188,25 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
   if (!parsed.ok) return invalid(parsed.errors);
 
   const { startsAt, endsAt } = periodToUtc(parsed.data.startsOn, parsed.data.endsOn, zoneOrDefault(campaign.timezone));
-  const before = { name: campaign.name, objective: campaign.objective, startsAt: campaign.startsAt, endsAt: campaign.endsAt };
-  const after = { name: parsed.data.name, objective: parsed.data.objective, startsAt, endsAt };
+  const before = {
+    name: campaign.name,
+    objectiveType: campaign.objectiveType,
+    objective: campaign.objective,
+    description: campaign.description,
+    goalValue: campaign.goalValue,
+    goalType: campaign.goalType,
+    budgetCents: campaign.budgetCents,
+    messageCostCents: campaign.messageCostCents,
+    keywords: campaign.keywords,
+    startsAt: campaign.startsAt,
+    endsAt: campaign.endsAt,
+  };
+  // As palavras-chave são editadas no passo "De onde vêm os leads": um
+  // formulário sem o campo não as apaga.
+  const fields = formFields(parsed.data);
+  if (!formData.has("keywords")) fields.keywords = campaign.keywords;
+  const after = { ...fields, startsAt, endsAt };
+  const scalarBefore = Object.fromEntries(Object.entries(before).filter(([key]) => key !== "keywords"));
 
   // Nada mudou: não grava (não mexe em `updatedAt`) e não enche a trilha.
   if (!hasChanges(diffFields(before, after))) {
@@ -187,8 +227,10 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
 
   const written = await attempt(() =>
     prisma.campaign.updateMany({
-      where: { id: campaign.id, tenantId: actor.tenantId, archivedAt: null, ...before },
-      data: startsLater ? { ...after, pausedAt: null } : after,
+      // A condição confere o estado lido (o array de palavras-chave fica de
+      // fora: filtro de igualdade em lista é frágil e não protege nada a mais).
+      where: { id: campaign.id, tenantId: actor.tenantId, archivedAt: null, ...scalarBefore },
+      data: { ...(startsLater ? { ...after, pausedAt: null } : after), updatedById: actor.userId },
     }),
   );
   if (!written.ok) return serverError();
@@ -213,10 +255,16 @@ export async function updateCampaign(_prev: Result | null, formData: FormData): 
  * As quatro mudanças de status. Cada uma diz o que pede (`allowed`), o que
  * grava, a evidência no log e o que responde quando o status atual não deixa.
  */
-type TransitionKind = "pause" | "resume" | "archive" | "unarchive";
+type TransitionKind = "activate" | "pause" | "resume" | "finish" | "archive" | "unarchive";
 
-/** O que uma mudança de status escreve: só as duas datas de estado, nunca o período. */
-type StateDates = { pausedAt?: Date | null; archivedAt?: Date | null };
+/** O que uma mudança de status escreve: as datas de estado (encerrar também mexe no período). */
+type StateDates = {
+  activatedAt?: Date | null;
+  pausedAt?: Date | null;
+  archivedAt?: Date | null;
+  startsAt?: Date | null;
+  endsAt?: Date | null;
+};
 
 const TRANSITIONS: Record<
   TransitionKind,
@@ -224,10 +272,35 @@ const TRANSITIONS: Record<
     event: AuditEvent;
     needs: keyof CampaignAllowed;
     info: string;
-    data: (now: Date) => StateDates;
+    data: (now: Date, campaign: { startsAt: Date | null }) => StateDates;
     refusal: (status: CampaignStatus) => string;
   }
 > = {
+  activate: {
+    event: "campaign.activated",
+    needs: "activate",
+    info: "Campanha ativada.",
+    data: (now) => ({ activatedAt: now }),
+    refusal: () => "Esta campanha já foi ativada.",
+  },
+  finish: {
+    event: "campaign.finished",
+    needs: "finish",
+    info: "Campanha encerrada. As regras deixaram de valer.",
+    // Encerrar é trazer o fim para agora. A agendada (início no futuro) tem o
+    // início trazido junto, para o período não ficar invertido.
+    data: (now, campaign) => ({
+      endsAt: now,
+      pausedAt: null,
+      ...(campaign.startsAt && campaign.startsAt > now ? { startsAt: now } : {}),
+    }),
+    refusal: (status) =>
+      status === "draft"
+        ? "Rascunho não tem o que encerrar: arquive se não for usar."
+        : status === "finished"
+          ? "Esta campanha já terminou."
+          : "Campanha arquivada não pode ser encerrada.",
+  },
   pause: {
     event: "campaign.paused",
     needs: "pause",
@@ -236,6 +309,7 @@ const TRANSITIONS: Record<
     refusal: (status) =>
       ({
         draft: "Só uma campanha ativa pode ser pausada, e esta ainda não começou.",
+        scheduled: "Só uma campanha ativa pode ser pausada, e esta ainda não começou.",
         paused: "Esta campanha já está pausada.",
         finished: "Campanha terminada não pode ser pausada.",
         archived: "Campanha arquivada não pode ser pausada.",
@@ -250,6 +324,7 @@ const TRANSITIONS: Record<
     refusal: (status) =>
       ({
         draft: "Esta campanha não está pausada.",
+        scheduled: "Esta campanha não está pausada.",
         active: "Esta campanha não está pausada.",
         finished: "Campanha terminada não pode ser retomada.",
         archived: "Campanha arquivada não pode ser retomada. Desarquive primeiro.",
@@ -284,18 +359,24 @@ async function transition(kind: TransitionKind, id: string): Promise<Result> {
   const before = campaignStatus(campaign, now);
   if (!allowedActions(before)[rule.needs]) return refused(rule.refusal(before));
 
-  const data = rule.data(now);
+  // Ativar pede o período completo: as regras e a atribuição dependem dele.
+  if (kind === "activate" && (!campaign.startsAt || !campaign.endsAt)) {
+    return refused("Defina o início e o fim da campanha em Dados gerais antes de ativar.");
+  }
+
+  const data = rule.data(now, campaign);
   const written = await attempt(() =>
     prisma.campaign.updateMany({
       where: {
         id: campaign.id,
         tenantId: actor.tenantId,
+        activatedAt: campaign.activatedAt,
         startsAt: campaign.startsAt,
         endsAt: campaign.endsAt,
         pausedAt: campaign.pausedAt,
         archivedAt: campaign.archivedAt,
       },
-      data,
+      data: { ...data, updatedById: actor.userId },
     }),
   );
   if (!written.ok) return serverError();
@@ -313,6 +394,16 @@ async function transition(kind: TransitionKind, id: string): Promise<Result> {
 
   revalidateCampaign(campaign.id);
   return { ok: true, id: campaign.id, info: rule.info };
+}
+
+/** Rascunho com período completo vira agendada ou ativa, conforme as datas. */
+export async function activateCampaign(id: string): Promise<Result> {
+  return transition("activate", id);
+}
+
+/** Traz o fim para agora: as regras deixam de valer e o lead volta ao fluxo padrão. */
+export async function finishCampaign(id: string): Promise<Result> {
+  return transition("finish", id);
 }
 
 /** Só uma campanha ativa pausa (a pausa vale dentro do período). */

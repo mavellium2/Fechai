@@ -12,6 +12,8 @@ import {
   type ScheduleConfig,
 } from "../../src/modules/scheduling/config";
 import { parseReminderOverride } from "../../src/modules/scheduling/reminder-override";
+import { loadReminderOverrides } from "../../src/modules/campaigns/active";
+import type { CampaignRules } from "../../src/modules/campaigns/rules";
 import { parseConversationVariables } from "../../src/modules/agent-engine/variables";
 import { isPhoneBlocked } from "../../src/modules/whatsapp/blocklist";
 import { dateInZone, dayKeyInZone, partsInZone, timeInZone, zonedTimeToUtc } from "../../src/modules/scheduling/time";
@@ -142,16 +144,25 @@ export async function loadAccountScheduleConfigs(): Promise<Map<string, Schedule
   );
 }
 
-/** Os lembretes que valem para esta consulta: os dela, ou os gerais da conta. */
+/**
+ * Os lembretes que valem para esta consulta: os dela; senão os da campanha em
+ * vigor do lead (desligados ou personalizados); senão os gerais da conta.
+ *
+ * O override da consulta vence a campanha: é a escolha explícita de alguém da
+ * equipe para AQUELA consulta. A campanha só substitui o padrão da conta.
+ */
 export function remindersFor(
   appt: { reminderOverride: unknown },
   cfg: Pick<ScheduleConfig, "reminderEnabled" | "reminders">,
+  campaign?: Pick<CampaignRules, "reminders" | "customReminders"> | null,
 ): ReminderRule[] {
   const override = parseReminderOverride(appt.reminderOverride);
   // Lista vazia no override é uma escolha ("esta consulta não recebe
   // lembrete"), diferente de não ter override. Por isso `!== null`, e não
   // um `||` que trataria vazio como ausente.
   if (override !== null) return override;
+  if (campaign?.reminders === "off") return [];
+  if (campaign?.reminders === "custom") return campaign.customReminders;
   return cfg.reminderEnabled ? cfg.reminders : [];
 }
 
@@ -164,9 +175,18 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
   // carregaria a agenda inteira do ano para descartar quase tudo em memória.
   // Uma consulta pode ter override próprio mais distante que o do agente, por
   // isso o teto considera os dois.
+  // Campanha em vigor que desliga ou troca os lembretes dos leads dela. Os
+  // lembretes desligados não são marcados como enviados: ficam suspensos e
+  // voltam a ser avaliados quando a campanha termina (os que venceram nesse
+  // meio-tempo são fechados como sempre, sem envio).
+  const campaignRules = await loadReminderOverrides([...configByTenant.keys()], now).catch((err) => {
+    console.error("[lembretes] campanhas indisponíveis; sem enviar a leads de campanha nesta volta", err);
+    return null;
+  });
   const configuredRules = [...configByTenant.values()]
     .filter((cfg) => cfg.reminderEnabled)
-    .flatMap((cfg) => cfg.reminders);
+    .flatMap((cfg) => cfg.reminders)
+    .concat([...(campaignRules?.values() ?? [])].flatMap((rules) => rules.customReminders));
   // Um horário fixo na véspera pode cair quase um dia antes do instante
   // "24 horas antes"; inclua essa margem na busca sem carregar o ano inteiro.
   const maxLeadMinutes = Math.max(0, ...configuredRules.map((r) =>
@@ -231,7 +251,11 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     // O público da conta vale também para lembretes próprios da consulta.
     if (!isReminderTypeAllowed(cfg, appt.serviceType)) continue;
 
-    const rules = remindersFor(appt, cfg);
+    // Sem conseguir ler as campanhas, não arrisca mandar lembrete que a
+    // campanha desligou: espera a próxima volta (o envio explícito passa).
+    if (campaignRules === null && appt.leadId && !target) continue;
+    const campaign = !target && appt.leadId ? campaignRules?.get(appt.leadId) : undefined;
+    const rules = remindersFor(appt, cfg, campaign);
     if (rules.length === 0) continue;
 
     const expired = staleReminders(appt, rules, now, cfg.timezone).map((r) => r.minutesBefore);

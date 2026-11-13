@@ -10,7 +10,7 @@ import {
   hasConflictAnywhere,
   listUpcomingLeadAppointments,
 } from "@/modules/scheduling/repository";
-import { formatInZone, parseLocalDateTime } from "@/modules/scheduling/time";
+import { dayKeyInZone as dayKeyOf, formatInZone, parseLocalDateTime } from "@/modules/scheduling/time";
 import { parseKind } from "@/modules/scheduling/dimensions";
 import { clinicorpConfirmationPending } from "@/modules/scheduling/clinicorp";
 import { DISQUALIFY_REASONS, parseReason } from "./disqualify";
@@ -21,6 +21,10 @@ import { allVariableDefinitions, parseVariableDefinitions, rememberConversationV
 import { registerKnowledgeGap, type RegisterGapResult } from "@/modules/knowledge-gaps/register";
 import { recordLeadInsight } from "@/modules/lead-insights/record";
 import { LEAD_INSIGHT_TOOL, leadInsightToolResult, leadInsightToolSchema } from "@/modules/lead-insights/tool";
+import type { LeadCampaign } from "@/modules/campaigns/active";
+import { checkCampaignSlot, CampaignRuleError } from "@/modules/campaigns/slots";
+import { restrictsSchedule } from "@/modules/campaigns/rules";
+import { CAMPAIGN_HANDOFF, campaignOutsideReply, campaignSlotsForTool, queueCampaignMedia, SEND_CAMPAIGN_MEDIA } from "@/modules/campaigns/agent";
 
 export type ToolContext = {
   tenantId: string;
@@ -39,6 +43,14 @@ export type ToolContext = {
    * real, sem nenhuma mudança.
    */
   dryRun?: boolean;
+  /**
+   * Campanha em vigor para o lead neste turno (`findLeadCampaign`), já
+   * carregada pelo orquestrador. `undefined` = não carregada (as ferramentas
+   * leem do banco); `null` = o lead está no fluxo padrão.
+   */
+  campaign?: LeadCampaign | null;
+  /** Arquivos da campanha que o agente pediu para enviar depois do texto. */
+  outgoingMedia?: { assetId: string; url: string; kind: string; name: string; mime: string }[];
 };
 type Handler = (ctx: ToolContext, args: Record<string, unknown>) => Promise<string>;
 
@@ -161,6 +173,19 @@ export async function runToolHandler(
   ctx: ToolContext,
   args: Record<string, unknown>,
 ): Promise<string> {
+  if (key === SEND_CAMPAIGN_MEDIA) {
+    try {
+      return await queueCampaignMedia(ctx, args);
+    } catch (err) {
+      console.error("[tools] falha ao enviar arquivo da campanha", err);
+      return "Não foi possível enviar o arquivo agora. Não diga que enviou.";
+    }
+  }
+  if (key === CAMPAIGN_HANDOFF) {
+    if (ctx.dryRun) return "Simulação: a conversa seria passada para a equipe. Diga que a equipe vai entrar em contato.";
+    await transferToHuman(ctx, str(args.reason) ?? "Lead da campanha quer data ou horário fora da campanha");
+    return "Conversa passada para a equipe. Diga ao contato que a equipe vai entrar em contato.";
+  }
   if (key === "report_unanswered") {
     const gap = await registerUnanswered(ctx, args.question);
     // Regra da conta (/perguntas): além da fila, passar a conversa para a
@@ -332,13 +357,23 @@ const TOOLS: Record<ActionKey, ToolDef> = {
           : "Esse horário já passou. Proponha um horário futuro.";
       }
 
+      // Regra da campanha do lead (datas, horários, vagas): vem antes de tudo,
+      // porque um horário fora dela não deve nem ser conferido na agenda.
+      const slot = await checkCampaignSlot({
+        tenantId: ctx.tenantId, leadId: ctx.leadId, startsAt, timezone: cfg.timezone, campaign: ctx.campaign,
+      });
+      if (ctx.campaign === undefined) ctx.campaign = slot.campaign;
+      if (slot.problem) return campaignOutsideReply(ctx, slot.problem);
+
       // A variação escolhida muda o tamanho do bloco, então entra ANTES da
       // checagem de expediente e de conflito: uma limpeza de 30 min cabe às
       // 17:30 num expediente que fecha às 18:00, uma avaliação de 60 não.
       const duration = resolveDuration(cfg, str(args.tipoAtendimento));
       const serviceType = resolveScheduleServiceType(cfg, str(args.tipoAtendimento));
 
-      if (!isWithinBusinessHours(startsAt, { ...cfg, durationMinutes: duration.minutes })) {
+      // Vaga de evento da campanha: várias pessoas no mesmo horário, fora do
+      // expediente se a clínica quiser. A lotação já foi conferida acima.
+      if (!slot.eventSlot && !isWithinBusinessHours(startsAt, { ...cfg, durationMinutes: duration.minutes })) {
         return `Fora dos períodos de atendimento deste dia ou durante uma pausa, considerando um bloco de ${duration.minutes} min. Consulte list_available_slots e proponha outro horário respeitando os intervalos.`;
       }
 
@@ -369,7 +404,12 @@ const TOOLS: Record<ActionKey, ToolDef> = {
       // Olha a nossa agenda E a do Clinicorp, quando conectado: a recepção
       // marca paciente direto no sistema da clínica e esses horários nunca
       // passaram por aqui.
-      if (await hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone)) {
+      if (!slot.eventSlot && await hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone)) {
+        // Lead de campanha com agenda restrita: as alternativas são as da
+        // campanha, nunca o leque normal da agenda.
+        if (slot.campaign && restrictsSchedule(slot.campaign.rules)) {
+          return `Esse horário está ocupado. ${await campaignSlotsForTool(ctx, cfg, dayKeyOf(startsAt, cfg.timezone))}`;
+        }
         return offerAlternativeSlots(ctx, cfg, startsAt, duration.minutes);
       }
 
@@ -379,7 +419,9 @@ const TOOLS: Record<ActionKey, ToolDef> = {
         return `Simulação: o horário ${whenSim}${kindSim}${cfg.location ? ` (${cfg.location})` : ""} está livre e seria marcado para ${patientName}. Nada foi gravado na agenda nem enviado ao Clinicorp, Google ou iCloud. Confirme esse horário com o contato como se tivesse sido marcado, sem dizer que é uma simulação.`;
       }
 
-      const appointment = await createAppointment({
+      let appointment: Awaited<ReturnType<typeof createAppointment>>;
+      try {
+        appointment = await createAppointment({
         tenantId: ctx.tenantId,
         agentId: ctx.agentId,
         leadId: ctx.leadId,
@@ -396,6 +438,12 @@ const TOOLS: Record<ActionKey, ToolDef> = {
         procedure: str(args.procedimento) ?? null,
         timezone: cfg.timezone,
       });
+      } catch (err) {
+        // A trava do backend (`createAppointment`) recusou: a vaga lotou entre
+        // a checagem e a gravação, ou a regra mudou no meio do turno.
+        if (err instanceof CampaignRuleError) return campaignOutsideReply(ctx, err.message);
+        throw err;
+      }
 
       const when = formatInZone(startsAt, cfg.timezone);
       // O nome pedido pode não existir na lista: o horário foi marcado com a

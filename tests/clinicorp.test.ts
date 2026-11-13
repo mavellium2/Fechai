@@ -3,6 +3,8 @@ import { encryptSecret } from "@/lib/crypto";
 import { Prisma } from "@prisma/client";
 
 const db = vi.hoisted(() => ({
+  // Sem campanha: o lead segue a agenda normal (ver modules/campaigns/active.ts).
+  campaignLead: { findMany: async () => [] },
   clinicorpIntegration: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
   calendarFeatures: { findUnique: vi.fn() },
   appointment: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },

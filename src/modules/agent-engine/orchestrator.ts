@@ -31,6 +31,11 @@ import { loadConversationVariables, parseVariableDefinitions, variablesSystemCon
 import { INJECTION_GUARD } from "./injection-guard";
 import { unansweredRule, type Retrieved } from "./unanswered-rule";
 import { leadInsightRule } from "@/modules/lead-insights/tool";
+import { findLeadCampaign, type LeadCampaign } from "@/modules/campaigns/active";
+import { campaignAgentFor } from "@/modules/campaigns/agent-routing";
+import { attributeByKeyword } from "@/modules/campaigns/attribution";
+import { campaignRulesPrompt, restrictsSchedule } from "@/modules/campaigns/rules";
+import { campaignHandoffSchema, sendCampaignMediaSchema } from "@/modules/campaigns/agent";
 
 const MAX_TOOL_ITERATIONS = 3;
 const DEFAULT_SYSTEM =
@@ -65,6 +70,8 @@ export type AgentTurn = {
   /** id da mensagem da resposta gravada no histórico — o webhook usa para anexar o key.id do WhatsApp e não duplicar o eco fromMe. */
   replyMessageId?: string;
   inspection?: SandboxInspection;
+  /** Arquivos da campanha que o agente pediu para enviar depois do texto. */
+  media?: NonNullable<ToolContext["outgoingMedia"]>;
 };
 
 // Monta o contexto (persona + RAG + histórico), roda o loop de function calling
@@ -135,13 +142,19 @@ export async function runAgentTurn(input: {
     await appendMessage(conversationId, "user", userMessage);
   }
 
+  // Palavra-chave da campanha na mensagem inicial: o lead entra na campanha
+  // antes de o agente responder (e mesmo com o agente pausado). Nunca lança.
+  if (!input.historyOverride) {
+    await attributeByKeyword({ tenantId, leadId, conversationId, message: userMessage });
+  }
+
   // Humano assumiu esta conversa (respondeu manualmente pelo painel): a
   // mensagem do contato fica registrada, mas a IA não responde por cima —
   // checa antes de resolver agente/persona porque nem chega a valer a pena
   // montar contexto para um turno que não vai gerar resposta.
   const paused = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { agentPaused: true },
+    select: { agentPaused: true, isTest: true },
   });
   if (paused?.agentPaused) {
     return { reply: "", toolsUsed: [], status: "human_handling" };
@@ -162,7 +175,17 @@ export async function runAgentTurn(input: {
     }
   }
 
-  const agent = await resolveAgent(tenantId, input.agentId);
+  // Campanha em vigor para o lead: as regras dela entram no prompt e nas
+  // ferramentas de agenda, e o agente da campanha (quando há um) atende no
+  // lugar do de sempre — só enquanto ela vale. Falha de leitura não derruba o
+  // turno; a trava do backend (`createAppointment`) continua valendo.
+  const leadCampaign: LeadCampaign | null | undefined = await findLeadCampaign(tenantId, leadId).catch((err) => {
+    console.error("[orchestrator] campanha do lead indisponível", err);
+    return undefined;
+  });
+  // O chat de teste escolhe o agente que quer testar: a campanha não troca.
+  const campaignAgentId = !paused?.isTest ? await campaignAgentFor(tenantId, leadCampaign) : null;
+  const agent = await resolveAgent(tenantId, campaignAgentId ?? input.agentId);
 
   if (!agent) {
     await prisma.conversation
@@ -199,9 +222,12 @@ export async function runAgentTurn(input: {
 
   // Registra quem atendeu — /conversas mostra isso, e sem o vínculo não há
   // como saber depois qual agente respondeu o quê.
-  if (agent) {
+  // O agente da campanha não vira o dono da conversa: terminada a campanha, o
+  // lead volta ao de sempre (o original de onde a cópia saiu, ou o principal).
+  const owner = campaignAgentId ? leadCampaign?.campaign.baseAgentId ?? null : agent?.id ?? null;
+  if (owner) {
     await prisma.conversation
-      .updateMany({ where: { id: conversationId, agentId: null }, data: { agentId: agent.id } })
+      .updateMany({ where: { id: conversationId, agentId: null }, data: { agentId: owner } })
       .catch(() => {});
   }
 
@@ -240,6 +266,14 @@ export async function runAgentTurn(input: {
       })
     : {};
 
+  const handoffEnabled = actions.some((a) => a.key === "handoff_human");
+  const pendingAssets = leadCampaign
+    ? leadCampaign.assets.filter((asset) => !leadCampaign.sentAssetIds.includes(asset.id))
+    : [];
+  const campaignContext = leadCampaign
+    ? campaignRulesPrompt(leadCampaign.campaign, leadCampaign.rules, { handoffAvailable: handoffEnabled, assets: pendingAssets })
+    : "";
+
   const personaPrompt = input.systemPromptOverride?.trim() || agent?.systemPrompt || DEFAULT_SYSTEM;
   const systemPrompt = [
     personaPrompt,
@@ -250,6 +284,8 @@ export async function runAgentTurn(input: {
     // ("Te esperamos amanhã às 10h" como modelo a repetir).
     timeContext,
     scheduleContext,
+    // Depois da agenda geral: a regra da campanha vence o expediente normal.
+    campaignContext,
     appointmentsContext,
     agent ? variablesSystemContext(variableDefinitions, variableValues) : "",
     context,
@@ -272,7 +308,13 @@ export async function runAgentTurn(input: {
     agent ? variableDefinitions : undefined,
     handoff ? parseHandoffConfig(handoff.config) : undefined,
   );
-  const ctx: ToolContext = { tenantId, conversationId, leadId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling };
+  if (leadCampaign && pendingAssets.length) toolSchemas.push(sendCampaignMediaSchema(pendingAssets.map((a) => a.id)));
+  if (leadCampaign?.rules.outside === "handoff" && restrictsSchedule(leadCampaign.rules) && !handoffEnabled) {
+    toolSchemas.push(campaignHandoffSchema);
+  }
+  const ctx: ToolContext = {
+    tenantId, conversationId, leadId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling, campaign: leadCampaign,
+  };
   // A cadeia de fallback vem do painel (/admin/ia): o admin monta a ordem e
   // aponta cada degrau para uma credencial. Sem nada cadastrado, cai no padrão
   // do código (modelo ativo → Grok → Groq). Resolvida UMA vez por turno, já
@@ -369,6 +411,7 @@ export async function runAgentTurn(input: {
   finalReply = sanitizedReply || "Certo!";
   const replyMsg = await appendMessage(conversationId, "assistant", finalReply, "agent");
   return { reply: finalReply, toolsUsed, status: agent ? "ok" : "no_agent", replyMessageId: replyMsg.id,
+    ...(ctx.outgoingMedia?.length ? { media: ctx.outgoingMedia } : {}),
     ...(input.inspect ? { inspection: { sources: retrieved?.sources ?? [], searched: retrieved?.searched ?? false, instructions: personaPrompt, tools: toolsUsed } } : {}) };
 }
 

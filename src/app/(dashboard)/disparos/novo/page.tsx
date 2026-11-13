@@ -25,14 +25,18 @@ function testPhoneFrom(phone: string | null | undefined): string {
 export default async function NovoDisparoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ rascunho?: string; modelo?: string }>;
+  searchParams: Promise<{ rascunho?: string; modelo?: string; campanha?: string }>;
 }) {
   const { tenantId, userId } = await requireBroadcastActor();
-  const { rascunho, modelo } = await searchParams;
-  const [connection, user, draft] = await Promise.all([
+  const { rascunho, modelo, campanha } = await searchParams;
+  const [connection, user, draft, campaign] = await Promise.all([
     getBroadcastConnection(tenantId),
     prisma.user.findUnique({ where: { id: userId }, select: { phone: true } }),
     rascunho ? getBroadcastReview(rascunho) : Promise.resolve(null),
+    // "Novo disparo para esta campanha": só campanha desta conta, não arquivada.
+    campanha
+      ? prisma.campaign.findFirst({ where: { id: campanha, tenantId, archivedAt: null }, select: { id: true, name: true } })
+      : Promise.resolve(null),
   ]);
   return (
     <div className="space-y-6">
@@ -42,11 +46,14 @@ export default async function NovoDisparoPage({
           defaultTestPhone={testPhoneFrom(user?.phone)}
           draft={draft}
           initialTemplateId={draft ? undefined : modelo}
+          campaignId={campaign?.id}
           notice={
             rascunho && !draft ? (
               <Alert tone="warn">
                 Este rascunho não está mais disponível (já foi enviado ou descartado). Comece um novo abaixo.
               </Alert>
+            ) : campaign ? (
+              <Alert tone="info">Este disparo será vinculado à campanha “{campaign.name}”: quem responder entra nela.</Alert>
             ) : null
           }
         />
