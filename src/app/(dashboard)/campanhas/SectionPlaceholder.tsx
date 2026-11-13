@@ -27,7 +27,7 @@ export function SectionPlaceholder({
   return (
     <Card id={id} className="scroll-mt-4 p-4 sm:p-6">
       <CardTitle>{title}</CardTitle>
-      <div className="rounded-control border border-dashed border-ink/20 bg-ink/[0.02] panel:border-white/20 panel:bg-white/[0.03]">
+      <div className="rounded-control border border-dashed border-ink/20 panel:border-white/20">
         <EmptyState icon={icon} title="Em breve" description={description} action={link} className="px-4 py-6 sm:px-6" />
       </div>
     </Card>

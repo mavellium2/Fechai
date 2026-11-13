@@ -59,7 +59,7 @@ export function CampaignList({ campaigns }: { campaigns: CampaignView[] }) {
       <ul className="space-y-3 md:hidden">
         {campaigns.map((campaign) => (
           <li key={campaign.id}>
-            <Card className="relative p-4 transition-colors hover:bg-ink/[0.02] panel:hover:bg-white/[0.07]">
+            <Card className="relative p-4 transition-colors hover:bg-ink/5 panel:hover:bg-white/10">
               <div className="flex items-start justify-between gap-3">
                 {/* Link esticado: o `::before` cobre o cartão e leva o foco visível. */}
                 <Link

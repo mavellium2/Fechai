@@ -35,7 +35,7 @@ export function CampaignDetail({
       <Link
         href="/campanhas"
         className={
-          "inline-flex min-h-11 items-center gap-1.5 rounded-control text-sm font-medium text-neutral " +
+          "inline-flex min-h-11 items-center gap-2 rounded-control text-sm font-medium text-neutral " +
           "hover:text-ink panel:text-white/60 panel:hover:text-white " +
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris focus-visible:ring-offset-2 " +
           "focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink sm:min-h-0"

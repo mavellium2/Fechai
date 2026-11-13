@@ -17,11 +17,18 @@ export const STATUS_LABEL: Record<CampaignStatus, string> = {
   archived: "Arquivada",
 };
 
+/**
+ * O tom segue o que cada cor significa no produto (e o que o /disparos já faz
+ * com os status dele): `iris` é o que está em andamento, `warn` é o que pede
+ * atenção (pausada), `success` é o concluído, e `neutral` o que está parado
+ * (rascunho, arquivada). `success` é "só sucesso/confirmação" — por isso não é
+ * a "Ativa", que está rodando, e sim a "Terminada".
+ */
 export const STATUS_TONE: Record<CampaignStatus, NonNullable<BadgeProps["tone"]>> = {
   draft: "neutral",
-  active: "success",
+  active: "iris",
   paused: "warn",
-  finished: "iris",
+  finished: "success",
   archived: "neutral",
 };
 

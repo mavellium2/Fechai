@@ -481,4 +481,14 @@ describe("textos da tela — o que cada status diz", () => {
     expect(view.startsOn).toBe("2026-11-01");
     expect(view.period).toBe("01/11 a 30/11/2026");
   });
+
+  it("o tom de cada status segue o que a cor significa no produto (success é só o concluído)", () => {
+    expect(STATUS_TONE).toEqual({
+      draft: "neutral",
+      active: "iris",
+      paused: "warn",
+      finished: "success",
+      archived: "neutral",
+    });
+  });
 });
