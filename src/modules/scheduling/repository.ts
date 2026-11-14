@@ -426,9 +426,11 @@ export async function rescheduleAppointment(input: {
   const historyId = history.id;
 
   // A alteração local já está confirmada. Espelhos são opcionais e nunca lançam.
+  const clinicorpOff = slot.campaign?.rules.clinicorp.mode === "off";
   const [googleRemoved, clinicorpRemoved] = await Promise.all([
     previous.googleEventId ? deleteEventFromGoogle(input.tenantId, previous.googleEventId) : Promise.resolve(true),
-    previous.clinicorpAppointmentId ? cancelAppointmentInClinicorp(input.tenantId, previous.clinicorpAppointmentId) : Promise.resolve(true),
+    // Campanha com "não espelhar": o Clinicorp não é tocado (nem cancelar); a recepção ajusta à mão.
+    clinicorpOff ? Promise.resolve(false) : previous.clinicorpAppointmentId ? cancelAppointmentInClinicorp(input.tenantId, previous.clinicorpAppointmentId) : Promise.resolve(true),
   ]);
   const lead = await prisma.lead.findFirst({
     where: { id: input.leadId, tenantId: input.tenantId }, select: { name: true, phone: true, isTest: true },
@@ -436,7 +438,7 @@ export async function rescheduleAppointment(input: {
   const event = { title: previous.title, startsAt: input.startsAt, endsAt, timeZone: input.timezone };
   const [googleEventId, clinicorpSync] = await Promise.all([
     googleRemoved ? pushEventToGoogle(input.tenantId, { ...event, description: previous.notes ?? undefined }) : Promise.resolve(previous.googleEventId),
-    overrideSlot || slot.campaign?.rules.clinicorp.mode === "off" ? Promise.resolve({ status: "skipped" } as const) : clinicorpRemoved ? pushAppointmentToClinicorp(input.tenantId, {
+    overrideSlot || clinicorpOff ? Promise.resolve({ status: "skipped" } as const) : clinicorpRemoved ? pushAppointmentToClinicorp(input.tenantId, {
       ...event,
       patientName: previous.patientName ?? undefined,
       notes: previous.notes,

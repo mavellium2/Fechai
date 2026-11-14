@@ -64,9 +64,9 @@ campos = comportamento de sempre: follow-up ligado, Clinicorp padrão, sem instr
 - **Clinicorp** (`clinicorp.mode`: `default` ou `off`): `off` não espelha a
   consulta nova (`skipped`, ao agendar e ao remarcar pelo agente). Não mexe em
   lembrete: a consulta segue a regra de lembretes da campanha e da conta, como
-  qualquer consulta só do Fechai. **Remarcar** uma consulta que já estava no
-  Clinicorp com `off` tenta cancelar a antiga lá e não cria a nova; a recepção
-  lança à mão. Escolha de profissional não existe.
+  qualquer consulta só do Fechai. **Remarcar** com `off` também não toca o
+  Clinicorp (nem cancela a antiga): se a consulta já estava lá antes da campanha,
+  ela fica como está e a recepção ajusta à mão. Escolha de profissional não existe.
 - **Vagas** continuam por horário; vaga por dia fica para o CMP-04.
 - **Instruções extras** entram no prompt entre marcas, como conteúdo da clínica
   que **não altera datas, horários, vagas nem travas**. Texto que tenta fechar a
