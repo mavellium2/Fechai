@@ -15,3 +15,4 @@ Leia o `_index.md` antes do código-fonte.
 - [satisfaction](context/satisfaction/_index.md) — pesquisa de satisfação pós-conversa: nota 1–5, comentário, painel, alerta de notas baixas e bloco no relatório mensal (`src/modules/satisfaction/`)
 - [campaign-reports](context/campaign-reports/_index.md) — de qual anúncio cada lead veio, aba Campanhas e relatório semanal enviado ao grupo do WhatsApp (`src/modules/campaign-reports/`)
 - [reports](context/reports/_index.md) — relatório mensal de ROI (P-79): assistente de fechamento em 5 etapas, fechamento com cobertura parcial, análise por IA, PDF, central de pendências e origem + selo de qualidade de cada número (`src/modules/reports/`)
+- [campaign-override](context/campaign-override/_index.md) — regra provisória da campanha de implantes (18–19/11/2026, expira em 19/11/2026 23:59:59 -03:00): quais leads são da campanha, configuração por script e lista de reagendamento (`src/modules/campaign-override/`)
