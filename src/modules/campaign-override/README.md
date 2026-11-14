@@ -46,6 +46,8 @@ lembretes (`loadReminderOverrides`) valem sem mudar um chamador. Fim sem cron: d
   A equipe marcando à mão (`source: "manual"`) não passa pela trava, como nas campanhas.
 - **Falha de leitura** da regra na agenda **lança** (`getCampaignOverrideForLeadStrict`): a tool
   responde "falha ao executar" e nada é gravado — nunca libera horário. No prompt vira "sem campanha".
+  Como `findLeadCampaign` consulta o override para todo lead sem `Campaign` real, se a leitura do override
+  falhar as tools de agenda falham para **todos** os leads (lado seguro, decisão do projeto).
 - **Vagas por dia** (um horário por dia, então vaga por horário = vaga por dia), no lugar do
   conflito de agenda. Esgotado um dia, a recusa já traz o outro; esgotados os dois, a conversa
   é transferida para a equipe (`transferToHuman`, não depende da IA pedir; a simulação não transfere).
@@ -60,7 +62,8 @@ lembretes (`loadReminderOverrides`) valem sem mudar um chamador. Fim sem cron: d
   iCloud seguem. A recepção lança à mão: `campanha-implantes-reagendar.ts --evento` lista também as consultas
   dentro da regra (coluna "O que fazer": "Lançar no Clinicorp" / "Reagendar").
 - **Lembretes**: consulta de lead da campanha nasce com `reminderOverride = []` e o `[]` **fica**
-  (não volta a `null` depois do espelho). O worker (`reminders.ts`) pula pelo mesmo `remindersFor`
+  (não volta a `null` depois do espelho). Na marcação manual e no script de limpeza o `[]` só vale até o
+  fim da regra (19/11 23:59:59): consulta depois disso, por exemplo 10/12, segue com os lembretes normais. O worker (`reminders.ts`) pula pelo mesmo `remindersFor`
   (`loadReminderOverrides` inclui os leads da regra com `reminders: "off"`; falha de leitura espera a
   próxima volta). Consulta só do Clinicorp (sem `Appointment`) é achada pelo telefone do lead e pulada
   (`overrideSuppressesReminder`, motivo `campaign`, só se a consulta é até o fim da regra; falha de leitura

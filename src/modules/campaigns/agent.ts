@@ -69,7 +69,7 @@ export async function campaignRefusalReply(ctx: ToolContext, cfg: ScheduleConfig
   return `${reply}\n${await campaignSlotsForTool(ctx, cfg, date)}`;
 }
 
-export const SEND_CAMPAIGN_MEDIA ="send_campaign_media";
+export const SEND_CAMPAIGN_MEDIA = "send_campaign_media";
 export const CAMPAIGN_HANDOFF = "campaign_handoff";
 
 /** Só existe no turno de lead com campanha que tem arquivo para o agente. */

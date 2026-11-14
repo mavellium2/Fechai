@@ -201,6 +201,21 @@ describe("lembrete da consulta do fechai", () => {
     expect((db.appointment.update.mock.calls.at(-1)?.[0] as { data: { reminderOverride: unknown } }).data.reminderOverride).toEqual([]);
   });
 
+  it("manual para depois do fim da regra (10/12) mantém os lembretes normais (volta a null)", async () => {
+    await createAppointment({
+      tenantId: TENANT, leadId: CAMPAIGN_LEAD, title: "Paciente", startsAt: new Date("2026-12-10T12:00:00Z"),
+      durationMinutes: 30, source: "manual", timezone: "America/Sao_Paulo",
+    });
+    const final = db.appointment.update.mock.calls.at(-1)?.[0] as { data: { reminderOverride: unknown } };
+    expect(final.data.reminderOverride).not.toEqual([]);
+    // O limite é o corte rígido: 19/11 23:59:59 (-03:00) ainda é do evento; um segundo depois, não.
+    await createAppointment({
+      tenantId: TENANT, leadId: CAMPAIGN_LEAD, title: "Paciente", startsAt: new Date("2026-11-20T02:59:59Z"),
+      durationMinutes: 30, source: "manual", timezone: "America/Sao_Paulo",
+    });
+    expect((db.appointment.update.mock.calls.at(-1)?.[0] as { data: { reminderOverride: unknown } }).data.reminderOverride).toEqual([]);
+  });
+
   it("quem não é da campanha segue como antes: o `[]` provisório vira null (segue o agente)", async () => {
     await createAppointment({
       tenantId: TENANT, agentId: "agente-1", leadId: NORMAL_LEAD, title: "Paciente", startsAt: new Date("2026-11-24T12:00:00Z"),
@@ -288,6 +303,10 @@ describe("consulta marcada direto no Clinicorp", () => {
 
   it("consulta depois do fim da regra (20/11 às 09:00) de lead da campanha ainda é lembrada", async () => {
     db.lead.findFirst.mockResolvedValue(knownLead(CAMPAIGN_LEAD));
+    // O lead TEM consulta local futura: o mapa do override não pode suprimir a do Clinicorp depois do corte.
+    db.appointment.findMany.mockImplementation(async (args: { select?: Record<string, boolean> }) =>
+      args.select?.clinicorpAppointmentId ? [] : [{ tenantId: TENANT, leadId: CAMPAIGN_LEAD }],
+    );
     clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta("2026-11-20T12:00:00Z")], skipped: 0 });
     // 19/11 às 12:00 em Brasília: a regra ainda vale, mas a consulta é depois do corte.
     expect(await scanAndSendClinicorpReminders(new Date("2026-11-19T15:00:00Z"))).toMatchObject({ sent: 1 });

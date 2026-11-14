@@ -144,7 +144,8 @@ export async function loadReminderOverrides(
   return result;
 }
 
-async function loadCampaignReminderOverrides(
+/** Só as campanhas reais (sem a regra provisória de implantes). */
+export async function loadCampaignReminderOverrides(
   tenantIds: string[],
   now: Date,
 ): Promise<Map<string, CampaignRules>> {

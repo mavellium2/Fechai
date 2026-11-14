@@ -5,7 +5,7 @@ import { resolveCampaignLeadMatches } from "./lead";
 
 /**
  * URG-03 para o que já existe: consultas futuras de leads da campanha de
- * implantes passam a **não receber nenhum lembrete** (`reminderOverride = []`) e
+ * implantes (até o fim da regra, 19/11 23:59:59) passam a **não receber nenhum lembrete** (`reminderOverride = []`) e
  * os disparos pendentes (`ReminderDispatch` em `queued`) delas são dispensados
  * (`skipped`, motivo "campanha implantes"). Consulta nova já nasce assim
  * (`createAppointment`); isto limpa o que foi marcado antes da regra.
@@ -47,13 +47,17 @@ export async function clearCampaignReminders(input: {
 
   const appointments = await prisma.appointment.findMany({
     where: { tenantId, status: "scheduled", startsAt: { gt: now }, leadId: { not: null } },
-    select: { id: true, leadId: true, clinicorpAppointmentId: true, reminderOverride: true },
+    select: { id: true, leadId: true, startsAt: true, clinicorpAppointmentId: true, reminderOverride: true },
   });
   if (!appointments.length) return { matched: 0, appointments: 0, dispatches: 0, applied: apply };
 
   // Versão que lança: falha de banco não pode virar "nenhuma consulta da campanha".
   const matches = await resolveCampaignLeadMatches(tenantId, appointments.map((a) => a.leadId as string), now);
-  const own = appointments.filter((a) => matches.has(a.leadId as string));
+  // Só até o fim da regra (19/11 23:59:59): consulta depois disso segue com os lembretes normais.
+  const own = appointments.filter((a) => {
+    const match = matches.get(a.leadId as string);
+    return match !== undefined && a.startsAt.getTime() <= match.override.endsAt.getTime();
+  });
   const toClear = own.filter((a) => {
     const current = parseReminderOverride(a.reminderOverride);
     return !(current !== null && current.length === 0);

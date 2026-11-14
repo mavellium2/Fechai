@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { assertCampaignSlot, checkCampaignSlot, type SlotCheck } from "@/modules/campaigns/slots";
 import { isOverrideCampaignId } from "@/modules/campaign-override/agent";
-import { isCampaignLead } from "@/modules/campaign-override/lead";
+import { getCampaignOverrideForLead } from "@/modules/campaign-override/lead";
 import { OverrideSlotFullError, overrideSlotCapacity, withOverrideSlotLock } from "@/modules/campaign-override/slot-lock";
 import { Prisma } from "@prisma/client";
 import { AvailabilityUnavailableError } from "./availability-error";
@@ -221,7 +221,10 @@ export async function createAppointment(input: CreateAppointmentInput) {
   // não é espelhada no Clinicorp (a recepção lança à mão) e nunca recebe lembrete.
   // A equipe marcando à mão não passa pela trava, mas o lead da campanha segue sem lembrete.
   const overrideSlot = slot ? isOverrideCampaignId(slot.campaign?.campaign.id) : false;
-  const campaignLead = overrideSlot || (slot === null && input.leadId ? await isCampaignLead(input.tenantId, input.leadId) : false);
+  // Marcação manual: o `[]` só vale até o fim da regra (19/11); consulta depois disso (ex.: 10/12) segue o agente.
+  // No caminho do agente o `[]` é só do slot do override (sempre dentro das datas da regra).
+  const manualOverride = slot === null && input.leadId ? await getCampaignOverrideForLead(input.tenantId, input.leadId) : null;
+  const campaignLead = overrideSlot || (manualOverride !== null && input.startsAt.getTime() <= manualOverride.endsAt.getTime());
   const overrideCapacity = slot ? overrideSlotCapacity(slot) : null;
 
   const data = {

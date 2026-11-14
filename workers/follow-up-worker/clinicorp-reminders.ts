@@ -1,5 +1,5 @@
 import { blockReminder, claimReminder, finishReminder, markReminderManual, reminderAlreadyHandled, type ReminderKey } from "../../src/modules/scheduling/reminder-dispatch";
-import { loadReminderOverrides } from "../../src/modules/campaigns/active";
+import { loadCampaignReminderOverrides } from "../../src/modules/campaigns/active";
 import { overrideSuppressesReminder } from "../../src/modules/campaign-override/agent";
 import { recordMessageContext } from "../../src/modules/reports/contact-context-events";
 import { prisma } from "../../src/lib/prisma";
@@ -202,9 +202,10 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
   if (known && !options.operation) {
     // Campanha de implantes (URG-03): a consulta marcada direto no Clinicorp não
     // tem `Appointment` nosso, então a regra olha o lead pelo telefone. Só vale
-    // para consulta até o fim da regra (19/11); falha de leitura = não envia.
+    // para consulta até o fim da regra (19/11); falha de leitura = não envia. O mapa abaixo é só das
+    // campanhas reais: o override tem a checagem de data acima (o mapa dele não tem limite de data).
     if (await overrideSuppressesReminder(tenantId, known.id, item.startsAt, now)) return { sent: false, reason: "campaign" };
-    const campaign = (await loadReminderOverrides([tenantId], now)).get(known.id);
+    const campaign = (await loadCampaignReminderOverrides([tenantId], now)).get(known.id);
     if (campaign) return { sent: false, reason: "campaign" };
   }
   if (options.operation === "manual") {

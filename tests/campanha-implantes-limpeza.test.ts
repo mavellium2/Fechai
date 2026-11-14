@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * exige `--actor` para gravar e a auditoria leva só contagens. Prisma simulado, sem banco.
  */
 
-type Appt = { id: string; leadId: string | null; clinicorpAppointmentId: string | null; reminderOverride: unknown };
+type Appt = { id: string; leadId: string | null; startsAt: Date; clinicorpAppointmentId: string | null; reminderOverride: unknown };
 
 const db = vi.hoisted(() => ({
   appointment: { findMany: vi.fn(), updateMany: vi.fn() },
@@ -24,11 +24,14 @@ import { CLEARED_REASON, clearCampaignReminders } from "@/modules/campaign-overr
 
 const TENANT = "t1";
 const NOW = new Date("2026-11-13T15:00:00Z");
+const EVENTO = new Date("2026-11-18T12:00:00Z");
 const appts = (): Appt[] => [
-  { id: "a1", leadId: "lead-1", clinicorpAppointmentId: null, reminderOverride: null },
-  { id: "a2", leadId: "lead-2", clinicorpAppointmentId: "9001", reminderOverride: [{ minutesBefore: 60, template: "x" }] },
-  { id: "a3", leadId: "lead-3", clinicorpAppointmentId: null, reminderOverride: [] },
-  { id: "a4", leadId: "lead-9", clinicorpAppointmentId: null, reminderOverride: null },
+  { id: "a1", leadId: "lead-1", startsAt: EVENTO, clinicorpAppointmentId: null, reminderOverride: null },
+  { id: "a2", leadId: "lead-2", startsAt: EVENTO, clinicorpAppointmentId: "9001", reminderOverride: [{ minutesBefore: 60, template: "x" }] },
+  { id: "a3", leadId: "lead-3", startsAt: EVENTO, clinicorpAppointmentId: null, reminderOverride: [] },
+  { id: "a4", leadId: "lead-9", startsAt: EVENTO, clinicorpAppointmentId: null, reminderOverride: null },
+  // Lead da campanha, mas depois do fim da regra (19/11 23:59:59): segue com os lembretes normais.
+  { id: "a5", leadId: "lead-1", startsAt: new Date("2026-12-10T12:00:00Z"), clinicorpAppointmentId: "9005", reminderOverride: null },
 ];
 
 beforeEach(() => {
@@ -59,6 +62,17 @@ describe("clearCampaignReminders", () => {
     expect(db.appointment.updateMany).not.toHaveBeenCalled();
     expect(db.reminderDispatch.updateMany).not.toHaveBeenCalled();
     expect(audit.recordAudit).not.toHaveBeenCalled();
+  });
+
+  it("consulta depois do fim da regra (10/12) fica de fora: nem simulação nem gravação a contam", async () => {
+    const dry = await clearCampaignReminders({ tenantId: TENANT, now: NOW });
+    expect(dry.matched).toBe(3);
+    await clearCampaignReminders({ tenantId: TENANT, apply: true, actorId: "dono", now: NOW });
+    const [update] = db.appointment.updateMany.mock.calls[0] as [{ where: { id: { in: string[] } } }];
+    expect(update.where.id.in).not.toContain("a5");
+    const [skip] = db.reminderDispatch.updateMany.mock.calls[0] as [{ where: { sourceKey: { in: string[] } } }];
+    expect(skip.where.sourceKey.in).not.toContain("appointment:a5");
+    expect(skip.where.sourceKey.in).not.toContain("clinicorp:9005");
   });
 
   it("--apply sem --actor é recusado antes de qualquer leitura ou escrita", async () => {
