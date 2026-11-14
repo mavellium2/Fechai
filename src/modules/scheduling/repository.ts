@@ -263,7 +263,9 @@ export async function createAppointment(input: CreateAppointmentInput) {
 
   // Uma recusa explícita por conflito é diferente de uma falha do espelho:
   // essa tentativa não pode ficar como consulta marcada nem ir para o Google.
-  const clinicorpSync: ClinicorpSyncResult = overrideSlot ? { status: "skipped" } : await syncAppointmentToClinicorp(input.tenantId, appointment.id, {
+  // Campanha real com "não espelhar no Clinicorp": a consulta fica só no fechai.
+  const skipClinicorp = overrideSlot || slot?.campaign?.rules.clinicorp.mode === "off";
+  const clinicorpSync: ClinicorpSyncResult = skipClinicorp ? { status: "skipped" } : await syncAppointmentToClinicorp(input.tenantId, appointment.id, {
     title: input.title,
     patientName: input.patientName,
     notes: input.notes,
@@ -434,7 +436,7 @@ export async function rescheduleAppointment(input: {
   const event = { title: previous.title, startsAt: input.startsAt, endsAt, timeZone: input.timezone };
   const [googleEventId, clinicorpSync] = await Promise.all([
     googleRemoved ? pushEventToGoogle(input.tenantId, { ...event, description: previous.notes ?? undefined }) : Promise.resolve(previous.googleEventId),
-    overrideSlot ? Promise.resolve({ status: "skipped" } as const) : clinicorpRemoved ? pushAppointmentToClinicorp(input.tenantId, {
+    overrideSlot || slot.campaign?.rules.clinicorp.mode === "off" ? Promise.resolve({ status: "skipped" } as const) : clinicorpRemoved ? pushAppointmentToClinicorp(input.tenantId, {
       ...event,
       patientName: previous.patientName ?? undefined,
       notes: previous.notes,

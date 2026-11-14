@@ -444,6 +444,42 @@ export async function addLeadToCampaign(campaignId: string, leadId: string): Pro
   return { ok: true, info: "Contato adicionado à campanha." };
 }
 
+/**
+ * "Usar o lead de teste desta campanha": liga o lead do chat de teste (sandbox)
+ * da conta à campanha, para o dono conferir as regras no chat. Só quando a
+ * pessoa clica, com origem manual. Relatórios e resultados já ignoram `isTest`.
+ * O chat de teste precisa ter sido aberto ao menos uma vez (não cria lead aqui).
+ */
+export async function linkTestLeadToCampaign(campaignId: string): Promise<Result> {
+  const actor = await requireCampaignActor();
+  if (!actor.canEdit) return forbidden();
+  const found = await editable(actor, campaignId, { allowFinished: true });
+  if (!found.ok) return found.error;
+  const leads = await prisma.lead.findMany({
+    where: { tenantId: actor.tenantId, isTest: true, phone: { startsWith: "sandbox" } },
+    select: { id: true, phone: true },
+    take: 20,
+  });
+  const live = leads.filter((lead) => !lead.phone.includes(":archived:"));
+  if (!live.length) return { ok: false, error: "Abra o chat de teste do agente uma vez e tente de novo." };
+  let added = 0;
+  for (const lead of live) {
+    const { created } = await attributeLead({
+      tenantId: actor.tenantId, campaignId: found.campaign.id, leadId: lead.id, source: "manual", assignedById: actor.userId,
+    });
+    if (created) added++;
+  }
+  if (!added) return { ok: true, info: "O lead de teste já está nesta campanha." };
+  await touch(found.campaign.id, actor);
+  await recordAudit({
+    event: "campaign.lead_added",
+    target: { type: AUDIT_TYPE, id: found.campaign.id, label: found.campaign.name },
+    after: { test: true, count: added, source: "manual" },
+  });
+  revalidate(found.campaign.id);
+  return { ok: true, info: "Lead de teste ligado à campanha. No chat de teste, o agente segue as regras dela." };
+}
+
 export async function removeLeadFromCampaign(campaignId: string, leadId: string): Promise<Result> {
   const actor = await requireCampaignActor();
   if (!actor.canEdit) return forbidden();

@@ -144,6 +144,42 @@ export async function loadReminderOverrides(
   return result;
 }
 
+/**
+ * Para a varredura de follow-up: leads cuja campanha em vigor desliga o
+ * follow-up. Mesma escolha do turno (a campanha em vigor mais recente, mesmo
+ * que ela deixe o follow-up ligado). Falha de leitura sobe: quem chama decide
+ * (o scan não envia a lead de campanha). A regra provisória de implantes não
+ * mexe no follow-up e fica de fora.
+ */
+export async function loadFollowUpOff(tenantIds: string[], now = new Date()): Promise<Set<string>> {
+  const result = new Set<string>();
+  if (!tenantIds.length) return result;
+  const links = await prisma.campaignLead.findMany({
+    where: { tenantId: { in: tenantIds }, campaign: candidateCampaignWhere(now) },
+    select: {
+      leadId: true,
+      assignedAt: true,
+      campaign: { select: { id: true, startsAt: true, endsAt: true, rules: true } },
+    },
+  });
+  const touched = new Set(links.filter((link) => !parseCampaignRules(link.campaign.rules).followUp).map((link) => link.leadId));
+  if (!touched.size) return result;
+  const byLead = new Map<string, typeof links>();
+  for (const link of links) {
+    if (touched.has(link.leadId)) byLead.set(link.leadId, [...(byLead.get(link.leadId) ?? []), link]);
+  }
+  const bookings = await prisma.appointment.findMany({
+    where: { leadId: { in: [...touched] }, status: "scheduled" },
+    select: { leadId: true, createdAt: true },
+  });
+  for (const [leadId, rows] of byLead) {
+    const own = bookings.filter((b) => b.leadId === leadId);
+    const chosen = pickCampaign(rows, now, (startsAt) => own.some((b) => b.createdAt >= startsAt));
+    if (chosen && !parseCampaignRules(chosen.campaign.rules).followUp) result.add(leadId);
+  }
+  return result;
+}
+
 /** Só as campanhas reais (sem a regra provisória de implantes). */
 export async function loadCampaignReminderOverrides(
   tenantIds: string[],
