@@ -138,6 +138,15 @@ export async function getCampaignOverrideForLead(tenantId: string, leadId: strin
   return (await campaignLeadMatches(tenantId, [leadId], now)).get(leadId)?.override ?? null;
 }
 
+/**
+ * Versão da agenda: a regra pela qual o lead é da campanha agora, ou null — mas
+ * **lança** quando o banco falha. A trava de horário (URG-02) não pode tratar
+ * "não consegui ler" como "não é da campanha": isso liberaria horário fora da regra.
+ */
+export async function getCampaignOverrideForLeadStrict(tenantId: string, leadId: string, now: Date = new Date()): Promise<CampaignOverride | null> {
+  return (await resolveCampaignLeadMatches(tenantId, [leadId], now)).get(leadId)?.override ?? null;
+}
+
 /** Origem do lead na campanha ("anúncio AD27", "disparo", "manual") ou null. Sem dado pessoal. */
 export async function campaignLeadOrigin(tenantId: string, leadId: string, now: Date = new Date()): Promise<CampaignLeadOrigin | null> {
   return (await campaignLeadMatches(tenantId, [leadId], now)).get(leadId)?.origin ?? null;

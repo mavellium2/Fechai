@@ -1,5 +1,6 @@
 import { blockReminder, claimReminder, finishReminder, markReminderManual, reminderAlreadyHandled, type ReminderKey } from "../../src/modules/scheduling/reminder-dispatch";
 import { loadReminderOverrides } from "../../src/modules/campaigns/active";
+import { overrideSuppressesReminder } from "../../src/modules/campaign-override/agent";
 import { recordMessageContext } from "../../src/modules/reports/contact-context-events";
 import { prisma } from "../../src/lib/prisma";
 import {
@@ -199,6 +200,10 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
   // confirmação automática do Clinicorp não sai (os personalizados valem para
   // as consultas do fechai). Não bloqueia: ao fim da campanha volta a valer.
   if (known && !options.operation) {
+    // Campanha de implantes (URG-03): a consulta marcada direto no Clinicorp não
+    // tem `Appointment` nosso, então a regra olha o lead pelo telefone. Só vale
+    // para consulta até o fim da regra (19/11); falha de leitura = não envia.
+    if (await overrideSuppressesReminder(tenantId, known.id, item.startsAt, now)) return { sent: false, reason: "campaign" };
     const campaign = (await loadReminderOverrides([tenantId], now)).get(known.id);
     if (campaign) return { sent: false, reason: "campaign" };
   }

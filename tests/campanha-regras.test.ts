@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
   campaignLead: { findMany: vi.fn(), updateMany: vi.fn() },
+  campaignOverride: { findMany: vi.fn() },
   $transaction: vi.fn(),
   appointmentReschedule: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn() },
   tenantAction: { findFirst: vi.fn(), findUnique: vi.fn() },
@@ -109,6 +110,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-11-13T12:00:00Z"));
   db.tenantAction.findFirst.mockResolvedValue({ config: cfg });
   db.campaignLead.findMany.mockResolvedValue([campaignLink(SORRISO)]);
+  db.campaignOverride.findMany.mockResolvedValue([]);
   db.campaignLead.updateMany.mockResolvedValue({ count: 1 });
   db.appointment.findFirst.mockResolvedValue(null);
   db.appointment.findMany.mockResolvedValue([]);

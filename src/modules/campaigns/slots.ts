@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isWithinBusinessHours, type ScheduleConfig } from "@/modules/scheduling/config";
 import { dayKeyInZone, parseLocalDateTime, timeInZone } from "@/modules/scheduling/time";
+import { isOverrideCampaignId, OVERRIDE_REFUSAL } from "@/modules/campaign-override/agent";
 import { findLeadCampaign, type LeadCampaign } from "./active";
 import { campaignSlotProblem, formatRuleDay, restrictsSchedule, timesFor, type CampaignRules } from "./rules";
 
@@ -25,6 +26,11 @@ export type SlotCheck = {
   /** Vaga de evento: o horário dispensa expediente e conflito de agenda. */
   eventSlot: boolean;
 };
+
+/** A frase da recusa por lotação (também usada pela trava de corrida da campanha de implantes). */
+export function slotFullProblem(day: string, time: string): string {
+  return `As vagas de ${formatRuleDay(day)} às ${time} da campanha estão esgotadas. Ofereça outra opção da campanha.`;
+}
 
 /** Quantos agendamentos já ocupam este instante (vaga de evento). */
 async function bookedAt(tenantId: string, startsAt: Date, ignoreId?: string): Promise<number> {
@@ -58,16 +64,13 @@ export async function checkCampaignSlot(input: {
   const day = dayKeyInZone(input.startsAt, input.timezone);
   const time = timeInZone(input.startsAt, input.timezone);
   const problem = campaignSlotProblem(rules, day, time);
-  if (problem) return { campaign, problem, eventSlot: false };
+  // Campanha de implantes: a recusa ao agente é a frase fixa do card.
+  if (problem) return { campaign, problem: isOverrideCampaignId(campaign.campaign.id) ? OVERRIDE_REFUSAL : problem, eventSlot: false };
 
   if (rules.capacity !== null && timesFor(rules, day).length) {
     const taken = await bookedAt(input.tenantId, input.startsAt, input.ignoreAppointmentId);
     if (taken >= rules.capacity) {
-      return {
-        campaign,
-        problem: `As vagas de ${formatRuleDay(day)} às ${time} da campanha estão esgotadas. Ofereça outra opção da campanha.`,
-        eventSlot: true,
-      };
+      return { campaign, problem: slotFullProblem(day, time), eventSlot: true };
     }
     return { campaign, problem: null, eventSlot: true };
   }
@@ -104,6 +107,8 @@ export async function campaignSlotsContext(input: {
   now?: Date;
   listFreeSlots: (date: string) => Promise<Date[]>;
   hasConflict: (startsAt: Date, endsAt: Date) => Promise<boolean>;
+  /** Chamado quando não sobra nenhuma vaga em nenhuma data (a campanha de implantes transfere aqui). */
+  onNoSlots?: () => Promise<void>;
 }): Promise<string> {
   const { cfg, rules } = input;
   const now = input.now ?? new Date();
@@ -143,6 +148,7 @@ export async function campaignSlotsContext(input: {
 
   const header = `Vagas da campanha "${input.campaignName}" (a regra da campanha vale para este contato; ofereça SOMENTE estas):`;
   if (!lines.length) {
+    await input.onNoSlots?.();
     return [
       header,
       "- Nenhuma vaga livre nas datas e horários da campanha.",

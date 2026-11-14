@@ -50,6 +50,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     campaignLead: { findMany: async () => [] },
+    campaignOverride: { findMany: async () => [] },
     mcpToken: { findUnique: mocks.tokenFindUnique, update: mocks.tokenUpdate },
     agent: { findFirst: mocks.agentFindFirst },
     lead: { findFirst: mocks.leadFindFirst, create: mocks.leadCreate, update: mocks.leadUpdate },

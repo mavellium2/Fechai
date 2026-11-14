@@ -24,7 +24,8 @@ import { LEAD_INSIGHT_TOOL, leadInsightToolResult, leadInsightToolSchema } from 
 import type { LeadCampaign } from "@/modules/campaigns/active";
 import { checkCampaignSlot, CampaignRuleError } from "@/modules/campaigns/slots";
 import { restrictsSchedule } from "@/modules/campaigns/rules";
-import { CAMPAIGN_HANDOFF, campaignOutsideReply, campaignSlotsForTool, queueCampaignMedia, SEND_CAMPAIGN_MEDIA } from "@/modules/campaigns/agent";
+import { CAMPAIGN_HANDOFF, campaignRefusalReply, campaignSlotsForTool, queueCampaignMedia, SEND_CAMPAIGN_MEDIA } from "@/modules/campaigns/agent";
+import { OverrideSlotFullError } from "@/modules/campaign-override/slot-lock";
 
 export type ToolContext = {
   tenantId: string;
@@ -141,7 +142,7 @@ async function registerUnanswered(ctx: ToolContext, question: unknown) {
  * chama a tool de novo. Usada por `handoff_human` e pela regra "passar para a
  * equipe" das perguntas sem resposta.
  */
-async function transferToHuman(ctx: ToolContext, reason?: string) {
+export async function transferToHuman(ctx: ToolContext, reason?: string) {
   const marked = await prisma.conversation.updateMany({
     where: { id: ctx.conversationId, tenantId: ctx.tenantId, needsHuman: false },
     data: { needsHuman: true },
@@ -363,7 +364,7 @@ const TOOLS: Record<ActionKey, ToolDef> = {
         tenantId: ctx.tenantId, leadId: ctx.leadId, startsAt, timezone: cfg.timezone, campaign: ctx.campaign,
       });
       if (ctx.campaign === undefined) ctx.campaign = slot.campaign;
-      if (slot.problem) return campaignOutsideReply(ctx, slot.problem);
+      if (slot.problem) return campaignRefusalReply(ctx, cfg, slot.problem, slot.eventSlot, date);
 
       // A variação escolhida muda o tamanho do bloco, então entra ANTES da
       // checagem de expediente e de conflito: uma limpeza de 30 min cabe às
@@ -441,7 +442,7 @@ const TOOLS: Record<ActionKey, ToolDef> = {
       } catch (err) {
         // A trava do backend (`createAppointment`) recusou: a vaga lotou entre
         // a checagem e a gravação, ou a regra mudou no meio do turno.
-        if (err instanceof CampaignRuleError) return campaignOutsideReply(ctx, err.message);
+        if (err instanceof CampaignRuleError) return campaignRefusalReply(ctx, cfg, err.message, err instanceof OverrideSlotFullError, date);
         throw err;
       }
 

@@ -6,7 +6,7 @@ import type { ToolContext } from "./tools";
 import { relativeDayLabel } from "./time-context";
 import { describeRanges, getWeeklyAvailability } from "@/modules/scheduling/weekly-availability";
 import { clinicorpConfirmationPending } from "@/modules/scheduling/clinicorp";
-import { campaignOutsideReply, campaignSlotsForTool } from "@/modules/campaigns/agent";
+import { campaignRefusalReply, campaignSlotsForTool } from "@/modules/campaigns/agent";
 import { findLeadCampaign } from "@/modules/campaigns/active";
 import { restrictsSchedule } from "@/modules/campaigns/rules";
 import { checkCampaignSlot } from "@/modules/campaigns/slots";
@@ -288,7 +288,7 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
     ignoreAppointmentId: appointment.id, campaign: ctx.campaign,
   });
   if (ctx.campaign === undefined) ctx.campaign = slot.campaign;
-  if (slot.problem) return `${campaignOutsideReply(ctx, slot.problem)} O horário original continua reservado.`;
+  if (slot.problem) return `${await campaignRefusalReply(ctx, cfg, slot.problem, slot.eventSlot, dayKeyInZone(startsAt, cfg.timezone))} O horário original continua reservado.`;
   if (!slot.eventSlot && !isWithinBusinessHours(startsAt, { ...cfg, durationMinutes })) return "O novo horário fica fora do expediente ou atravessa uma pausa. O horário original continua reservado. Combine outro horário.";
   if (ctx.dryRun) {
     // Mesma checagem de conflito da remarcação real (ignora a própria consulta
@@ -302,7 +302,7 @@ export async function runSchedulingTool(name: string, ctx: ToolContext, args: Re
   const result = await rescheduleAppointment({
     tenantId: ctx.tenantId, leadId: ctx.leadId, id: appointment.id, startsAt, timezone: cfg.timezone, eventSlot: slot.eventSlot,
   });
-  if (result.status === "campaign_rule") return `${campaignOutsideReply(ctx, result.reason)} O horário original continua reservado.`;
+  if (result.status === "campaign_rule") return `${await campaignRefusalReply(ctx, cfg, result.reason, result.full, dayKeyInZone(startsAt, cfg.timezone))} O horário original continua reservado.`;
   if (result.status === "conflict") {
     if (ctx.campaign && restrictsSchedule(ctx.campaign.rules)) {
       return `Esse horário está ocupado. O horário original continua reservado. ${await campaignSlotsForTool(ctx, cfg, dayKeyInZone(startsAt, cfg.timezone))}`;
