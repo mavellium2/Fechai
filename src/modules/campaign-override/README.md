@@ -45,7 +45,7 @@ lembretes (`loadReminderOverrides`) valem sem mudar um chamador. Fim sem cron: d
   implantes, só 18 ou 19/11 com chegada às 09h00. Ofereça essas opções." (`OVERRIDE_REFUSAL`).
   A equipe marcando à mão (`source: "manual"`) não passa pela trava, como nas campanhas.
 - **Falha de leitura** da regra na agenda **lança** (`getCampaignOverrideForLeadStrict`): a tool
-  responde "falha ao executar" e nada é gravado — nunca libera horário. No prompt vira "sem campanha".
+  devolve `Falha ao executar <tool>.` e nada é gravado — nunca libera horário. No prompt vira "sem campanha".
   Como `findLeadCampaign` consulta o override para todo lead sem `Campaign` real, se a leitura do override
   falhar as tools de agenda falham para **todos** os leads (lado seguro, decisão do projeto).
 - **Vagas por dia** (um horário por dia, então vaga por horário = vaga por dia), no lugar do
@@ -68,7 +68,12 @@ lembretes (`loadReminderOverrides`) valem sem mudar um chamador. Fim sem cron: d
   próxima volta). Consulta só do Clinicorp (sem `Appointment`) é achada pelo telefone do lead e pulada
   (`overrideSuppressesReminder`, motivo `campaign`, só se a consulta é até o fim da regra; falha de leitura
   também pula). O aviso do mesmo dia é o mesmo caminho (lembrete de poucas horas); não há outro.
-  Envio manual da recepção (botão da `/agenda`) segue sendo escolha humana. Follow-up de quem não agendou não muda.
+  **Envio e marcação manual pela `/agenda` não saem para consulta local com `[]`**: `remindersFor` devolve
+  `[]` antes de considerar o envio manual (`scanAndSendReminders`, `if (rules.length === 0) continue`), e a
+  tela mostra "Não foi possível enviar…" (ou o motivo gravado no último disparo, "campanha implantes", nas
+  consultas que o script limpou). A recepção confirma por fora (telefone ou WhatsApp). Consulta só do
+  Clinicorp (sem `Appointment` local) passa pela confirmação manual, porque o manual pula a checagem da
+  campanha em `sendClinicorpConfirmation`. Follow-up de quem não agendou não muda.
 - **Consultas que já existiam**: `scripts/campanha-implantes-lembretes.ts --tenant ID` simula;
   `--apply --actor USER` grava `reminderOverride = []` nas consultas futuras de leads da campanha e passa os
   `ReminderDispatch` `queued` delas para `skipped` ("campanha implantes"). Auditoria
@@ -129,9 +134,15 @@ Em `campanha-override.ts` é obrigatório com `--apply`. Em `campanha-implantes-
    dois processos (web e worker). Não use `--accept-data-loss`; se o Prisma pedir essa
    flag, pare e confira o SQL do diff.
 2. Sem variável de ambiente nova e sem feature flag.
-3. Criar a regra e configurar a conta (comandos acima): `--create --apply --actor USER`,
-   depois `--set-codes`, `--set-broadcasts`, `--set-capacity`, `--set-offer` e `--add-lead`.
-4. Conferir com `--show`.
+3. Criar a regra: `--create --apply --actor USER`. **`--create` põe a regra no ar na hora** (`startsAt`
+   = agora). Sem código, disparo nem lead ela não afeta ninguém, mas assim que um desses entra, vale.
+4. **Capacidade antes de tudo que coloca lead na regra**: `--set-capacity N --apply --actor USER` vem
+   antes de `--set-codes`, `--set-broadcasts` e `--add-lead`. Sem capacidade a agenda recusa e transfere.
+5. Depois: `--set-codes`, `--set-broadcasts`, `--set-offer` e `--add-lead` (comandos acima).
+6. Consultas já marcadas de leads da campanha: `npx tsx scripts/campanha-implantes-lembretes.ts --tenant ID`
+   simula (sem `--apply` não grava nada); com `--apply --actor USER` grava `[]` e dispensa os disparos
+   pendentes. Só acha consultas enquanto a regra vale: depois de 19/11 23:59:59 não encontra mais nada.
+7. Conferir com `--show`.
 
 ## Como testar
 
@@ -151,6 +162,11 @@ Clinicorp. O Prisma é mockado, então não precisam de banco. Em conta real, a 
   tem como saber que é da campanha e segue lembrando.
 - Lead da campanha com consulta local e consulta só no Clinicorp: o lembrete do Clinicorp é pulado
   também enquanto a regra vale e a consulta é até 19/11 (suprime por lead, não por consulta).
+- Marcação manual (`createAppointment`, `repository.ts`, ~l. 226) usa `getCampaignOverrideForLead`, que
+  **nunca lança** e vira `null` em erro. Se a leitura do override falhar naquela hora, a consulta criada à
+  mão **não ganha `[]`**. O automático segue barrado pela regra de campanha do worker (lembrete `off` do
+  lead, que vale enquanto o worker lê a regra; sem leitura ele não envia). A diferença real é o botão manual
+  da `/agenda`, que nessa consulta passa a enviar (escolha humana).
 
 ## Remoção (depois de 19/11/2026)
 

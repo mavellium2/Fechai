@@ -29,3 +29,6 @@ Não há Server Action deste módulo: a escrita sai de scripts (`npx tsx`) e a a
 ## Tools da agenda (`list_available_slots`, `schedule_meeting`, `reschedule_meeting`)
 - **Recusa:** `campaignRefusalReply` — lotado com o outro dia livre, devolve as vagas do outro dia; sem vaga em nenhum dos dois, `transferToHuman` (não roda na simulação `dryRun`).
 - **Erro comum:** leitura da regra falha → tool devolve `Falha ao executar <tool>.`; nada é gravado.
+
+## Envio manual pela /agenda (`reminders.ts`, com `target`)
+- **Consulta local com `reminderOverride = []`:** envio e marcação manual não saem (`remindersFor` devolve `[]`); a recepção confirma por fora. Consulta só do Clinicorp passa (o manual pula a checagem da campanha).
