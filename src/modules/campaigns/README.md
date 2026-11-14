@@ -50,6 +50,26 @@ extensão depois do fim para quem já agendou.
 - **Transbordo:** com `outside: "handoff"` e sem `handoff_human` ligado no
   agente, o turno ganha `campaign_handoff` (mesmo `transferToHuman`).
 
+## Follow-up, Clinicorp, instruções e prévia (CMP-03)
+
+Tudo em `Campaign.rules`, sem schema novo. Linha antiga sem os campos = comportamento de sempre.
+
+- **Follow-up** (`followUp`, padrão `true`): desligado, o scan do worker pula o
+  lead da campanha em vigor (`loadFollowUpOff`) **sem marcar a etapa**; o fim da
+  campanha devolve a esteira (etapa velha não sai, `isStale`). Se a leitura das
+  campanhas falhar, a volta não envia nada.
+- **Clinicorp** (`clinicorp.mode`: `default` ou `off`): `off` não espelha a
+  consulta no Clinicorp (agendar e remarcar pelo agente). Não grava
+  `reminderOverride`: o lembrete é suspenso pelo worker e expira com a campanha.
+  Escolha de profissional não existe.
+- **Instruções extras** entram no prompt entre marcas, como conteúdo da clínica
+  que **não altera datas, horários, vagas nem travas**. A trava é do servidor.
+- **Prévia** (`prompt-preview.ts`): o mesmo `campaignRulesPrompt` do turno, só
+  leitura, nas telas de agenda e de fala.
+- **Lead de teste** (`linkTestLeadToCampaign`): botão no passo de agenda liga o
+  lead do chat de teste à campanha (origem manual). Só por clique; relatórios
+  ignoram `isTest`. O chat de teste precisa já ter sido aberto.
+
 ## Agente da campanha (`agent-routing.ts`)
 
 `Campaign.agentId` atende os leads da campanha **enquanto ela vale** (mesma
