@@ -52,23 +52,37 @@ extensão depois do fim para quem já agendou.
 
 ## Follow-up, Clinicorp, instruções e prévia (CMP-03)
 
-Tudo em `Campaign.rules`, sem schema novo. Linha antiga sem os campos = comportamento de sempre.
+Tudo em `Campaign.rules`, sem schema novo e sem migração. Linha antiga sem os
+campos = comportamento de sempre: follow-up ligado, Clinicorp padrão, sem instruções.
 
 - **Follow-up** (`followUp`, padrão `true`): desligado, o scan do worker pula o
   lead da campanha em vigor (`loadFollowUpOff`) **sem marcar a etapa**; o fim da
-  campanha devolve a esteira (etapa velha não sai, `isStale`). Se a leitura das
-  campanhas falhar, a volta não envia nada.
+  campanha devolve a esteira (etapa velha não sai, `isStale`). Se ler as
+  campanhas falhar, só as contas com alguma campanha que pode valer agora ficam
+  sem envio nesta volta (`loadTenantsWithCampaign`); se nem isso der para ler, a
+  volta não envia nada.
 - **Clinicorp** (`clinicorp.mode`: `default` ou `off`): `off` não espelha a
-  consulta no Clinicorp (agendar e remarcar pelo agente). Não grava
-  `reminderOverride`: o lembrete é suspenso pelo worker e expira com a campanha.
-  Escolha de profissional não existe.
+  consulta nova (`skipped`, ao agendar e ao remarcar pelo agente). Não mexe em
+  lembrete: a consulta segue a regra de lembretes da campanha e da conta, como
+  qualquer consulta só do Fechai. **Remarcar** uma consulta que já estava no
+  Clinicorp com `off` tenta cancelar a antiga lá e não cria a nova; a recepção
+  lança à mão. Escolha de profissional não existe.
+- **Vagas** continuam por horário; vaga por dia fica para o CMP-04.
 - **Instruções extras** entram no prompt entre marcas, como conteúdo da clínica
-  que **não altera datas, horários, vagas nem travas**. A trava é do servidor.
+  que **não altera datas, horários, vagas nem travas**. Texto que tenta fechar a
+  moldura (`FIM DAS INSTRUÇÕES DA CLÍNICA`, `>>>`) é limpo antes. A trava é do servidor.
 - **Prévia** (`prompt-preview.ts`): o mesmo `campaignRulesPrompt` do turno, só
-  leitura, nas telas de agenda e de fala.
-- **Lead de teste** (`linkTestLeadToCampaign`): botão no passo de agenda liga o
-  lead do chat de teste à campanha (origem manual). Só por clique; relatórios
-  ignoram `isTest`. O chat de teste precisa já ter sido aberto.
+  leitura, nos passos "Quem atende" e "Agenda da campanha".
+- **Lead de teste** (`linkTestLeadToCampaign`): o botão "Usar o lead de teste
+  desta campanha", no passo Agenda, liga o lead do chat de teste da conta à
+  campanha (origem manual). Só por clique; o chat de teste precisa ter sido
+  aberto ao menos uma vez. Relatórios ignoram `isTest`.
+
+**Configurar:** campanha › "Agenda da campanha" (follow-up automático e consulta
+no Clinicorp) e "Quem atende" (instruções extras). Quem salva precisa de
+`canEdit`.
+
+**Testar:** `npx vitest run tests/campanha-regras.test.ts tests/campanha-regras-aceite.test.ts tests/campanha-followup.test.ts tests/campanha-entidade-ui.test.ts tests/follow-up-agendamento.test.ts` (Prisma mockado, sem banco).
 
 ## Agente da campanha (`agent-routing.ts`)
 
