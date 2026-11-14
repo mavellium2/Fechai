@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { assertCampaignSlot, checkCampaignSlot } from "@/modules/campaigns/slots";
+import { assertCampaignSlot, checkCampaignSlot, type SlotCheck } from "@/modules/campaigns/slots";
+import { isOverrideCampaignId } from "@/modules/campaign-override/agent";
+import { getCampaignOverrideForLead } from "@/modules/campaign-override/lead";
+import { OverrideSlotFullError, overrideSlotCapacity, withOverrideSlotLock } from "@/modules/campaign-override/slot-lock";
 import { Prisma } from "@prisma/client";
 import { AvailabilityUnavailableError } from "./availability-error";
 import { isWithinBusinessHours, parseScheduleConfig, slotStartTimes, type ScheduleConfig } from "./config";
@@ -9,6 +12,7 @@ import {
   hasClinicorpConflict,
   listClinicorpBusyBlocks,
   pushAppointmentToClinicorp,
+  type ClinicorpSyncResult,
 } from "./clinicorp";
 import { dayKeyInZone, monthRangeUtc, parseLocalDateTime, partsInZone, timeInZone, zonedTimeToUtc } from "./time";
 import { canConfirm, canMarkAttendance, type AppointmentKind, type Attendance } from "./dimensions";
@@ -209,30 +213,45 @@ export async function createAppointment(input: CreateAppointmentInput) {
   // Regra da campanha do lead (datas, horários, vagas): trava do backend.
   // Vale para tudo que não é a equipe marcando à mão no painel — a equipe é
   // justamente quem atende o lead que não pôde nas datas da campanha.
+  let slot: SlotCheck | null = null;
   if (input.source !== "manual") {
-    await assertCampaignSlot({ tenantId: input.tenantId, leadId: input.leadId, startsAt: input.startsAt, timezone: input.timezone });
+    slot = await assertCampaignSlot({ tenantId: input.tenantId, leadId: input.leadId, startsAt: input.startsAt, timezone: input.timezone });
   }
+  // Campanha de implantes (regra provisória): consulta marcada nas vagas do evento
+  // não é espelhada no Clinicorp (a recepção lança à mão) e nunca recebe lembrete.
+  // A equipe marcando à mão não passa pela trava, mas o lead da campanha segue sem lembrete.
+  const overrideSlot = slot ? isOverrideCampaignId(slot.campaign?.campaign.id) : false;
+  // Marcação manual: o `[]` só vale até o fim da regra (19/11); consulta depois disso (ex.: 10/12) segue o agente.
+  // No caminho do agente o `[]` é só do slot do override (sempre dentro das datas da regra).
+  const manualOverride = slot === null && input.leadId ? await getCampaignOverrideForLead(input.tenantId, input.leadId) : null;
+  const campaignLead = overrideSlot || (manualOverride !== null && input.startsAt.getTime() <= manualOverride.endsAt.getTime());
+  const overrideCapacity = slot ? overrideSlotCapacity(slot) : null;
 
-  const appointment = await prisma.appointment.create({
-    data: {
-      tenantId: input.tenantId,
-      agentId: input.agentId ?? null,
-      leadId: input.leadId ?? null,
-      conversationId: input.conversationId ?? null,
-      title: input.title,
-      patientName: input.patientName ?? null,
-      notes: input.notes ?? null,
-      startsAt: input.startsAt,
-      endsAt,
-      source: input.source,
-      serviceType: input.serviceType ?? null,
-      kind: input.kind ?? null,
-      procedure: input.procedure?.trim() || null,
-      // Não deixe o worker enviar lembrete enquanto a tentativa ainda está
-      // aguardando a resposta que pode recusá-la por conflito.
-      reminderOverride: [],
-    },
-  });
+  const data = {
+    tenantId: input.tenantId,
+    agentId: input.agentId ?? null,
+    leadId: input.leadId ?? null,
+    conversationId: input.conversationId ?? null,
+    title: input.title,
+    patientName: input.patientName ?? null,
+    notes: input.notes ?? null,
+    startsAt: input.startsAt,
+    endsAt,
+    source: input.source,
+    serviceType: input.serviceType ?? null,
+    kind: input.kind ?? null,
+    procedure: input.procedure?.trim() || null,
+    // Não deixe o worker enviar lembrete enquanto a tentativa ainda está
+    // aguardando a resposta que pode recusá-la por conflito.
+    reminderOverride: [],
+  };
+  // Vaga da campanha de implantes: contar e criar na mesma transação, travada por horário.
+  const appointment = overrideCapacity !== null
+    ? await withOverrideSlotLock(
+        { tenantId: input.tenantId, startsAt: input.startsAt, capacity: overrideCapacity, timezone: input.timezone },
+        (tx) => tx.appointment.create({ data }),
+      )
+    : await prisma.appointment.create({ data });
 
   // O Clinicorp liga o horário ao cadastro do paciente pelo telefone, então
   // precisa do contato — o Google não usa nada disso.
@@ -244,7 +263,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
 
   // Uma recusa explícita por conflito é diferente de uma falha do espelho:
   // essa tentativa não pode ficar como consulta marcada nem ir para o Google.
-  const clinicorpSync = await syncAppointmentToClinicorp(input.tenantId, appointment.id, {
+  const clinicorpSync: ClinicorpSyncResult = overrideSlot ? { status: "skipped" } : await syncAppointmentToClinicorp(input.tenantId, appointment.id, {
     title: input.title,
     patientName: input.patientName,
     notes: input.notes,
@@ -293,14 +312,15 @@ export async function createAppointment(input: CreateAppointmentInput) {
   await prisma.appointment.update({
     where: { id: appointment.id },
     data: {
-      reminderOverride: Prisma.DbNull,
+      // Lead da campanha de implantes: o `[]` fica ("esta consulta não recebe nada").
+      reminderOverride: campaignLead ? [] : Prisma.DbNull,
       ...(googleEventId ? { googleEventId } : {}),
       ...(clinicorpAppointmentId ? { clinicorpAppointmentId } : {}),
       ...(icloudEventUrl ? { icloudEventUrl } : {}),
     },
   });
 
-  return { ...appointment, reminderOverride: null, googleEventId, clinicorpAppointmentId, icloudEventUrl, clinicorpSync };
+  return { ...appointment, reminderOverride: campaignLead ? [] : null, googleEventId, clinicorpAppointmentId, icloudEventUrl, clinicorpSync };
 }
 
 export async function cancelAppointment(tenantId: string, id: string, leadId?: string, options: {
@@ -362,18 +382,22 @@ export async function rescheduleAppointment(input: {
   const slot = await checkCampaignSlot({
     tenantId: input.tenantId, leadId: input.leadId, startsAt: input.startsAt, timezone: input.timezone, ignoreAppointmentId: previous.id,
   });
-  if (slot.problem) return { status: "campaign_rule", reason: slot.problem } as const;
+  if (slot.problem) return { status: "campaign_rule", reason: slot.problem, full: slot.eventSlot } as const;
   if (!slot.eventSlot && await hasConflictAnywhere(input.tenantId, input.startsAt, endsAt, input.timezone, previous.id, previous.clinicorpAppointmentId ?? undefined)) {
     return { status: "conflict" } as const;
   }
+  // Campanha de implantes (regra provisória): sem espelho no Clinicorp, sem lembrete,
+  // e a vaga é conferida de novo sob o lock do horário, na mesma transação da troca.
+  const overrideSlot = isOverrideCampaignId(slot.campaign?.campaign.id);
+  const overrideCapacity = overrideSlotCapacity(slot);
   const changedAt = new Date();
-  const history = await prisma.$transaction(async (tx) => {
+  const move = async (tx: Prisma.TransactionClient) => {
     const changed = await tx.appointment.updateMany({
       where: { id: previous.id, tenantId: input.tenantId, leadId: input.leadId, status: "scheduled", startsAt: previous.startsAt, endsAt: previous.endsAt,
         notes: previous.notes, rescheduledAt: previous.rescheduledAt },
       // Confirmação e lembretes enviados eram do horário antigo.
       data: { startsAt: input.startsAt, endsAt, rescheduledAt: changedAt, confirmedAt: null, confirmationSource: null,
-        remindersSent: { set: [] }, reminderSentAt: null },
+        remindersSent: { set: [] }, reminderSentAt: null, ...(overrideSlot ? { reminderOverride: [] } : {}) },
     });
     if (!changed.count) return null;
     return tx.appointmentReschedule.create({ data: {
@@ -383,8 +407,21 @@ export async function rescheduleAppointment(input: {
       notes: previous.notes, clinicorpAppointmentId: previous.clinicorpAppointmentId,
       createdAt: changedAt,
     } });
-  });
+  };
+  let history: Awaited<ReturnType<typeof move>>;
+  try {
+    history = overrideCapacity !== null
+      ? await withOverrideSlotLock(
+          { tenantId: input.tenantId, startsAt: input.startsAt, capacity: overrideCapacity, timezone: input.timezone, ignoreAppointmentId: previous.id },
+          move,
+        )
+      : await prisma.$transaction(move);
+  } catch (err) {
+    if (err instanceof OverrideSlotFullError) return { status: "campaign_rule", reason: err.message, full: true } as const;
+    throw err;
+  }
   if (!history) return { status: "unavailable" } as const;
+  const historyId = history.id;
 
   // A alteração local já está confirmada. Espelhos são opcionais e nunca lançam.
   const [googleRemoved, clinicorpRemoved] = await Promise.all([
@@ -397,7 +434,7 @@ export async function rescheduleAppointment(input: {
   const event = { title: previous.title, startsAt: input.startsAt, endsAt, timeZone: input.timezone };
   const [googleEventId, clinicorpSync] = await Promise.all([
     googleRemoved ? pushEventToGoogle(input.tenantId, { ...event, description: previous.notes ?? undefined }) : Promise.resolve(previous.googleEventId),
-    clinicorpRemoved ? pushAppointmentToClinicorp(input.tenantId, {
+    overrideSlot ? Promise.resolve({ status: "skipped" } as const) : clinicorpRemoved ? pushAppointmentToClinicorp(input.tenantId, {
       ...event,
       patientName: previous.patientName ?? undefined,
       notes: previous.notes,
@@ -424,7 +461,7 @@ export async function rescheduleAppointment(input: {
           remindersSent: { set: previous.remindersSent }, reminderSentAt: previous.reminderSentAt,
         },
       });
-      if (changed.count) await tx.appointmentReschedule.deleteMany({ where: { id: history.id, tenantId: input.tenantId, appointmentId: previous.id } });
+      if (changed.count) await tx.appointmentReschedule.deleteMany({ where: { id: historyId, tenantId: input.tenantId, appointmentId: previous.id } });
       return changed;
     });
     if (!reverted.count) return { status: "unavailable" } as const;

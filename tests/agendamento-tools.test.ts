@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   // Sem campanha: o lead segue a agenda normal (ver modules/campaigns/active.ts).
   campaignLead: { findMany: async () => [] },
+  campaignOverride: { findMany: async () => [] },
   $transaction: vi.fn(),
   appointmentReschedule: { create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn() },
   tenantAction: { findFirst: vi.fn(), findUnique: vi.fn() },

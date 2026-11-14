@@ -1,5 +1,6 @@
 import type { Campaign, CampaignAsset } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { loadOverrideReminderRules, overrideAsLeadCampaign } from "@/modules/campaign-override/agent";
 import { parseCampaignRules, type CampaignRules } from "./rules";
 
 /**
@@ -17,6 +18,10 @@ import { parseCampaignRules, type CampaignRules } from "./rules";
  *
  * Quando várias valem, ganha a de atribuição mais recente. Teste não tem
  * exceção: o chat de teste usa a mesma regra para o dono conferir a campanha.
+ *
+ * Sem campanha real, vale a regra provisória da campanha de implantes
+ * (`campaign-override`, URG-02/03), vestida de campanha sintética: uma
+ * `Campaign` real ligada ao lead sempre vence.
  *
  * Nada aqui grava, e o fim da campanha não precisa de cron: passou da data (e
  * da extensão), a consulta simplesmente deixa de devolvê-la e o lead volta ao
@@ -105,7 +110,7 @@ export async function findLeadCampaign(tenantId: string, leadId: string, now = n
       },
     },
   });
-  if (!links.length) return null;
+  if (!links.length) return overrideAsLeadCampaign(tenantId, leadId, now);
 
   // Só vai ao banco atrás de consulta quando alguma campanha já terminou.
   const ended = links.some((link) => link.campaign.endsAt && link.campaign.endsAt < now);
@@ -116,7 +121,7 @@ export async function findLeadCampaign(tenantId: string, leadId: string, now = n
       })
     : [];
   const chosen = pickCampaign(links, now, (startsAt) => bookings.some((b) => b.createdAt >= startsAt));
-  if (!chosen) return null;
+  if (!chosen) return overrideAsLeadCampaign(tenantId, leadId, now);
   const { rules, assets, ...campaign } = chosen.campaign;
   return { campaign, rules: parseCampaignRules(rules), assets, sentAssetIds: chosen.sentAssetIds };
 }
@@ -129,6 +134,20 @@ export async function findLeadCampaign(tenantId: string, leadId: string, now = n
 export async function loadReminderOverrides(
   tenantIds: string[],
   now = new Date(),
+): Promise<Map<string, CampaignRules>> {
+  const result = await loadCampaignReminderOverrides(tenantIds, now);
+  // Campanha de implantes: lembretes desligados. A campanha real do lead (que
+  // mexe nos lembretes) vence; falha de leitura sobe, como a das campanhas.
+  for (const [leadId, rules] of await loadOverrideReminderRules(tenantIds, now)) {
+    if (!result.has(leadId)) result.set(leadId, rules);
+  }
+  return result;
+}
+
+/** Só as campanhas reais (sem a regra provisória de implantes). */
+export async function loadCampaignReminderOverrides(
+  tenantIds: string[],
+  now: Date,
 ): Promise<Map<string, CampaignRules>> {
   const result = new Map<string, CampaignRules>();
   if (!tenantIds.length) return result;

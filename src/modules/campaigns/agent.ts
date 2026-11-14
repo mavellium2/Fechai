@@ -1,5 +1,6 @@
 import type { LlmToolSchema } from "@/modules/ai";
 import { prisma } from "@/lib/prisma";
+import { isOverrideCampaignId } from "@/modules/campaign-override/agent";
 import type { ScheduleConfig } from "@/modules/scheduling/config";
 import { hasConflictAnywhere, listFreeSlots } from "@/modules/scheduling/repository";
 import type { ToolContext } from "@/modules/agent-engine/tools";
@@ -40,11 +41,32 @@ export async function campaignSlotsForTool(ctx: ToolContext, cfg: ScheduleConfig
       days,
       listFreeSlots: (date) => listFreeSlots(ctx.tenantId, cfg, date),
       hasConflict: (startsAt, endsAt) => hasConflictAnywhere(ctx.tenantId, startsAt, endsAt, cfg.timezone),
+      // Campanha de implantes sem vaga em nenhum dos dois dias: a conversa vai
+      // para a equipe pelo mesmo transbordo de sempre, sem depender de a IA pedir.
+      // (As `Campaign` reais seguem como antes: só o texto manda transferir.)
+      onNoSlots: isOverrideCampaignId(campaign.campaign.id) && campaign.rules.outside === "handoff" && !ctx.dryRun
+        ? async () => {
+            const { transferToHuman } = await import("@/modules/agent-engine/tools");
+            await transferToHuman(ctx, "Campanha de implantes: sem vaga em 18 ou 19/11");
+          }
+        : undefined,
     });
   } catch (err) {
     console.error("[campanhas] vagas da campanha indisponíveis", err);
     return `Não consegui conferir as vagas agora. As opções da campanha são: ${describeAllowedSlots(campaign.rules)}. Não confirme horário sem conferir.`;
   }
+}
+
+/**
+ * A recusa da regra com a saída certa. Na campanha de implantes, quando o
+ * horário recusado era uma vaga lotada, já devolve as vagas que sobraram (o
+ * outro dia) ou, sem nenhuma, transfere — "esgotado um dia, oferece o outro".
+ * `full` = a recusa foi por lotação. As `Campaign` reais não mudam.
+ */
+export async function campaignRefusalReply(ctx: ToolContext, cfg: ScheduleConfig, problem: string, full: boolean, date: string): Promise<string> {
+  const reply = campaignOutsideReply(ctx, problem);
+  if (!full || !isOverrideCampaignId(ctx.campaign?.campaign.id)) return reply;
+  return `${reply}\n${await campaignSlotsForTool(ctx, cfg, date)}`;
 }
 
 export const SEND_CAMPAIGN_MEDIA = "send_campaign_media";

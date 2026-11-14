@@ -9,7 +9,10 @@ import { buildRescheduleWorkbook, listRescheduleCandidates, rescheduleFileName }
  * Lista para a recepção da campanha de implantes (URG-04): consultas futuras de leads da campanha
  * fora dos dias 18 e 19/11 às 9h, que precisam ser reagendadas. SÓ LEITURA.
  *
- *   npx tsx scripts/campanha-implantes-reagendar.ts --tenant <id> [--out caminho] [--actor <userId>] [--no-audit]
+ *   npx tsx scripts/campanha-implantes-reagendar.ts --tenant <id> [--out caminho] [--actor <userId>] [--no-audit] [--evento]
+ *
+ * `--evento` lista TAMBÉM as consultas que já estão em 18 ou 19/11 às 9h: as marcadas pela regra da
+ * campanha não são espelhadas no Clinicorp, e a recepção as lança à mão (coluna "O que fazer").
  *
  * Grava a planilha (por padrão em out/, que o git ignora) e mostra no terminal SÓ a quantidade e o
  * caminho. A planilha tem nome e telefone e é só para a clínica. Nenhuma tabela é alterada; a única
@@ -23,7 +26,7 @@ const one = (name: string) => {
 
 async function main() {
   const tenantId = one("tenant");
-  if (!tenantId) throw new Error("Uso: npx tsx scripts/campanha-implantes-reagendar.ts --tenant <id> [--out caminho] [--actor <userId>] [--no-audit]");
+  if (!tenantId) throw new Error("Uso: npx tsx scripts/campanha-implantes-reagendar.ts --tenant <id> [--out caminho] [--actor <userId>] [--no-audit] [--evento]");
 
   // Ator inválido recusa antes de gerar qualquer arquivo.
   const audit = !args.includes("--no-audit");
@@ -36,13 +39,16 @@ async function main() {
   }
 
   const now = new Date();
-  const rows = await listRescheduleCandidates(tenantId, now);
+  const includeEvent = args.includes("--evento");
+  const rows = await listRescheduleCandidates(tenantId, now, undefined, { includeEvent });
 
   const out = one("out");
   const file = out?.toLowerCase().endsWith(".xlsx") ? path.resolve(out) : path.resolve(out ?? "out", rescheduleFileName(now));
   await mkdir(path.dirname(file), { recursive: true });
-  await buildRescheduleWorkbook(rows).xlsx.writeFile(file);
-  console.log(`${rows.length} consulta(s) para reagendar.`);
+  await buildRescheduleWorkbook(rows, { withEvent: includeEvent }).xlsx.writeFile(file);
+  console.log(includeEvent
+    ? `${rows.length} consulta(s) da campanha, ${rows.filter((r) => r.inEvent).length} delas no evento (lançar à mão no Clinicorp).`
+    : `${rows.length} consulta(s) para reagendar.`);
   console.log(`Arquivo: ${file}`);
 
   if (!audit) return;
