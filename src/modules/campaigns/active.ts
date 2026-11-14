@@ -151,11 +151,11 @@ export async function loadReminderOverrides(
  * (o scan não envia a lead de campanha). A regra provisória de implantes não
  * mexe no follow-up e fica de fora.
  */
-export async function loadFollowUpOff(tenantIds: string[], now = new Date()): Promise<Set<string>> {
+export async function loadFollowUpOff(tenantIds: string[], leadIds: string[], now = new Date()): Promise<Set<string>> {
   const result = new Set<string>();
-  if (!tenantIds.length) return result;
+  if (!tenantIds.length || !leadIds.length) return result;
   const links = await prisma.campaignLead.findMany({
-    where: { tenantId: { in: tenantIds }, campaign: candidateCampaignWhere(now) },
+    where: { tenantId: { in: tenantIds }, leadId: { in: leadIds }, campaign: candidateCampaignWhere(now) },
     select: {
       leadId: true,
       assignedAt: true,
@@ -169,7 +169,7 @@ export async function loadFollowUpOff(tenantIds: string[], now = new Date()): Pr
     if (touched.has(link.leadId)) byLead.set(link.leadId, [...(byLead.get(link.leadId) ?? []), link]);
   }
   const bookings = await prisma.appointment.findMany({
-    where: { leadId: { in: [...touched] }, status: "scheduled" },
+    where: { tenantId: { in: tenantIds }, leadId: { in: [...touched] }, status: "scheduled" },
     select: { leadId: true, createdAt: true },
   });
   for (const [leadId, rows] of byLead) {
@@ -178,6 +178,17 @@ export async function loadFollowUpOff(tenantIds: string[], now = new Date()): Pr
     if (chosen && !parseCampaignRules(chosen.campaign.rules).followUp) result.add(leadId);
   }
   return result;
+}
+
+/** Contas com alguma campanha que pode valer agora (consulta barata, para o lado seguro do scan). */
+export async function loadTenantsWithCampaign(tenantIds: string[], now = new Date()): Promise<Set<string>> {
+  if (!tenantIds.length) return new Set();
+  const rows = await prisma.campaign.findMany({
+    where: { tenantId: { in: tenantIds }, ...candidateCampaignWhere(now) },
+    select: { tenantId: true },
+    distinct: ["tenantId"],
+  });
+  return new Set(rows.map((row) => row.tenantId));
 }
 
 /** Só as campanhas reais (sem a regra provisória de implantes). */

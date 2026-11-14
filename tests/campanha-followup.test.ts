@@ -10,6 +10,7 @@ const db = vi.hoisted(() => ({
   tenantAction: { findMany: vi.fn() },
   conversation: { findMany: vi.fn(), update: vi.fn() },
   campaignLead: { findMany: vi.fn() },
+  campaign: { findMany: vi.fn() },
   appointment: { findMany: vi.fn() },
   message: { create: vi.fn() },
 }));
@@ -33,12 +34,13 @@ vi.mock("../src/modules/whatsapp/meta-config", () => ({
 
 import { scanAndSendFollowUps } from "../workers/follow-up-worker/scan";
 
+const CFG = { noReply: { enabled: true, steps: [{ delayMinutes: 30, message: "Oi, sumiu?" }] } };
 const NOW = new Date("2026-11-14T15:00:00Z");
 
-function convo(leadId: string) {
+function convo(leadId: string, tenantId = "conta-1") {
   return {
     id: `conv-${leadId}`,
-    tenantId: "conta-1",
+    tenantId,
     agentId: "agente-1",
     leadId,
     needsHuman: false,
@@ -105,11 +107,31 @@ describe("follow-up por campanha", () => {
     expect((await scanAndSendFollowUps(NOW)).sent).toBe(2);
   });
 
-  it("sem conseguir ler as campanhas, a volta não envia", async () => {
+  it("leitura falha: silencia só a conta com campanha; conta sem campanha segue", async () => {
+    db.tenantAction.findMany.mockImplementation(async (args: { where: { key: string } }) =>
+      args.where.key === "follow_up"
+        ? [{ tenantId: "conta-1", agentId: "agente-1", config: CFG }, { tenantId: "conta-2", agentId: "agente-1", config: CFG }]
+        : [],
+    );
+    db.conversation.findMany.mockResolvedValue([convo("lead-campanha"), convo("lead-outra-conta", "conta-2")]);
     db.campaignLead.findMany.mockRejectedValue(new Error("banco fora"));
+    db.campaign.findMany.mockResolvedValue([{ tenantId: "conta-1" }]);
+    const result = await scanAndSendFollowUps(NOW);
+    expect(result.sent).toBe(1);
+    expect(db.conversation.update.mock.calls[0][0].where.id).toBe("conv-lead-outra-conta");
+  });
+
+  it("se nem as contas com campanha puderem ser lidas, a volta não envia", async () => {
+    db.campaignLead.findMany.mockRejectedValue(new Error("banco fora"));
+    db.campaign.findMany.mockRejectedValue(new Error("banco fora"));
     const result = await scanAndSendFollowUps(NOW);
     expect(result.sent).toBe(0);
     expect(send.sendMessage).not.toHaveBeenCalled();
     expect(db.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it("a consulta de campanhas é filtrada pelos leads da fila", async () => {
+    await scanAndSendFollowUps(NOW);
+    expect(db.campaignLead.findMany.mock.calls[0][0].where.leadId).toEqual({ in: ["lead-campanha", "lead-comum"] });
   });
 });
