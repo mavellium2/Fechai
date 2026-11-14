@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { campaignPromptPreview } from "@/modules/campaigns/prompt-preview";
+import { campaignRulesPrompt, parseCampaignRules } from "@/modules/campaigns/rules";
 
 /**
  * As telas de campanha contra o `CONVENTIONS.md` da raiz. São leituras do
@@ -117,5 +119,26 @@ describe("telas de campanha — convenções de UI", () => {
     for (const { name, code } of files) {
       if (code.includes("outline-none")) expect(code, name).toMatch(/focus-visible:(?:before:)?ring-2/);
     }
+  });
+});
+
+describe("prévia do prompt da campanha (CMP-03)", () => {
+  const campaign = { name: "Implantes", objective: null, description: null };
+
+  it("é o mesmo bloco do turno do agente, sem segunda regra", () => {
+    const rules = parseCampaignRules({ dates: ["2026-11-18"], times: ["09:00"], followUp: false, instructions: "Seja breve." });
+    const preview = campaignPromptPreview(campaign, rules);
+    expect(preview).toBe(campaignRulesPrompt(campaign, rules, { handoffAvailable: true, assets: [] }));
+    expect(preview).toContain("18/11/2026 às 09:00");
+    expect(preview).toContain("não há follow-up automático");
+    expect(preview).toContain("Seja breve.");
+  });
+
+  it("o formulário mostra a prévia só para leitura e oferece o lead de teste só no passo de agenda", () => {
+    const form = readFileSync(path.resolve(__dirname, "..", "src", "app", "(dashboard)", "campanhas", "CampaignRulesForm.tsx"), "utf8");
+    expect(form).toContain("Um lead desta campanha verá:");
+    expect(form).toContain("campaignPromptPreview(");
+    expect(form).toMatch(/editable && part === "agenda"/);
+    expect(form).toContain("Usar o lead de teste desta campanha");
   });
 });

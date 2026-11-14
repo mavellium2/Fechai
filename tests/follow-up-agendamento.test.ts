@@ -15,6 +15,8 @@ const db = vi.hoisted(() => ({
   whatsappInstance: { findMany: vi.fn() },
   whatsappBlockedNumber: { findUnique: vi.fn() },
   message: { create: vi.fn() },
+  campaignLead: { findMany: vi.fn(async () => []) },
+  appointment: { findMany: vi.fn(async () => []) },
 }));
 const provider = vi.hoisted(() => ({
   isConfigured: vi.fn(() => true),

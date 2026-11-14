@@ -1,5 +1,6 @@
 import { recordMessageContext } from "../../src/modules/reports/contact-context-events";
 import { prisma } from "../../src/lib/prisma";
+import { loadFollowUpOff, loadTenantsWithCampaign } from "../../src/modules/campaigns/active";
 import { getWhatsAppProviderForInstance } from "../../src/modules/whatsapp/meta-config";
 import { agentRepliesOn, findWhatsappChannel } from "../../src/modules/whatsapp/instances";
 import {
@@ -231,9 +232,32 @@ export async function scanAndSendFollowUps(now: Date = new Date()) {
     },
   });
 
+  // Campanha em vigor que desliga o follow-up dos leads dela. Não marca a etapa
+  // como enviada (como os lembretes): fica suspenso e a esteira volta se a
+  // campanha terminar, respeitando `isStale`. Sem conseguir ler as campanhas
+  // não dá para saber quem é de campanha: a volta não envia nada.
+  let followUpOff = new Set<string>();
+  // Falha de leitura: só as contas com campanha em vigor ficam caladas.
+  let silencedTenants = new Set<string>();
+  if (convos.length) {
+    const tenantIds = [...new Set(convos.map((c) => c.tenantId))];
+    try {
+      followUpOff = await loadFollowUpOff(tenantIds, convos.map((c) => c.leadId), now);
+    } catch (err) {
+      console.error("[follow-up] campanhas indisponíveis; contas com campanha ficam sem envio nesta volta", err);
+      try {
+        silencedTenants = await loadTenantsWithCampaign(tenantIds, now);
+      } catch (err2) {
+        console.error("[follow-up] não foi possível saber quais contas têm campanha; sem enviar nesta volta", err2);
+        return { scanned: convos.length, sent: 0 };
+      }
+    }
+  }
+
   let sent = 0;
 
   for (const c of convos) {
+    if (followUpOff.has(c.leadId) || silencedTenants.has(c.tenantId)) continue;
     // Conversa de um agente que não tem follow_up ligado (mesmo que outro
     // agente da mesma conta tenha) não entra — a ação é por agente.
     const config = c.agentId ? configByAgent.get(c.agentId) : undefined;

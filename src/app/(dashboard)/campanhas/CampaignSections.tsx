@@ -67,12 +67,15 @@ function stepInfo(props: Props): Record<StepId, { state: StepState; summary: str
         : "O agente que já atende cada contato",
     },
     agenda: {
-      state: restrictsSchedule(rules) || rules.reminders !== "default" ? "done" : "default",
-      summary: restrictsSchedule(rules)
-        ? `Só ${describeAllowedSlots(rules)}${rules.reminders === "off" ? " · sem lembretes" : ""}`
-        : rules.reminders === "off"
-          ? "Agenda normal · sem lembretes"
-          : "Agenda normal da clínica",
+      state: restrictsSchedule(rules) || rules.reminders !== "default" || !rules.followUp || rules.clinicorp.mode !== "default" ? "done" : "default",
+      summary:
+        (restrictsSchedule(rules)
+          ? `Só ${describeAllowedSlots(rules)}${rules.reminders === "off" ? " · sem lembretes" : ""}`
+          : rules.reminders === "off"
+            ? "Agenda normal · sem lembretes"
+            : "Agenda normal da clínica") +
+        (rules.followUp ? "" : " · sem follow-up") +
+        (rules.clinicorp.mode === "off" ? " · sem Clinicorp" : ""),
     },
     origem: {
       state: origins.length ? "done" : "missing",
@@ -235,11 +238,11 @@ function StepEditor(props: Props & { editable: boolean; stepId: StepId }) {
       return (
         <>
           <CampaignAgentPanel campaignId={campaign.id} editable={editable} setup={props.agentSetup} />
-          <CampaignRulesForm campaignId={campaign.id} rules={props.rules} editable={editable} part="fala" />
+          <CampaignRulesForm campaignId={campaign.id} campaign={campaign} rules={props.rules} editable={editable} part="fala" />
         </>
       );
     case "agenda":
-      return <CampaignRulesForm campaignId={campaign.id} rules={props.rules} editable={editable} part="agenda" />;
+      return <CampaignRulesForm campaignId={campaign.id} campaign={campaign} rules={props.rules} editable={editable} part="agenda" />;
     case "origem":
       return (
         <>

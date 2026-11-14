@@ -12,8 +12,14 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveFeedback } from "@/components/ui/toast";
 import { shiftDay } from "@/modules/campaigns/period";
-import { parseTimeList as parseTimes, type CampaignRules, type ReminderMode } from "@/modules/campaigns/rules";
-import { saveCampaignRules } from "./setup-actions";
+import { campaignPromptPreview } from "@/modules/campaigns/prompt-preview";
+import { parseCampaignRules, parseTimeList as parseTimes, type CampaignRules, type ClinicorpMode, type ReminderMode } from "@/modules/campaigns/rules";
+import { linkTestLeadToCampaign, saveCampaignRules } from "./setup-actions";
+
+const CLINICORP_OPTIONS = [
+  { value: "default", label: "Padrão da conta" },
+  { value: "off", label: "Não espelhar no Clinicorp" },
+];
 
 /** "2026-11-18" → "18/11/2026" (sem fuso: é um dia de calendário). */
 function dayLabel(day: string): string {
@@ -45,17 +51,20 @@ const HELP = "text-sm text-neutral panel:text-white/60";
  */
 export function CampaignRulesForm({
   campaignId,
+  campaign,
   rules,
   editable,
   part,
 }: {
   campaignId: string;
+  campaign: { name: string; objective: string | null; description: string | null };
   rules: CampaignRules;
   editable: boolean;
   part: "agenda" | "fala";
 }) {
   const router = useRouter();
   const save = useSaveFeedback({ entity: "regras", action: "save", gender: "f", plural: true });
+  const testLead = useSaveFeedback({ entity: "lead de teste", action: "save", gender: "m" });
   const base = useId();
 
   const [dates, setDates] = useState<string[]>(rules.dates);
@@ -80,8 +89,20 @@ export function CampaignRulesForm({
   const [instructions, setInstructions] = useState(rules.instructions);
   const [outside, setOutside] = useState(rules.outside);
   const [grace, setGrace] = useState(String(rules.graceDays || ""));
+  const [followUp, setFollowUp] = useState(rules.followUp);
+  const [clinicorp, setClinicorp] = useState<ClinicorpMode>(rules.clinicorp.mode);
 
   const disabled = !editable || save.saving;
+
+  /** O que o agente lerá com o que está na tela agora (só leitura). */
+  const preview = campaignPromptPreview(
+    campaign,
+    parseCampaignRules(
+      part === "fala"
+        ? { ...rules, offer, instructions }
+        : { ...rules, arrival, reminders, outside, followUp, clinicorp: { mode: clinicorp }, dates, times: parseTimes(times), capacity: isEvent && capacity.trim() !== "" ? Number(capacity) : null, customReminders: reminders === "custom" ? custom.map((r) => ({ minutesBefore: Number(r.amount) * Number(r.unit), template: r.template })) : [] },
+    ),
+  );
 
   /** Uma data, ou um intervalo quando "até" está preenchido. */
   function addDates() {
@@ -114,6 +135,8 @@ export function CampaignRulesForm({
                 ? custom.map((r) => ({ minutesBefore: Number(r.amount) * Number(r.unit), template: r.template }))
                 : [],
             outside,
+            followUp,
+            clinicorp: { mode: clinicorp },
             graceDays: grace.trim() === "" ? 0 : Number(grace),
           };
     const result = await save.run(() => saveCampaignRules(campaignId, payload));
@@ -314,6 +337,30 @@ export function CampaignRulesForm({
             )}
           </div>
 
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className={QUESTION}>Follow-up automático</p>
+                <p className={HELP}>
+                  {followUp
+                    ? "Os leads da campanha seguem recebendo o follow-up de sempre."
+                    : "Nenhum follow-up sai para os leads da campanha enquanto ela estiver ativa."}
+                </p>
+              </div>
+              <Switch checked={followUp} onCheckedChange={setFollowUp} disabled={disabled} label="Follow-up automático" />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <p className={QUESTION}>Consulta no Clinicorp</p>
+            <SelectMenu label="Consulta no Clinicorp" value={clinicorp} onChange={(mode) => setClinicorp(mode as ClinicorpMode)} options={CLINICORP_OPTIONS} disabled={disabled} />
+            <p className={HELP}>
+              {clinicorp === "off"
+                ? "As consultas da campanha ficam só no Fechai; a recepção lança no Clinicorp."
+                : "A consulta é enviada ao Clinicorp como nas outras."}
+            </p>
+          </div>
+
           <details className="text-sm">
             <summary className="min-h-11 cursor-pointer py-3 font-medium text-ink panel:text-white">Mais opções</summary>
             <Field
@@ -326,6 +373,27 @@ export function CampaignRulesForm({
             </Field>
           </details>
         </fieldset>
+      )}
+
+      <div className="space-y-2 rounded-control border border-ink/10 p-3 panel:border-white/15">
+        <p className="text-sm font-medium text-ink panel:text-white">Um lead desta campanha verá:</p>
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm text-neutral panel:text-white/70">{preview}</pre>
+      </div>
+
+      {editable && part === "agenda" && (
+        <div className="space-y-2">
+          <p className={HELP}>Para conferir no chat de teste, ligue o lead de teste a esta campanha.</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="max-sm:h-11"
+            loading={testLead.saving}
+            loadingLabel="Ligando"
+            onClick={() => void testLead.run(() => linkTestLeadToCampaign(campaignId))}
+          >
+            Usar o lead de teste desta campanha
+          </Button>
+        </div>
       )}
 
       {editable && (
