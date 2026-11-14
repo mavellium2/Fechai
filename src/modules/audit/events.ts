@@ -238,6 +238,8 @@ export const AUDIT_EVENTS = {
   "campaign_override.updated": { label: "Alterou a regra provisória da campanha", kind: "update", group: "campanhas" },
   // Só a quantidade de contatos da lista de reagendamento: nada de nome ou telefone.
   "campaign_override.reschedule_list_generated": { label: "Gerou a lista de reagendamento da campanha", kind: "access", group: "campanhas" },
+  // Só contagens (consultas e disparos pendentes dispensados): nada de nome ou telefone. Não revertível.
+  "campaign_override.reminders_cleared": { label: "Desligou os lembretes das consultas da campanha", kind: "update", group: "campanhas" },
 
   // ── integrações ───────────────────────────────────────────────────────
   "whatsapp.connected": { label: "Conectou o WhatsApp", kind: "update", group: "integracoes" },

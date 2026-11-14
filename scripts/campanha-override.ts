@@ -56,7 +56,7 @@ async function main() {
     console.log(`  disparos:            ${view.broadcastCampaignIds.length}`);
     console.log(`  leads marcados:      ${view.leadIds.length}`);
     console.log(`  dias / hora:         ${view.rules.dates.join(", ")} · ${view.rules.time}`);
-    console.log(`  vagas por dia:       ${view.rules.capacityPerDay ?? "(não definidas)"}`);
+    console.log(`  vagas por dia:       ${view.rules.capacityPerDay ?? "(não definidas: a agenda recusa marcar e transfere para a equipe)"}`);
     console.log(`  oferta:              ${view.rules.offerText ?? "(não definida)"}`);
     return;
   }

@@ -27,6 +27,11 @@ export type RescheduleRow = {
   origin: string;
   clinicorpAppointmentId: string | null;
   reminder: ReminderPlan;
+  /**
+   * Só no modo `--evento`: a consulta já está num dos dias do evento às 9h (a
+   * recepção só a lança à mão no Clinicorp, porque estas não são espelhadas).
+   */
+  inEvent?: boolean;
 };
 
 /** Há lembrete por sair? `unknown` = não deu para ler a config ou as campanhas (nunca vira "não"). */
@@ -57,11 +62,16 @@ export function isInEventSlot(startsAt: Date, rules: { dates: string[]; time: st
   return rules.dates.includes(dayKeyInZone(startsAt, timeZone)) && timeInZone(startsAt, timeZone) === rules.time;
 }
 
-/** Consultas da campanha que precisam de reagendamento, em ordem de data. */
+/**
+ * Consultas da campanha que precisam de reagendamento, em ordem de data. Com
+ * `includeEvent` (`--evento`), entram também as que já estão no encaixe do
+ * evento, marcadas com `inEvent` — as da regra não vão ao Clinicorp sozinhas.
+ */
 export async function listRescheduleCandidates(
   tenantId: string,
   now: Date = new Date(),
   timeZone: string = RESCHEDULE_TIMEZONE,
+  options: { includeEvent?: boolean } = {},
 ): Promise<RescheduleRow[]> {
   const appointments = await prisma.appointment.findMany({
     where: { tenantId, status: "scheduled", startsAt: { gt: now }, leadId: { not: null }, lead: { isTest: false } },
@@ -87,7 +97,8 @@ export async function listRescheduleCandidates(
   const matches = await resolveCampaignLeadMatches(tenantId, future.map((a) => a.leadId as string), now);
   const outside = future.filter((a) => {
     const match = matches.get(a.leadId as string);
-    return match ? !isInEventSlot(a.startsAt, match.override.rules, timeZone) : false;
+    if (!match) return false;
+    return options.includeEvent ? true : !isInEventSlot(a.startsAt, match.override.rules, timeZone);
   });
   if (!outside.length) return [];
 
@@ -113,6 +124,7 @@ export async function listRescheduleCandidates(
     origin: matches.get(a.leadId as string)!.origin.label,
     clinicorpAppointmentId: a.clinicorpAppointmentId,
     reminder: readable ? reminderPlan(a, cfg, campaigns?.get(a.leadId as string), now) : { status: "unknown", pending: 0 },
+    ...(options.includeEvent ? { inEvent: isInEventSlot(a.startsAt, matches.get(a.leadId as string)!.override.rules, timeZone) } : {}),
   }));
 }
 
@@ -133,10 +145,14 @@ export function reminderLabel(plan: ReminderPlan): string {
 }
 
 /** Monta a planilha. Data em "dd/mm/aaaa" e telefone como texto (não vira número). */
-export function buildRescheduleWorkbook(rows: RescheduleRow[]): ExcelJS.Workbook {
+export function buildRescheduleWorkbook(rows: RescheduleRow[], options: { withEvent?: boolean } = {}): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Reagendar");
-  sheet.columns = COLUMNS.map(({ header, key, width }) => ({ header, key, width }));
+  sheet.columns = [
+    ...COLUMNS.map(({ header, key, width }) => ({ header, key, width })),
+    // `--evento`: o que a recepção faz com cada linha.
+    ...(options.withEvent ? [{ header: "O que fazer", key: "action", width: 26 }] : []),
+  ];
   sheet.getRow(1).font = { bold: true };
   for (const row of rows) {
     const [year, month, day] = row.date.split("-");
@@ -145,6 +161,7 @@ export function buildRescheduleWorkbook(rows: RescheduleRow[]): ExcelJS.Workbook
       date: `${day}/${month}/${year}`,
       clinicorpAppointmentId: row.clinicorpAppointmentId ?? "",
       reminder: reminderLabel(row.reminder),
+      action: row.inEvent ? "Lançar no Clinicorp" : "Reagendar",
     });
   }
   sheet.getColumn("phone").numFmt = "@";
