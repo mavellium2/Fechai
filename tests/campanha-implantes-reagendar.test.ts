@@ -202,6 +202,35 @@ describe("listRescheduleCandidates", () => {
   });
 });
 
+describe("--evento (consultas dentro da regra também)", () => {
+  it("lista as consultas de 18/19 às 09:00 junto com as que precisam reagendar, marcadas com inEvent", async () => {
+    db.appointments = [
+      appt("a1", "camp-1", "2026-11-18T12:00:00Z"),
+      appt("a2", "camp-2", "2026-11-20T12:00:00Z"),
+      appt("a3", "organico-1", "2026-11-19T12:00:00Z"),
+    ];
+    const rows = await listRescheduleCandidates(TENANT, NOW, undefined, { includeEvent: true });
+    expect(rows.map((r) => [r.date, r.time, r.inEvent])).toEqual([
+      ["2026-11-18", "09:00", true],
+      ["2026-11-20", "09:00", false],
+    ]);
+    // Sem a opção, a lista segue como antes (só as fora da regra, sem o campo novo).
+    const plain = await listRescheduleCandidates(TENANT, NOW);
+    expect(plain.map((r) => r.date)).toEqual(["2026-11-20"]);
+    expect(plain[0].inEvent).toBeUndefined();
+    expect(db.writes).toEqual([]);
+  });
+
+  it("a planilha ganha a coluna 'O que fazer'; sem --evento as colunas não mudam", () => {
+    const row = { name: "Maria", phone: "5514998586900", date: "2026-11-18", time: "09:00", origin: "manual", clinicorpAppointmentId: null, reminder: { status: "no" as const, pending: 0 } };
+    const withEvent = buildRescheduleWorkbook([{ ...row, inEvent: true }, { ...row, date: "2026-11-20", inEvent: false }], { withEvent: true }).getWorksheet("Reagendar")!;
+    expect(withEvent.getRow(1).getCell(8).value).toBe("O que fazer");
+    expect(withEvent.getRow(2).getCell(8).value).toBe("Lançar no Clinicorp");
+    expect(withEvent.getRow(3).getCell(8).value).toBe("Reagendar");
+    expect(buildRescheduleWorkbook([row]).getWorksheet("Reagendar")!.getRow(1).cellCount).toBe(7);
+  });
+});
+
 describe("lembrete agendado (mesma regra do worker)", () => {
   const plan = async () => (await listRescheduleCandidates(TENANT, NOW)).map((r) => reminderLabel(r.reminder));
 

@@ -12,7 +12,12 @@ import { AUDIT_EVENTS, eventLabel, isRevertibleEvent, type AuditEventDef } from 
 
 describe("eventos da regra provisória da campanha", () => {
   const EVENTS = AUDIT_EVENTS as Record<string, AuditEventDef>;
-  const keys = ["campaign_override.created", "campaign_override.updated", "campaign_override.reschedule_list_generated"];
+  const keys = [
+    "campaign_override.created",
+    "campaign_override.updated",
+    "campaign_override.reschedule_list_generated",
+    "campaign_override.reminders_cleared",
+  ];
 
   it("existem no grupo de campanhas, com rótulo em português", () => {
     for (const key of keys) {
