@@ -69,7 +69,9 @@ e não podem ser escolhidos (`contact-search.ts`, sempre com `tenantId`).
   do usuário e lembra o último número usado (localStorage).
 - **`/disparos/[id]`** — acompanhamento: números, contatos com filtro por
   resultado e busca, exportar planilha, Pausar/Retomar e Cancelar (sempre com
-  confirmação). Rascunho redireciona para o passo a passo.
+  confirmação). Nome e telefone abrem a conversa existente da conta. Erros da
+  Meta vêm com causa e próximo passo, inclusive nos recibos antigos com código.
+  Rascunho redireciona para o passo a passo.
 
 Retornos de ação vão pelo toast (`useSaveFeedback`), nunca por aviso no topo.
 Descartar rascunho apaga se nenhum teste saiu; com teste, cancela (o teste foi
@@ -205,7 +207,7 @@ modelo** — só dentro das 24h abertas pelo contato —, por isso não é ofere
   `components[type=header]` (`document` leva `filename`).
 - Na conversa, `Message.content` leva `[Imagem]`/`[Vídeo]`/`[Documento]` no lugar
   do topo (`renderBroadcast`). Link que a Meta não conseguir baixar volta como
-  falha de entrega no recibo, nunca como reenvio.
+  falha de entrega no recibo, sem reenvio automático.
 - **Criar modelo com mídia** (`/disparos/modelos/novo`, "Topo da mensagem"): o
   exemplo vai direto para a Meta pela Resumable Upload API do app
   (`uploadTemplateExample`, via `/app/uploads` com o token da própria conexão)
@@ -360,6 +362,16 @@ caso ainda exige acompanhamento da conversa, evitando resposta duplicada.
 prevalece sobre entrega, entrega sobre falha, e um `sent` atrasado não regride
 nenhum resultado. Entregues incluem lidos. Falha posterior à aceitação não
 reabre envio. A Meta pode não fornecer confirmação de leitura.
+
+**Reenviar falhas** é um novo disparo na faixa original, só para campanhas
+encerradas e após revisão e confirmação da autorização. O servidor reconfere
+a seleção e o mesmo remetente e modelos aprovados. Exclui entregas, leituras,
+respostas, resultados incertos, testes, bloqueios e pedidos para parar, além
+de falhas que exigem mudar a mensagem ou o destinatário. Para 131049, aguarda
+pelo menos 24h. Para 131048, oriente a confirmar que a Meta liberou o número.
+`retryOfCampaignId` liga o histórico e `retryOfRecipientId` único impede criar
+dois reenvios da mesma linha; os recibos originais não mudam. O worker confere
+de novo o resultado da origem e recibos tardios antes de chamar a Meta.
 
 `BroadcastReceipt` é inbox idempotente: conserva retorno que chega enquanto o
 worker ainda está enviando, antes de gravar o `wamid`. Depois do commit, o worker

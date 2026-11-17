@@ -14,7 +14,7 @@ export default async function DisparoPage({ params }: { params: Promise<{ id: st
   return (
     <div className="space-y-6">
       <DisparosNav />
-      <CampaignDetail initial={detail} />
+      <CampaignDetail key={id} initial={detail} />
     </div>
   );
 }

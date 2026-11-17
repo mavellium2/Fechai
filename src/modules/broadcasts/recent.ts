@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { broadcastPhoneVariants } from "./phone";
 export async function recentlyContacted(
   tenantId: string,
   phones: string[],
   excludeCampaignId?: string,
+  db: Pick<Prisma.TransactionClient, "broadcastRecipient"> = prisma,
 ) {
-  const rows = await prisma.broadcastRecipient.findMany({
+  const rows = await db.broadcastRecipient.findMany({
     where: {
       campaign: { tenantId },
       campaignId: { not: excludeCampaignId },

@@ -10,6 +10,7 @@ import { broadcastPhoneVariants } from "./phone";
 import { reconcileBroadcastReceipts } from "./receipts";
 import { BLOCKED_SKIP_ERROR } from "./unblock";
 import { recipientTemplate } from "./template";
+import { canRepeatBroadcastAttempt } from "./retry-policy";
 
 /** O mesmo caminho protegido atende o worker e o botão explícito de teste. */
 export async function sendBroadcastRecipient(
@@ -110,6 +111,34 @@ export async function sendBroadcastRecipient(
       where: { id: recipient.id },
       data: { conversationId: conversation.id, leadStatusAtSend: lead.status },
     });
+    if (campaign.retryOfCampaignId) {
+      // Um recibo de sucesso ou uma resposta pode chegar entre a confirmação e a fila.
+      const original = recipient.retryOfRecipientId && await prisma.broadcastRecipient.findFirst({
+        where: {
+          id: recipient.retryOfRecipientId,
+          campaignId: campaign.retryOfCampaignId,
+          phone: recipient.phone,
+          campaign: { tenantId: campaign.tenantId, phoneNumberId: campaign.phoneNumberId },
+        },
+      });
+      const lateReceipt = original && original.whatsappMessageId && await prisma.broadcastReceipt.findFirst({
+        where: {
+          tenantId: campaign.tenantId,
+          phoneNumberId: campaign.phoneNumberId,
+          messageId: original.whatsappMessageId,
+          recipientPhone: { in: broadcastPhoneVariants(recipient.phone) },
+          status: { in: ["delivered", "read"] },
+        },
+        select: { id: true },
+      });
+      if (!original || !canRepeatBroadcastAttempt(original) || lateReceipt) {
+        await prisma.broadcastRecipient.updateMany({
+          where: { id: recipient.id, status: "sending" },
+          data: { status: "skipped", error: "O resultado do envio original mudou após a confirmação." },
+        });
+        return false;
+      }
+    }
     requestStarted = true;
     const messageId = await fresh.provider.sendBroadcastTemplate(
       recipient.phone,

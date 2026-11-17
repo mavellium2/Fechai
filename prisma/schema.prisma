@@ -788,6 +788,8 @@ model BroadcastCampaign {
   finishedAt       DateTime?
   error            String?
   recipients       BroadcastRecipient[]
+  /// Disparo original de um reenvio confirmado manualmente.
+  retryOfCampaignId String?
   /// Campanha (`Campaign`) a que este disparo pertence; no máximo uma.
   campaignId       String?
   campaign         Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -831,6 +833,10 @@ model BroadcastRecipient {
   qualifiedAt         DateTime?
   appointmentId       String?
   firstReplyMessageId String?           @unique
+  /// Uma única nova tentativa por linha de origem; os recibos antigos ficam intactos.
+  retryOfRecipientId  String?           @unique
+  retryOfRecipient    BroadcastRecipient? @relation("BroadcastRetry", fields: [retryOfRecipientId], references: [id], onDelete: SetNull)
+  retryRecipient      BroadcastRecipient? @relation("BroadcastRetry")
 
   @@unique([campaignId, phone, isTest])
   @@index([campaignId, status])

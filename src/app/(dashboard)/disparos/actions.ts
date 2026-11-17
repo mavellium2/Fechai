@@ -47,6 +47,7 @@ import { broadcastPhoneVariants, normalizeBroadcastPhone } from "@/modules/broad
 import { sendBroadcastRecipient } from "@/modules/broadcasts/send";
 import { recentlyContacted } from "@/modules/broadcasts/recent";
 import { broadcastCsv } from "@/modules/broadcasts/csv";
+import { canReviewBroadcastRetry, loadBroadcastRetry } from "@/modules/broadcasts/retry";
 import {
   isMediaFormat,
   parseCampaignMedia,
@@ -562,7 +563,110 @@ export async function getBroadcastCampaign(id: string) {
     getBroadcastSummary(tenantId, id),
     getBroadcastDetails(id),
   ]);
-  return summary ? { summary, rows } : null;
+  if (!summary) return null;
+  const conversationIds = rows.flatMap((r) => r.conversationId ? [r.conversationId] : []);
+  const aliases = [...new Set(rows.flatMap((r) => broadcastPhoneVariants(r.phone)))];
+  const [conversations, retry] = await Promise.all([
+    prisma.conversation.findMany({
+      where: {
+        tenantId, isTest: false, lead: { tenantId },
+        OR: [{ id: { in: conversationIds } }, { lead: { phone: { in: aliases } } }],
+      },
+      select: { id: true, lead: { select: { phone: true } } },
+    }),
+    canReviewBroadcastRetry(summary) && (summary.failed > 0 || summary.deliveryFailed > 0)
+      ? loadBroadcastRetry(prisma, tenantId, id)
+      : null,
+  ]);
+  const byId = new Set(conversations.map((c) => c.id));
+  const byPhone = new Map(conversations.map((c) => [c.lead.phone, c.id]));
+  return {
+    summary,
+    rows: rows.map((r) => ({
+      ...r,
+      conversationId: r.conversationId && byId.has(r.conversationId)
+        ? r.conversationId
+        : broadcastPhoneVariants(r.phone).map((phone) => byPhone.get(phone)).find(Boolean) ?? null,
+    })),
+    retry: retry?.recipients.length
+      ? { ids: retry.recipients.map((r) => r.id), token: retry.token, recentCount: retry.recentCount }
+      : null,
+  };
+}
+
+export async function confirmBroadcastRetry(id: string, token: string, consent: boolean, reviewed: boolean) {
+  const { tenantId, userId, label } = await requireBroadcastActor();
+  const invalid = (error: string) => ({ ok: false as const, code: "validation" as const, error });
+  const changed = () => invalid("A lista de falhas mudou. Atualize a revisão antes de confirmar.");
+  if (typeof id !== "string" || !id || id.length > 64) return invalid("Disparo não encontrado.");
+  if (consent !== true || reviewed !== true)
+    return invalid("Confirme a revisão das falhas e a autorização dos contatos.");
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) return changed();
+
+  const source = await prisma.broadcastCampaign.findFirst({ where: { id, tenantId } });
+  if (!source || !canReviewBroadcastRetry(source))
+    return invalid("O reenvio só está disponível para disparos já encerrados.");
+  const connection = await getBroadcastConnection(tenantId);
+  if (!connection || connection.phoneNumberId !== source.phoneNumberId)
+    return invalid("Reconecte o mesmo número da Meta usado no disparo original.");
+  try {
+    const approved = await connection.provider.listBroadcastTemplates({ media: true });
+    if (!templatesStillApproved(campaignTemplates(source), approved))
+      return invalid("O modelo original mudou ou não está aprovado. Prepare um novo disparo com um modelo aprovado.");
+  } catch {
+    return { ok: false as const, error: "Não foi possível conferir os modelos na Meta. Tente novamente em alguns instantes." };
+  }
+
+  try {
+    const retry = await prisma.$transaction(async (tx) => {
+      const { recipients, token: current } = await loadBroadcastRetry(tx, tenantId, id);
+      if (!recipients.length || token !== current) return null;
+      const schedule = {
+        scheduledAt: null,
+        timezone: source.timezone,
+        windowStart: source.windowStart,
+        windowEnd: source.windowEnd,
+      };
+      return tx.broadcastCampaign.create({
+        data: {
+          tenantId,
+          name: `Reenvio: ${source.name.replace(/^(Reenvio: )+/, "")}`.slice(0, 100),
+          phoneNumberId: source.phoneNumberId,
+          template: source.template as Prisma.InputJsonValue,
+          namelessTemplate: source.namelessTemplate as Prisma.InputJsonValue ?? Prisma.DbNull,
+          media: source.media as Prisma.InputJsonValue ?? Prisma.DbNull,
+          campaignId: source.campaignId,
+          retryOfCampaignId: source.id,
+          status: "queued",
+          confirmedBy: userId,
+          confirmedByLabel: label,
+          confirmedAt: new Date(),
+          consentVersion: "whatsapp-opt-in-v1",
+          ...schedule,
+          nextAttemptAt: nextBroadcastTime(schedule),
+          recipients: { createMany: { data: recipients.map((r) => ({
+            row: r.row,
+            phone: r.phone,
+            name: r.name,
+            content: r.content,
+            parameters: r.parameters as Prisma.InputJsonValue,
+            variant: r.variant,
+            mediaUrl: r.mediaUrl,
+            mediaFilename: r.mediaFilename,
+            retryOfRecipientId: r.id,
+          })) } },
+        },
+        select: { id: true },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (!retry) return changed();
+    revalidatePath("/disparos");
+    return { ok: true as const, id: retry.id, info: "Reenvio confirmado. A fila segue a faixa de horário do disparo original." };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code))
+      return changed();
+    throw error;
+  }
 }
 
 export async function refreshBroadcasts(filter: BroadcastFilter = {}) {
@@ -577,6 +681,7 @@ export async function getBroadcastDetails(id: string) {
     take: 1010,
     select: {
       id: true,
+      conversationId: true,
       row: true,
       phone: true,
       name: true,

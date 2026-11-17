@@ -70,10 +70,10 @@ export function recipientResult(r: RecipientLike): { label: string; tone: Tone }
 /** Explicação curta para quem vê "Conferir" ou "Ignorado". */
 export const RESULT_HINT: Record<string, string> = {
   Conferir:
-    "Não sabemos se a Meta recebeu (a conexão caiu no meio). Não reenviamos sozinhos para não mandar duas vezes.",
-  Ignorado: "Número bloqueado na conta ou contato que pediu para não receber.",
-  "Não enviado": "A Meta recusou o envio. Veja o motivo ao lado.",
-  "Não entregue": "A Meta aceitou, mas não conseguiu entregar no aparelho.",
+    "A Meta não confirmou se aceitou a mensagem. O contato fica fora do reenvio em lote.",
+  Ignorado: "O contato não recebeu uma nova tentativa. Confira o motivo abaixo.",
+  "Não enviado": "O envio falhou antes de a Meta aceitar a mensagem.",
+  "Não entregue": "A Meta aceitou o envio e depois informou falha na entrega.",
 };
 
 export const RECIPIENT_FILTERS = [

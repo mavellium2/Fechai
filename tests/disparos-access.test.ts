@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   recipients: vi.fn(),
   recent: vi.fn(),
   findRecipient: vi.fn(),
+  create: vi.fn(),
+  blocked: vi.fn(),
+  stopped: vi.fn(),
 }));
 vi.mock("@/lib/require-product", () => ({
   requireProductAccess: mocks.product,
@@ -26,18 +29,24 @@ vi.mock("@/modules/broadcasts/connection", () => ({
 vi.mock("@/modules/broadcasts/recent", () => ({
   recentlyContacted: mocks.recent,
 }));
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const db = {
     tenant: { findUnique: mocks.tenant },
-    broadcastCampaign: { findFirst: mocks.find, updateMany: mocks.update },
+    broadcastCampaign: { findFirst: mocks.find, updateMany: mocks.update, create: mocks.create },
     broadcastRecipient: {
       findMany: mocks.recipients,
       findUnique: mocks.findRecipient,
     },
-  },
-}));
+    whatsappBlockedNumber: { findMany: mocks.blocked },
+    conversation: { findMany: mocks.stopped },
+  };
+  return { prisma: { ...db, $transaction: (fn: (tx: typeof db) => unknown) => fn(db) } };
+});
+import { prisma } from "@/lib/prisma";
 import { requireBroadcastAccess } from "@/modules/broadcasts/access";
+import { loadBroadcastRetry } from "@/modules/broadcasts/retry";
 import {
+  confirmBroadcastRetry,
   getBroadcastDetails,
   startBroadcast,
   pauseBroadcast,
@@ -83,6 +92,54 @@ beforeEach(() => {
   mocks.recipients.mockResolvedValue([]);
   mocks.recent.mockResolvedValue([]);
   mocks.findRecipient.mockResolvedValue(null);
+  mocks.blocked.mockResolvedValue([]);
+  mocks.stopped.mockResolvedValue([]);
+});
+
+describe("reenvio manual de falhas", () => {
+  const failed = { id: "failed", status: "failed", phone: "5511987654321", row: 1, content: "Olá", parameters: [], variant: "main" };
+  const delivery = { ...failed, id: "delivery", phone: "5511987654322", status: "sent", whatsappMessageId: "wamid.failed", deliveryStatus: "failed", deliveryError: "Falha de entrega informada pela Meta (código 131048)." };
+
+  beforeEach(() => {
+    mocks.find.mockResolvedValue({ id: "campaign-a", tenantId: "tenant-a", name: "Disparo de teste", status: "completed", confirmedAt: new Date(), phoneNumberId: "phone-a", template, timezone: "America/Sao_Paulo", windowStart: 540, windowEnd: 1080 });
+    mocks.create.mockResolvedValue({ id: "retry-a" });
+  });
+
+  it("cria novo disparo só com falhas aptas, mantém a janela e registra quem confirmou", async () => {
+    mocks.blocked.mockResolvedValue([{ phone: "1187654323" }]);
+    mocks.stopped.mockResolvedValue([{ lead: { phone: "551187654324" } }]);
+    mocks.recipients.mockResolvedValue([
+      failed, delivery,
+      { ...failed, id: "blocked", phone: "5511987654323" },
+      { ...failed, id: "stopped", phone: "5511987654324" },
+      { ...failed, id: "test", isTest: true },
+      { ...failed, id: "uncertain", status: "unknown" },
+      { ...delivery, id: "read", readAt: new Date() },
+      { ...delivery, id: "replied", repliedAt: new Date() },
+      { ...delivery, id: "marketing-opt-out", deliveryError: "(código 131050)." },
+    ]);
+    const review = await loadBroadcastRetry(prisma, "tenant-a", "campaign-a");
+    await expect(confirmBroadcastRetry("campaign-a", review.token, true, true)).resolves.toMatchObject({ ok: true, id: "retry-a" });
+    expect(mocks.recipients).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ retryRecipient: null, campaign: expect.objectContaining({ tenantId: "tenant-a" }) }) }));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      status: "queued", retryOfCampaignId: "campaign-a", confirmedBy: "user-a", consentVersion: "whatsapp-opt-in-v1",
+      phoneNumberId: "phone-a", windowStart: 540, windowEnd: 1080,
+      recipients: { createMany: { data: [
+        expect.objectContaining({ retryOfRecipientId: "failed", content: "Olá" }),
+        expect.objectContaining({ retryOfRecipientId: "delivery", content: "Olá" }),
+      ] } },
+    }) }));
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("recusa sem confirmação ou se chegou resposta depois da revisão", async () => {
+    mocks.recipients.mockResolvedValue([delivery]);
+    const review = await loadBroadcastRetry(prisma, "tenant-a", "campaign-a");
+    await expect(confirmBroadcastRetry("campaign-a", review.token, true, false)).resolves.toMatchObject({ ok: false });
+    mocks.recipients.mockResolvedValue([{ ...delivery, repliedAt: new Date() }]);
+    await expect(confirmBroadcastRetry("campaign-a", review.token, true, true)).resolves.toMatchObject({ ok: false, error: expect.stringContaining("lista de falhas mudou") });
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("autorização de Disparos", () => {

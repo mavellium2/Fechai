@@ -37,6 +37,7 @@ const summarySelect = {
   status: true,
   createdAt: true,
   error: true,
+  retryOfCampaignId: true,
   scheduledAt: true,
   timezone: true,
   windowStart: true,

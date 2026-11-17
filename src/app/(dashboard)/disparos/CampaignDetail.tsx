@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Search } from "lucide-react";
+import Link from "next/link";
+import { Download, RefreshCw, Search } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { useSaveFeedback } from "@/components/ui/toast/use-save-feedback";
 import type { BroadcastSummary } from "@/modules/broadcasts/queries";
 import { CampaignStats } from "./CampaignStats";
 import { RecipientList } from "./RecipientList";
+import { RetryBroadcastButton } from "./RetryBroadcastButton";
 import { downloadBase64 } from "./download";
 import {
   campaignStatus,
@@ -41,12 +43,14 @@ const TIMEZONE_LABEL: Record<string, string> = {
 
 export function CampaignDetail({ initial }: { initial: Detail }) {
   const [data, setData] = useState(initial);
-  const [filter, setFilter] = useState<RecipientFilter>("all");
+  const [filter, setFilter] = useState<RecipientFilter | "retry">("all");
   const [query, setQuery] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const save = useSaveFeedback({ entity: "disparo", action: "update" });
   const c: BroadcastSummary = data.summary;
   const state = campaignStatus(c);
+  const ended = c.confirmedAt && (c.status === "completed" || c.status === "cancelled");
 
   async function reload() {
     try {
@@ -72,21 +76,22 @@ export function CampaignDetail({ initial }: { initial: Detail }) {
     await reload();
   }
 
-  const realRows = data.rows.filter((r) => !r.isTest);
+  const realRows = useMemo(() => data.rows.filter((r) => !r.isTest), [data.rows]);
+  const retryIds = useMemo(() => new Set(data.retry?.ids), [data.retry]);
   const tests = data.rows.filter((r) => r.isTest);
   const message = realRows[0]?.content ?? tests[0]?.content ?? "";
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const digits = q.replace(/\D/g, "");
     return realRows
-      .filter((r) => matchesRecipientFilter(r, filter))
+      .filter((r) => filter === "retry" ? retryIds.has(r.id) : matchesRecipientFilter(r, filter))
       .filter(
         (r) =>
           !q ||
           r.name?.toLowerCase().includes(q) ||
           (digits.length >= 3 && r.phone.includes(digits)),
       );
-  }, [realRows, filter, query]);
+  }, [realRows, retryIds, filter, query]);
   const counts = useMemo(
     () =>
       Object.fromEntries(
@@ -118,8 +123,21 @@ export function CampaignDetail({ initial }: { initial: Detail }) {
                 {formatDate(c.confirmedAt, c.timezone)}
               </p>
             )}
+            {c.retryOfCampaignId && (
+              <Link href={`/disparos/${c.retryOfCampaignId}`} className="mt-2 inline-block text-sm text-white/80 underline underline-offset-2">
+                Ver disparo original
+              </Link>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
+            {ended && (
+              <Button variant="ghost" loading={refreshing} onClick={async () => {
+                setRefreshing(true);
+                try { await reload(); } finally { setRefreshing(false); }
+              }}>
+                <RefreshCw size={16} aria-hidden /> Atualizar resultados
+              </Button>
+            )}
             {c.status === "queued" && (
               <Button
                 variant="outline"
@@ -209,19 +227,30 @@ export function CampaignDetail({ initial }: { initial: Detail }) {
             />
           </div>
         </div>
+        {data.retry ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-white/10 p-3">
+            <p className="text-sm text-white/70">Revise a causa das falhas antes de reenviar. A seleção considera todo o disparo.</p>
+            <RetryBroadcastButton campaignId={c.id} count={retryIds.size} token={data.retry.token} recentCount={data.retry.recentCount}
+              hours={`${minuteLabel(c.windowStart)}–${minuteLabel(c.windowEnd)}, ${TIMEZONE_LABEL[c.timezone] ?? c.timezone}`}
+              refresh={reload} />
+          </div>
+        ) : ended && (c.failed + c.deliveryFailed > 0) && (
+          <p className="text-sm text-white/65">Nenhuma falha está disponível para reenvio agora. Confira o motivo em cada contato.</p>
+        )}
         <SegmentedControl
           label="Filtrar contatos por resultado"
           value={filter}
           className="flex-wrap"
-          options={RECIPIENT_FILTERS.map((f) => ({
+          options={[...RECIPIENT_FILTERS.map((f) => ({
             value: f.value,
             label: `${f.label} ${counts[f.value]}`,
-          }))}
+          })), ...(retryIds.size ? [{ value: "retry" as const, label: `Para reenviar ${retryIds.size}` }] : [])]}
           onSelect={setFilter}
         />
         <RecipientList
           rows={rows.map((r) => ({
             ...r,
+            retryEligible: retryIds.has(r.id),
             detail: r.variant === "nameless" ? "Recebeu a versão sem o nome" : undefined,
           }))}
           empty="Nenhum contato com este resultado."
@@ -244,9 +273,8 @@ export function CampaignDetail({ initial }: { initial: Detail }) {
             ou agendado; agendamento é uma consulta nova encontrada ao processar
             a resposta. São registros do que aconteceu depois, não prova de que o
             disparo causou a conversão. A Meta nem sempre informa a leitura.
-            Envio com resultado incerto (&quot;Conferir&quot;) nunca é repetido
-            sozinho, para o contato não receber duas vezes. Testes não entram nos
-            números.
+            Envio com resultado incerto (&quot;Conferir&quot;) fica fora do reenvio em lote.
+            Testes não entram nos números.
           </p>
         </details>
       </Card>

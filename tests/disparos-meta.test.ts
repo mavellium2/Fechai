@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { broadcastMetaErrorCode, broadcastMetaFailure } from "@/modules/broadcasts/meta-failure";
 import {
   MetaCloudProvider,
   MetaBroadcastRejected,
@@ -20,6 +21,18 @@ const template = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Meta: disparos", () => {
+  it("orienta como resolver 131048 em recibos antigos e em recusas novas sem exibir o corpo bruto", async () => {
+    const legacyCode = broadcastMetaErrorCode("Falha de entrega informada pela Meta (código 131048).");
+    expect(broadcastMetaFailure(legacyCode, true).next).toContain("qualidade do número remetente");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 131048, error_data: { details: "dado privado do provedor" } },
+    }), { status: 400 })));
+    const refusal = await provider.sendBroadcastTemplate("5511987654321", template, ["Ana"]).catch((err: Error) => err);
+    expect(refusal).toBeInstanceOf(MetaBroadcastRejected);
+    expect(String(refusal)).toContain("código 131048");
+    expect(String(refusal)).not.toContain("dado privado");
+  });
+
   it("envia template e idioma, com variáveis na ordem, usando o número configurado", async () => {
     const fetchMock = vi
       .fn()

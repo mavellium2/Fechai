@@ -36,8 +36,11 @@ processos (web e worker).
 
 **Entrega é separada de envio** (`deliveryStatus`): callbacks são assinados e
 idempotentes, e `BroadcastReceipt` guarda os que chegaram antes do commit.
-Não regrida `read`/`delivered` com eventos atrasados, nem use falha de entrega
-para reenviar. Desconexão **pausa**, não cancela pendentes. Retomar não restaura
+Não regrida `read`/`delivered` com eventos atrasados; recibo nunca reabre fila.
+**Reenviar falhas** é um novo disparo após revisão e confirmação explícita,
+só para falhas confirmadas e elegíveis. Nunca inclui `unknown`, teste, sucesso,
+resposta ou opt-out; a fila reconfere o resultado original antes do envio.
+Desconexão **pausa**, não cancela pendentes. Retomar não restaura
 contatos processados. Datas/fusos usam `scheduling/time.ts`; a seleção da fila
 dá uma vaga por tenant e recua em falhas. Testes têm `isTest` no destinatário
 da campanha, nunca transformam a conversa real em sandbox. Resultados usam a
