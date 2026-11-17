@@ -195,11 +195,19 @@ export async function loadTenantsWithCampaign(tenantIds: string[], now = new Dat
 export async function loadCampaignReminderOverrides(
   tenantIds: string[],
   now: Date,
+  scope?: { leadId: string } | { phones: string[] },
 ): Promise<Map<string, CampaignRules>> {
   const result = new Map<string, CampaignRules>();
   if (!tenantIds.length) return result;
+  const tenantId = { in: tenantIds };
   const links = await prisma.campaignLead.findMany({
-    where: { tenantId: { in: tenantIds }, campaign: candidateCampaignWhere(now) },
+    where: {
+      tenantId,
+      campaign: { tenantId, ...candidateCampaignWhere(now) },
+      ...(scope && ("leadId" in scope
+        ? { leadId: scope.leadId }
+        : { lead: { tenantId, phone: { in: scope.phones } } })),
+    },
     select: {
       leadId: true,
       tenantId: true,
@@ -220,7 +228,7 @@ export async function loadCampaignReminderOverrides(
   }
 
   const bookings = await prisma.appointment.findMany({
-    where: { leadId: { in: [...touched] }, status: "scheduled" },
+    where: { tenantId, leadId: { in: [...touched] }, status: "scheduled" },
     select: { leadId: true, createdAt: true },
   });
   for (const [leadId, rows] of byLead) {

@@ -288,7 +288,7 @@ export function CampaignRulesForm({
             />
             <p className={HELP}>
               {reminders === "off"
-                ? "Nenhum lembrete sai para os leads da campanha enquanto ela estiver ativa."
+                ? "Os lembretes automáticos ficam suspensos enquanto a regra da campanha estiver em vigor. Uma consulta com lembretes próprios na Agenda segue a configuração dela."
                 : reminders === "custom"
                   ? "Só os lembretes abaixo, no lugar dos de sempre."
                   : "Os mesmos lembretes da agenda da clínica."}

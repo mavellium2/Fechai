@@ -45,8 +45,10 @@ extensão depois do fim para quem já agendou.
 - **Lembretes:** `loadReminderOverrides` na varredura. Desligado = não sai e não
   é marcado como enviado (volta a ser avaliado no fim; o que venceu é fechado
   sem envio). Personalizado = os da campanha. O lembrete próprio da consulta
-  vence a campanha. Confirmação do Clinicorp não sai para lead de campanha com
-  lembretes mexidos. Sem conseguir ler as campanhas, a volta não envia a leads.
+  vence a campanha. A confirmação automática do Clinicorp não sai se uma das
+  variantes do telefone estiver ligada a um lead de campanha com lembretes
+  desligados ou personalizados. Os dois workers conferem a regra da campanha
+  de novo antes de enviar; se a leitura falhar, adiam sem consumir o lembrete.
 - **Transbordo:** com `outside: "handoff"` e sem `handoff_human` ligado no
   agente, o turno ganha `campaign_handoff` (mesmo `transferToHuman`).
 

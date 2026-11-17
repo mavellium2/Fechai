@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
   // Sem campanha: o lead segue a agenda normal (ver modules/campaigns/active.ts).
-  campaignLead: { findMany: async () => [] },
+  campaignLead: { findMany: vi.fn() },
   campaignOverride: { findMany: async () => [] },
   tenantAction: { findMany: vi.fn() },
   reminderReceipt: { deleteMany: vi.fn() },
@@ -71,6 +71,7 @@ const upserts = () => db.clinicorpReminder.upsert.mock.calls.map(([arg]) => arg)
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.campaignLead.findMany.mockResolvedValue([]);
   vi.spyOn(console, "error").mockImplementation(() => {});
   config = {
     timezone: "America/Sao_Paulo",
@@ -499,6 +500,32 @@ describe("QR autorizado para avaliações externas", () => {
 
 
 describe("conferência imediatamente antes do envio", () => {
+  const campaignLink = {
+    tenantId: CONTA, leadId: "lead-campanha", assignedAt: new Date("2026-09-27"),
+    campaign: { id: "campanha", startsAt: new Date("2026-09-27"), endsAt: new Date("2026-09-30"), rules: { reminders: "off" } },
+  };
+
+  it("respeita a campanha ligada ao cadastro com a outra variante do telefone", async () => {
+    db.lead.findFirst.mockResolvedValue({ id: "cadastro-sem-campanha", phone: "5514991406457", conversation: { id: "c", whatsappProvider: "meta" } });
+    db.campaignLead.findMany.mockImplementation(async ({ where }) => {
+      const phone = "551491406457"; // cadastro vinculado à campanha, sem o nono dígito
+      return where.lead?.phone.in.includes(phone) ? [campaignLink] : [];
+    });
+    expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA }))
+      .toEqual({ sent: false, reason: "campaign" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(db.clinicorpReminder.upsert).not.toHaveBeenCalled();
+  });
+
+  it("adia a confirmação se a campanha desligar os lembretes depois do claim", async () => {
+    db.campaignLead.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([campaignLink]);
+    expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA }))
+      .toEqual({ sent: false, reason: "campaign" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(db.clinicorpReminder.upsert).not.toHaveBeenCalled();
+    expect(finishReminder).toHaveBeenCalledWith(expect.anything(), "blocked", expect.anything());
+  });
+
   it("não envia se a consulta foi cancelada depois da primeira leitura", async () => {
     clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta({ canceled: true })] });
     expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA })).toMatchObject({ reason: "changed", sent: false });

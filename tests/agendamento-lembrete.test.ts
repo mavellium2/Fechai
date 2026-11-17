@@ -17,6 +17,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const db = vi.hoisted(() => ({
+  campaignLead: { findMany: vi.fn() },
+  campaignOverride: { findMany: vi.fn(async () => []) },
   tenantAction: { findMany: vi.fn() },
   agent: { findMany: vi.fn() },
   appointment: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
@@ -63,6 +65,7 @@ import {
 } from "@/modules/scheduling/config";
 import { parseReminderOverride, serializeReminderOverride } from "@/modules/scheduling/reminder-override";
 import { outsideMetaWindow } from "@/modules/scheduling/meta-reminder";
+import { finishReminder } from "@/modules/scheduling/reminder-dispatch";
 import {
   dueReminders,
   reminderDueAt,
@@ -437,6 +440,7 @@ describe("Quais disparos estão vencidos (dueReminders)", () => {
 describe("Varredura (scanAndSendReminders)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    db.campaignLead.findMany.mockResolvedValue([]);
     db.appointment.findFirst.mockImplementation(async (args: { where: { id: string } }) => (await db.appointment.findMany({ where: {} })).find((a: { id: string }) => a.id === args.where.id) ?? null);
     db.appointment.update.mockResolvedValue({});
     db.message.create.mockResolvedValue({});
@@ -491,6 +495,37 @@ describe("Varredura (scanAndSendReminders)", () => {
     remindersSent: over.remindersSent ?? [],
     reminderOverride: over.reminderOverride ?? null,
     lead: { phone: "5511999990000", name: "Maria", isTest: false },
+  });
+
+  const campaignLink = {
+    tenantId: CONTA, leadId: "lead-campanha", assignedAt: new Date("2026-09-15"),
+    campaign: { id: "campanha", startsAt: new Date("2026-09-15"), endsAt: new Date("2026-09-18"), rules: { reminders: "off" } },
+  };
+
+  it("não envia se a campanha foi configurada para não mandar durante a varredura", async () => {
+    acaoConfigurada();
+    consultas([{ ...consultaAmanha(), leadId: campaignLink.leadId }]);
+    db.campaignLead.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([campaignLink]);
+    expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 0 });
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+    expect(db.appointment.update).not.toHaveBeenCalled();
+    expect(finishReminder).toHaveBeenCalledWith(expect.anything(), "blocked", expect.anything());
+  });
+
+  it("não marca como enviado o lembrete expirado enquanto a campanha o suspende", async () => {
+    acaoConfigurada();
+    consultas([], [{ ...consultaAmanha(), leadId: campaignLink.leadId, startsAt: new Date("2026-09-16T10:00:00Z") }]);
+    db.campaignLead.findMany.mockResolvedValue([campaignLink]);
+    expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 0 });
+    expect(db.appointment.update).not.toHaveBeenCalled();
+  });
+
+  it("mantém o lembrete próprio da consulta mesmo com lembretes da campanha desligados", async () => {
+    acaoConfigurada();
+    consultas([{ ...consultaAmanha({ reminderOverride: [{ minutesBefore: UM_DIA, template: "Lembrete desta consulta." }] }), leadId: campaignLink.leadId }]);
+    db.campaignLead.findMany.mockResolvedValue([campaignLink]);
+    expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 1 });
+    expect(provider.sendMessage).toHaveBeenCalledWith("inst-1", "5511999990000", "Lembrete desta consulta.");
   });
 
   it.each(["Ortodontia", "Reavaliação", null])("lembrete próprio não contorna o público da conta: %s", async (serviceType) => {

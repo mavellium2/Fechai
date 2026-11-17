@@ -172,6 +172,13 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
     ? cfg.reminders.filter((r) => isReminderSendDay(item.startsAt, r, now, cfg.timezone)) : cfg.reminders;
   const rules = options.operation ? due.length ? due : available : due;
   const toSend = [...rules].sort((a, b) => options.operation && !due.length ? b.minutesBefore - a.minutesBefore : a.minutesBefore - b.minutesBefore)[0];
+  const phone = clinicorpWhatsappPhone(item.phone);
+  const phones = phone ? broadcastPhoneVariants(phone) : [];
+  // O Clinicorp identifica o contato pelo telefone, não por um lead local.
+  // Se as variantes têm cadastros separados, confira a campanha em todos eles.
+  const campaignBlocks = async () => !options.operation && phones.length > 0 &&
+    await loadCampaignReminderOverrides([tenantId], now, { phones }).then((rules) => rules.size > 0).catch(() => true);
+  if ((toSend || expired.length) && await campaignBlocks()) return { sent: false, reason: "campaign" };
   if (!toSend) {
     if (expired.length) await markSent(tenantId, item, already, expired, null, moved);
     return { sent: false, reason: options.operation === "send" ? "outside_window" : already.length ? "handled" : "waiting" };
@@ -189,9 +196,8 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
     return { sent: false, reason: "type" };
   }
   if (await reminderAlreadyHandled(key)) return { sent: false, reason: "handled" };
-  const phone = clinicorpWhatsappPhone(item.phone);
   if (!phone || await isPhoneBlocked(tenantId, phone)) { await blockReminder(key, "Telefone inválido ou contato bloqueado."); return { sent: false, reason: "phone" }; }
-  const known = await prisma.lead.findFirst({ where: { tenantId, phone: { in: broadcastPhoneVariants(phone) } },
+  const known = await prisma.lead.findFirst({ where: { tenantId, phone: { in: phones } },
     select: { id: true, phone: true, isTest: true, conversation: { select: { id: true, lastInboundAt: true, followUpReason: true, variables: true, whatsappProvider: true } } } });
   if (known?.isTest || known?.conversation?.followUpReason === "stop") {
     await blockReminder(key, "Conversa de teste ou contato que pediu para parar."); return { sent: false, reason: "stop" };
@@ -202,11 +208,8 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
   if (known && !options.operation) {
     // Campanha de implantes (URG-03): a consulta marcada direto no Clinicorp não
     // tem `Appointment` nosso, então a regra olha o lead pelo telefone. Só vale
-    // para consulta até o fim da regra (19/11); falha de leitura = não envia. O mapa abaixo é só das
-    // campanhas reais: o override tem a checagem de data acima (o mapa dele não tem limite de data).
+    // para consulta até o fim da regra (19/11); falha de leitura = não envia.
     if (await overrideSuppressesReminder(tenantId, known.id, item.startsAt, now)) return { sent: false, reason: "campaign" };
-    const campaign = (await loadCampaignReminderOverrides([tenantId], now)).get(known.id);
-    if (campaign) return { sent: false, reason: "campaign" };
   }
   if (options.operation === "manual") {
     const recorded = await markReminderManual(key, options.userId ?? "");
@@ -237,6 +240,10 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
       freshItem.category !== item.category || clinicorpWhatsappPhone(freshItem.phone) !== phone || await isPhoneBlocked(tenantId, phone)) {
     await finishReminder(claim, "blocked", { reason: "A configuração ou a consulta mudou. Confira os dados antes do envio." });
     return { sent: false, reason: "changed" };
+  }
+  if (await campaignBlocks()) {
+    await finishReminder(claim, "blocked", { reason: "Os lembretes da campanha estão suspensos ou a regra não pôde ser conferida." });
+    return { sent: false, reason: "campaign" };
   }
   let messageId: string | null;
   try {

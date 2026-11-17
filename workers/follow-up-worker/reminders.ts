@@ -12,7 +12,7 @@ import {
   type ScheduleConfig,
 } from "../../src/modules/scheduling/config";
 import { parseReminderOverride } from "../../src/modules/scheduling/reminder-override";
-import { loadReminderOverrides } from "../../src/modules/campaigns/active";
+import { loadCampaignReminderOverrides, loadReminderOverrides } from "../../src/modules/campaigns/active";
 import type { CampaignRules } from "../../src/modules/campaigns/rules";
 import { parseConversationVariables } from "../../src/modules/agent-engine/variables";
 import { isPhoneBlocked } from "../../src/modules/whatsapp/blocklist";
@@ -232,12 +232,14 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
       status: "scheduled",
       startsAt: { lt: now },
     },
-    select: { id: true, tenantId: true, remindersSent: true, reminderOverride: true, startsAt: true, status: true },
+    select: { id: true, tenantId: true, leadId: true, remindersSent: true, reminderOverride: true, startsAt: true, status: true },
   });
   for (const appt of overdue) {
     const cfg = configByTenant.get(appt.tenantId);
     if (!cfg) continue;
-    const pending = staleReminders(appt, remindersFor(appt, cfg), now, cfg.timezone);
+    if (campaignRules === null && appt.leadId) continue;
+    const campaign = appt.leadId ? campaignRules?.get(appt.leadId) : undefined;
+    const pending = staleReminders(appt, remindersFor(appt, cfg, campaign), now, cfg.timezone);
     if (pending.length === 0) continue;
     await markSent(appt.id, appt.remindersSent, pending.map((r) => r.minutesBefore), null);
   }
@@ -326,11 +328,22 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
       include: { lead: true },
     });
     if (!currentConfig || JSON.stringify(currentConfig) !== JSON.stringify(cfg) || !currentAppointment ||
+        currentAppointment.leadId !== appt.leadId ||
         currentAppointment.lead?.phone !== appt.lead.phone || currentAppointment.clinicorpAppointmentId !== appt.clinicorpAppointmentId ||
         JSON.stringify(currentAppointment.reminderOverride) !== JSON.stringify(appt.reminderOverride) ||
         currentAppointment.serviceType !== appt.serviceType || await isPhoneBlocked(appt.tenantId, appt.lead.phone)) {
       await finishReminder(claim, "blocked", { reason: "A configuração ou a consulta mudou. Confira os dados antes do envio." });
       continue;
+    }
+    if (!target && appt.leadId && parseReminderOverride(appt.reminderOverride) === null) {
+      // A conta e a consulta podem estar intactas mesmo se a regra da campanha
+      // mudou depois que a varredura começou. Releia antes de enviar.
+      const latest = await loadCampaignReminderOverrides([appt.tenantId], now, { leadId: appt.leadId })
+        .catch(() => null);
+      if (!latest || JSON.stringify(remindersFor(appt, cfg, latest.get(appt.leadId))) !== JSON.stringify(rules)) {
+        await finishReminder(claim, "blocked", { reason: "A regra de lembretes da campanha mudou ou não pôde ser conferida." });
+        continue;
+      }
     }
     let keyId: string | null = null;
     let delivered = false;
