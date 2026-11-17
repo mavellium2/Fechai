@@ -403,12 +403,16 @@ O projeto usa **db push**, sem migrations. Atualize web e worker juntos:
 
 ```bash
 npm install
+npx prisma db execute --file prisma/manual/002-broadcast-retry-index.sql --schema prisma/schema.prisma
 npx prisma db push
 npx prisma generate
 npm run worker
 ```
 
-Além de campanhas/destinatários, há tabelas de recibos e sinal do serviço.
+O deploy executa o SQL acima antes do `db push`. Ele adiciona a coluna opcional
+e o índice único do reenvio em bancos existentes, sem preencher registros antigos.
+Em banco vazio, o `db push` cria a tabela e o índice. Além de
+campanhas/destinatários, há tabelas de recibos e sinal do serviço.
 Campanhas antigas mantêm faixa de dia inteiro; campos novos têm defaults ou
 aceitam null. A unicidade dos contatos agora inclui `isTest`. Se `db push` avisar
 sobre índices únicos, confira duplicatas antes de aceitar o aviso. No Windows,

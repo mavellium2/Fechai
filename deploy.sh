@@ -107,6 +107,8 @@ deploy_web() {
 
   if [[ "${DEPLOY_DB_PUSH:-0}" == "1" ]]; then
     echo "==> Aplicando schema antes da troca (use somente mudanças retrocompatíveis)..."
+    "${COMPOSE[@]}" run --rm --no-deps "${candidate}" npx prisma db execute \
+      --file prisma/manual/002-broadcast-retry-index.sql --schema prisma/schema.prisma
     "${COMPOSE[@]}" run --rm --no-deps "${candidate}" npx prisma db push
   fi
 

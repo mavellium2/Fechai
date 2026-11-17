@@ -29,6 +29,8 @@ echo "==> Construindo a imagem do laboratório..."
 "${COMPOSE[@]}" build web
 
 echo "==> Sincronizando somente o schema do banco saas_test..."
+"${COMPOSE[@]}" run --rm --no-deps web npx prisma db execute \
+  --file prisma/manual/002-broadcast-retry-index.sql --schema prisma/schema.prisma
 "${COMPOSE[@]}" run --rm --no-deps web npx prisma db push --skip-generate
 
 echo "==> Inserindo as contas de demonstração (operação idempotente)..."
