@@ -43,6 +43,14 @@ export type CampaignRules = {
   arrival: string;
   reminders: ReminderMode;
   customReminders: CampaignReminder[];
+  /**
+   * Pausa os lembretes automáticos de TODA a conta enquanto a campanha vale —
+   * não só dos leads dela: paciente marcado direto no Clinicorp, remarcado ou
+   * de fora da campanha também não recebe. É a única regra da campanha que passa
+   * dos leads dela, por isso só existe com `reminders: "off"` e exige data de fim
+   * (é o fim que faz os lembretes voltarem sozinhos). Ver `reminder-pause.ts`.
+   */
+  pauseAllReminders: boolean;
   /** Oferta e condições que a IA usa na conversa. */
   offer: string;
   /** Instruções livres, anexadas ao prompt do agente. */
@@ -78,6 +86,7 @@ export const DEFAULT_RULES: CampaignRules = {
   arrival: "",
   reminders: "default",
   customReminders: [],
+  pauseAllReminders: false,
   offer: "",
   instructions: "",
   outside: "offer_alternative",
@@ -155,6 +164,9 @@ export function parseCampaignRules(raw: unknown): CampaignRules {
   const grace = Math.round(Number(r.graceDays));
   const mode = r.reminders === "off" || r.reminders === "custom" ? r.reminders : "default";
   const custom = reminders(r.customReminders);
+  // "Personalizado" sem nenhum lembrete válido é o mesmo que desligado — e é
+  // o lado seguro: nunca manda lembrete que a clínica não escreveu.
+  const reminderMode: ReminderMode = mode === "custom" && !custom.length ? "off" : mode;
   return {
     dates: allowedDates,
     times: times(r.times),
@@ -163,10 +175,10 @@ export function parseCampaignRules(raw: unknown): CampaignRules {
       ? null
       : Math.min(capacity, RULE_LIMITS.capacity),
     arrival: text(r.arrival, RULE_LIMITS.arrival),
-    // "Personalizado" sem nenhum lembrete válido é o mesmo que desligado — e é
-    // o lado seguro: nunca manda lembrete que a clínica não escreveu.
-    reminders: mode === "custom" && !custom.length ? "off" : mode,
+    reminders: reminderMode,
     customReminders: mode === "custom" ? custom : [],
+    // Pausar os de todos só faz sentido com os da campanha também desligados.
+    pauseAllReminders: reminderMode === "off" && r.pauseAllReminders === true,
     offer: text(r.offer, RULE_LIMITS.offer),
     instructions: text(r.instructions, RULE_LIMITS.instructions),
     outside: r.outside === "handoff" ? "handoff" : "offer_alternative",
@@ -249,9 +261,12 @@ export function campaignSlotProblem(rules: CampaignRules, day: string, time: str
 /** Validação da tela (servidor): devolve a primeira mensagem de erro, ou null. */
 export function validateCampaignRules(
   rules: CampaignRules,
-  raw: { times?: unknown; dates?: unknown; followUp?: unknown; clinicorp?: unknown },
+  raw: { times?: unknown; dates?: unknown; followUp?: unknown; clinicorp?: unknown; pauseAllReminders?: unknown },
 ): string | null {
   if (raw.followUp !== undefined && typeof raw.followUp !== "boolean") return "Follow-up: escolha ligado ou desligado.";
+  if (raw.pauseAllReminders !== undefined && typeof raw.pauseAllReminders !== "boolean") {
+    return "Pausa dos lembretes: escolha ligada ou desligada.";
+  }
   if (raw.clinicorp !== undefined) {
     const mode = raw.clinicorp && typeof raw.clinicorp === "object" ? (raw.clinicorp as { mode?: unknown }).mode : undefined;
     if (mode !== "default" && mode !== "off") return "Clinicorp: escolha o padrão ou não espelhar.";

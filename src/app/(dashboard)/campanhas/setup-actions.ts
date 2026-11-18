@@ -92,6 +92,15 @@ export async function saveCampaignRules(campaignId: string, raw: unknown): Promi
   const rules = parseCampaignRules(merged);
   const problem = validateCampaignRules(rules, raw as { times?: unknown; dates?: unknown });
   if (problem) return { ok: false, code: "validation", error: problem };
+  // A pausa alcança todos os pacientes da conta: sem data de fim ela nunca
+  // voltaria sozinha (e `loadReminderPauses` ignora campanha sem fim).
+  if (rules.pauseAllReminders && !campaign.endsAt) {
+    return {
+      ok: false,
+      code: "validation",
+      error: "Para pausar os lembretes de todos, defina a data de fim da campanha: é nela que eles voltam sozinhos.",
+    };
+  }
 
   const before = parseCampaignRules(campaign.rules);
   if (JSON.stringify(before) === JSON.stringify(rules)) return { ok: true, id: campaign.id, info: "Nenhuma alteração para salvar." };

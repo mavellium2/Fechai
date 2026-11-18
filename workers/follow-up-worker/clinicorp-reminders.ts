@@ -1,5 +1,6 @@
 import { blockReminder, claimReminder, finishReminder, markReminderManual, reminderAlreadyHandled, type ReminderKey } from "../../src/modules/scheduling/reminder-dispatch";
-import { loadCampaignReminderOverrides } from "../../src/modules/campaigns/active";
+import { loadCampaignReminderOverrides, loadReminderPauses } from "../../src/modules/campaigns/active";
+import { activePause, pausedDue, reminderPausedBy, type ReminderPause } from "../../src/modules/campaigns/reminder-pause";
 import { overrideSuppressesReminder } from "../../src/modules/campaign-override/agent";
 import { recordMessageContext } from "../../src/modules/reports/contact-context-events";
 import { prisma } from "../../src/lib/prisma";
@@ -24,7 +25,7 @@ import {
   pickWhatsappChannel,
   setConversationChannel,
 } from "../../src/modules/whatsapp/instances";
-import { dueReminders, isReminderSendDay, loadAccountScheduleConfigs, staleReminders } from "./reminders";
+import { dueReminders, isReminderSendDay, loadAccountScheduleConfigs, reminderDueAt, staleReminders } from "./reminders";
 
 /**
  * Confirmações das consultas diretas do Clinicorp. Mesmo calendário de regras
@@ -135,6 +136,11 @@ export async function scanAndSendClinicorpReminders(now: Date = new Date()) {
 
 async function remindTenant(tenantId: string, cfg: ScheduleConfig, channels: Channels, now: Date) {
   const counts = { scanned: 0, sent: 0, firstContactSkipped: 0, typeSkipped: 0, unknownTypeSkipped: 0 };
+  // Campanha que pausa os lembretes da conta inteira: nenhuma confirmação sai,
+  // nem a da consulta remarcada. Falha de leitura sobe e a conta espera a
+  // próxima volta (o try/catch de quem chama não deixa calar as outras contas).
+  const pauses = (await loadReminderPauses([tenantId], now)).get(tenantId) ?? [];
+  if (activePause(pauses, now)) return counts;
   const maxLead = Math.max(...cfg.reminders.map((r) => r.minutesBefore + (r.sendTime ? 1440 : 0)));
   const agenda = await listClinicorpAgenda(tenantId, dayKeyInZone(now, cfg.timezone),
     dayKeyInZone(new Date(now.getTime() + (maxLead + 1440) * 60_000), cfg.timezone), cfg.timezone, { fresh: true });
@@ -147,7 +153,7 @@ async function remindTenant(tenantId: string, cfg: ScheduleConfig, channels: Cha
   for (const item of upcoming) {
     if (ours.has(item.id)) continue;
     const category = item.categoryId ? categories?.ok ? categories.data.find((c) => c.id === item.categoryId)?.name : null : item.category;
-    const result = await sendClinicorpConfirmation(tenantId, item, cfg, { now, channels, category });
+    const result = await sendClinicorpConfirmation(tenantId, item, cfg, { now, channels, category, pauses });
     if (result.sent) counts.sent++;
     if (result.reason === "channel") counts.firstContactSkipped++;
     if (result.reason === "type") { counts.typeSkipped++; if (!category) counts.unknownTypeSkipped++; }
@@ -157,7 +163,8 @@ async function remindTenant(tenantId: string, cfg: ScheduleConfig, channels: Cha
 
 /** Same path for the worker and the explicit per-appointment manual action. */
 export async function sendClinicorpConfirmation(tenantId: string, item: ClinicorpAgendaItem, cfg: ScheduleConfig,
-  options: { now?: Date; channels?: Channels; category?: string | null; operation?: "send" | "manual"; userId?: string } = {}) {
+  options: { now?: Date; channels?: Channels; category?: string | null; operation?: "send" | "manual"; userId?: string;
+    pauses?: readonly ReminderPause[] } = {}) {
   const now = options.now ?? new Date();
   if (item.canceled || item.startsAt <= now || !cfg.reminderEnabled || !cfg.reminders.length) return { sent: false, reason: "inactive" };
   const legacy = await prisma.clinicorpReminder.findUnique({ where: { tenantId_clinicorpAppointmentId: { tenantId, clinicorpAppointmentId: item.id } } });
@@ -172,6 +179,14 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
     ? cfg.reminders.filter((r) => isReminderSendDay(item.startsAt, r, now, cfg.timezone)) : cfg.reminders;
   const rules = options.operation ? due.length ? due : available : due;
   const toSend = [...rules].sort((a, b) => options.operation && !due.length ? b.minutesBefore - a.minutesBefore : a.minutesBefore - b.minutesBefore)[0];
+  if (!options.operation) {
+    // Pausa da conta (campanha): nada sai durante ela, e o disparo que venceu
+    // nela não sai depois. Nada é marcado: perde a janela e fecha sem envio.
+    const pauses = options.pauses ?? (await loadReminderPauses([tenantId], now)).get(tenantId) ?? [];
+    if (activePause(pauses, now) || (toSend && pausedDue(pauses, reminderDueAt(item.startsAt, toSend, cfg.timezone)))) {
+      return { sent: false, reason: "paused" };
+    }
+  }
   const phone = clinicorpWhatsappPhone(item.phone);
   const phones = phone ? broadcastPhoneVariants(phone) : [];
   // O Clinicorp identifica o contato pelo telefone, não por um lead local.
@@ -244,6 +259,19 @@ export async function sendClinicorpConfirmation(tenantId: string, item: Clinicor
   if (await campaignBlocks()) {
     await finishReminder(claim, "blocked", { reason: "Os lembretes da campanha estão suspensos ou a regra não pôde ser conferida." });
     return { sent: false, reason: "campaign" };
+  }
+  if (!options.operation) {
+    // A pausa pode ter sido ligada depois que a varredura começou: releia.
+    const latestPauses = await loadReminderPauses([tenantId], now).catch(() => null);
+    const pause = latestPauses
+      ? reminderPausedBy(latestPauses.get(tenantId) ?? [], reminderDueAt(item.startsAt, toSend, cfg.timezone), now)
+      : null;
+    if (!latestPauses || pause) {
+      await finishReminder(claim, "blocked", {
+        reason: pause ? `Lembretes pausados pela campanha ${pause.name}.` : "A pausa de lembretes das campanhas não pôde ser conferida.",
+      });
+      return { sent: false, reason: "paused" };
+    }
   }
   let messageId: string | null;
   try {

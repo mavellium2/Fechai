@@ -57,7 +57,8 @@ export function CampaignRulesForm({
   part,
 }: {
   campaignId: string;
-  campaign: { name: string; objective: string | null; description: string | null };
+  /** `endsOn` ("YYYY-MM-DD" ou "") diz se a pausa dos lembretes pode ser ligada. */
+  campaign: { name: string; objective: string | null; description: string | null; endsOn?: string };
   rules: CampaignRules;
   editable: boolean;
   part: "agenda" | "fala";
@@ -91,6 +92,9 @@ export function CampaignRulesForm({
   const [grace, setGrace] = useState(String(rules.graceDays || ""));
   const [followUp, setFollowUp] = useState(rules.followUp);
   const [clinicorp, setClinicorp] = useState<ClinicorpMode>(rules.clinicorp.mode);
+  const [pauseAll, setPauseAll] = useState(rules.pauseAllReminders);
+  // Sem data de fim a pausa nunca voltaria sozinha (o servidor também recusa).
+  const hasEnd = Boolean(campaign.endsOn);
 
   const disabled = !editable || save.saving;
 
@@ -134,6 +138,8 @@ export function CampaignRulesForm({
               reminders === "custom"
                 ? custom.map((r) => ({ minutesBefore: Number(r.amount) * Number(r.unit), template: r.template }))
                 : [],
+            // Sem data de fim o interruptor fica travado; não reenvie uma pausa antiga.
+            pauseAllReminders: reminders === "off" && pauseAll && hasEnd,
             outside,
             followUp,
             clinicorp: { mode: clinicorp },
@@ -293,6 +299,26 @@ export function CampaignRulesForm({
                   ? "Só os lembretes abaixo, no lugar dos de sempre."
                   : "Os mesmos lembretes da agenda da clínica."}
             </p>
+            {reminders === "off" && (
+              <div className="flex items-start justify-between gap-4 rounded-control border border-ink/10 p-3 panel:border-white/15">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-ink panel:text-white">Pausar também os lembretes de quem não é da campanha</p>
+                  <p className={HELP}>
+                    {!hasEnd
+                      ? "Defina a data de fim da campanha para usar a pausa: é nela que os lembretes voltam sozinhos."
+                      : pauseAll
+                        ? "Enquanto a campanha estiver em vigor, nenhum paciente recebe lembrete automático, nem quem for remarcado ou marcado direto no Clinicorp. No fim da campanha volta sozinho, e o que sairia nesses dias não é enviado depois. O envio manual pela Agenda continua disponível."
+                        : "Só os leads da campanha ficam sem lembrete. Os outros pacientes seguem recebendo os de sempre."}
+                  </p>
+                </div>
+                <Switch
+                  checked={pauseAll && hasEnd}
+                  onCheckedChange={setPauseAll}
+                  disabled={disabled || !hasEnd}
+                  label="Pausar também os lembretes de quem não é da campanha"
+                />
+              </div>
+            )}
             {reminders === "custom" && (
               <div className="space-y-3">
                 {custom.map((reminder, index) => (

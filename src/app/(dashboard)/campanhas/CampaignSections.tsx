@@ -48,6 +48,7 @@ function stepInfo(props: Props): Record<StepId, { state: StepState; summary: str
     broadcasts ? `${broadcasts} disparo${broadcasts === 1 ? "" : "s"}` : "",
   ].filter(Boolean);
   const hasPeriod = Boolean(campaign.startsOn && campaign.endsOn);
+  const reminderOffLabel = rules.pauseAllReminders ? " · lembretes pausados para todos" : " · sem lembretes";
   return {
     basico: {
       state: hasPeriod ? "done" : "missing",
@@ -70,9 +71,9 @@ function stepInfo(props: Props): Record<StepId, { state: StepState; summary: str
       state: restrictsSchedule(rules) || rules.reminders !== "default" || !rules.followUp || rules.clinicorp.mode !== "default" ? "done" : "default",
       summary:
         (restrictsSchedule(rules)
-          ? `Só ${describeAllowedSlots(rules)}${rules.reminders === "off" ? " · sem lembretes" : ""}`
+          ? `Só ${describeAllowedSlots(rules)}${rules.reminders === "off" ? reminderOffLabel : ""}`
           : rules.reminders === "off"
-            ? "Agenda normal · sem lembretes"
+            ? `Agenda normal${reminderOffLabel}`
             : "Agenda normal da clínica") +
         (rules.followUp ? "" : " · sem follow-up") +
         (rules.clinicorp.mode === "off" ? " · sem Clinicorp" : ""),

@@ -1,7 +1,9 @@
 import type { Campaign, CampaignAsset } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { loadOverrideReminderRules, overrideAsLeadCampaign } from "@/modules/campaign-override/agent";
-import { parseCampaignRules, type CampaignRules } from "./rules";
+import { MAX_REMINDER_MINUTES } from "@/modules/scheduling/config";
+import type { ReminderPause } from "./reminder-pause";
+import { parseCampaignRules, RULE_LIMITS, type CampaignRules } from "./rules";
 
 /**
  * Qual campanha manda no atendimento de um lead AGORA. Fonte única do turno do
@@ -237,6 +239,45 @@ export async function loadCampaignReminderOverrides(
     if (!chosen) continue;
     const rules = parseCampaignRules(chosen.campaign.rules);
     if (rules.reminders !== "default") result.set(leadId, rules);
+  }
+  return result;
+}
+
+/**
+ * Até quando uma pausa já encerrada ainda importa: o disparo que venceu dentro
+ * dela pode seguir "vencido" até a consulta (lembrete de minutos/horas), e o
+ * maior lembrete aceito é o da conta (8 semanas) ou o da campanha (30 dias).
+ */
+const PAUSE_LOOKBACK_MS = (Math.max(MAX_REMINDER_MINUTES, RULE_LIMITS.reminderMinutes) + 24 * 60) * 60_000;
+
+/**
+ * Pausas de lembrete da conta inteira (`pauseAllReminders`), por conta. Só
+ * campanha ativada, não pausada nem arquivada, que já começou e tem fim: sem
+ * fim a pausa não teria como voltar sozinha, então não vale (a tela exige a
+ * data). Vem também a pausa que acabou há pouco: o que venceu dentro dela não
+ * sai depois (`reminder-pause.ts`).
+ *
+ * **Lança** se o banco falhar: os workers não enviam na dúvida e tentam de novo
+ * na volta seguinte.
+ */
+export async function loadReminderPauses(tenantIds: string[], now: Date): Promise<Map<string, ReminderPause[]>> {
+  const result = new Map<string, ReminderPause[]>();
+  if (!tenantIds.length) return result;
+  const rows = await prisma.campaign.findMany({
+    where: {
+      tenantId: { in: tenantIds },
+      archivedAt: null,
+      activatedAt: { not: null },
+      pausedAt: null,
+      startsAt: { lte: now },
+      endsAt: { gte: new Date(now.getTime() - PAUSE_LOOKBACK_MS) },
+    },
+    select: { id: true, tenantId: true, name: true, startsAt: true, endsAt: true, rules: true },
+  });
+  for (const row of rows) {
+    if (!row.startsAt || !row.endsAt || !parseCampaignRules(row.rules).pauseAllReminders) continue;
+    const pause = { campaignId: row.id, name: row.name, startsAt: row.startsAt, endsAt: row.endsAt };
+    result.set(row.tenantId, [...(result.get(row.tenantId) ?? []), pause]);
   }
   return result;
 }

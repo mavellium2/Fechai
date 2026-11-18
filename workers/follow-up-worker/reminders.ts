@@ -12,7 +12,8 @@ import {
   type ScheduleConfig,
 } from "../../src/modules/scheduling/config";
 import { parseReminderOverride } from "../../src/modules/scheduling/reminder-override";
-import { loadCampaignReminderOverrides, loadReminderOverrides } from "../../src/modules/campaigns/active";
+import { loadCampaignReminderOverrides, loadReminderOverrides, loadReminderPauses } from "../../src/modules/campaigns/active";
+import { activePause, pausedDue, reminderPausedBy, type ReminderPause } from "../../src/modules/campaigns/reminder-pause";
 import type { CampaignRules } from "../../src/modules/campaigns/rules";
 import { parseConversationVariables } from "../../src/modules/agent-engine/variables";
 import { isPhoneBlocked } from "../../src/modules/whatsapp/blocklist";
@@ -183,6 +184,14 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     console.error("[lembretes] campanhas indisponíveis; sem enviar a leads de campanha nesta volta", err);
     return null;
   });
+  // Campanha que pausa os lembretes da conta inteira (`reminder-pause.ts`).
+  // Sem conseguir ler, esta volta não envia nada; o envio explícito passa.
+  const pauses: Map<string, ReminderPause[]> | null = target
+    ? new Map()
+    : await loadReminderPauses([...configByTenant.keys()], now).catch((err) => {
+        console.error("[lembretes] pausas de campanha indisponíveis; sem enviar nesta volta", err);
+        return null;
+      });
   const configuredRules = [...configByTenant.values()]
     .filter((cfg) => cfg.reminderEnabled)
     .flatMap((cfg) => cfg.reminders)
@@ -256,12 +265,19 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     // Sem conseguir ler as campanhas, não arrisca mandar lembrete que a
     // campanha desligou: espera a próxima volta (o envio explícito passa).
     if (campaignRules === null && appt.leadId && !target) continue;
+    // Pausa da conta: nada sai, nem é marcado — o que vencer nela perde a
+    // janela e é fechado sem envio depois, como qualquer disparo atrasado.
+    if (pauses === null) continue;
+    const tenantPauses = pauses.get(appt.tenantId) ?? [];
+    if (activePause(tenantPauses, now)) continue;
     const campaign = !target && appt.leadId ? campaignRules?.get(appt.leadId) : undefined;
     const rules = remindersFor(appt, cfg, campaign);
     if (rules.length === 0) continue;
 
     const expired = staleReminders(appt, rules, now, cfg.timezone).map((r) => r.minutesBefore);
-    const dueNow = dueReminders(target ? { ...appt, remindersSent: [] } : appt, rules, now, cfg.timezone);
+    // O disparo que venceu durante a pausa não sai depois que ela acaba.
+    const dueNow = dueReminders(target ? { ...appt, remindersSent: [] } : appt, rules, now, cfg.timezone)
+      .filter((r) => !pausedDue(tenantPauses, reminderDueAt(appt.startsAt, r, cfg.timezone)));
     const available = target?.operation === "send"
       ? rules.filter((r) => isReminderSendDay(appt.startsAt, r, now, cfg.timezone)) : rules;
     const due = target && !dueNow.length ? available : dueNow;
@@ -342,6 +358,19 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
         .catch(() => null);
       if (!latest || JSON.stringify(remindersFor(appt, cfg, latest.get(appt.leadId))) !== JSON.stringify(rules)) {
         await finishReminder(claim, "blocked", { reason: "A regra de lembretes da campanha mudou ou não pôde ser conferida." });
+        continue;
+      }
+    }
+    if (!target) {
+      // A pausa pode ter sido ligada depois que a varredura começou: releia.
+      const latestPauses = await loadReminderPauses([appt.tenantId], now).catch(() => null);
+      const pause = latestPauses
+        ? reminderPausedBy(latestPauses.get(appt.tenantId) ?? [], reminderDueAt(appt.startsAt, toSend, cfg.timezone), now)
+        : null;
+      if (!latestPauses || pause) {
+        await finishReminder(claim, "blocked", {
+          reason: pause ? `Lembretes pausados pela campanha ${pause.name}.` : "A pausa de lembretes das campanhas não pôde ser conferida.",
+        });
         continue;
       }
     }

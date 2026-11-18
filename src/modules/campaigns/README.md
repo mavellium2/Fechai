@@ -49,6 +49,15 @@ extensão depois do fim para quem já agendou.
   variantes do telefone estiver ligada a um lead de campanha com lembretes
   desligados ou personalizados. Os dois workers conferem a regra da campanha
   de novo antes de enviar; se a leitura falhar, adiam sem consumir o lembrete.
+- **Pausar os lembretes de todos** (`pauseAllReminders`, só com lembretes
+  desligados e campanha com data de fim): é a única regra que passa dos leads
+  da campanha. Enquanto ela vale (ativada, não pausada, entre início e fim, sem
+  extensão), nenhum lembrete automático sai da conta — nem de consulta
+  remarcada, nem da marcada direto no Clinicorp, nem de quem não é lead. O
+  disparo que venceu dentro da pausa também não sai depois que ela acaba
+  (`reminder-pause.ts`); nada é marcado, ele perde a janela e é fechado sem
+  envio. Os dois workers leem `loadReminderPauses` e releem antes de enviar;
+  sem conseguir ler, não enviam naquela volta. O envio manual da Agenda passa.
 - **Transbordo:** com `outside: "handoff"` e sem `handoff_human` ligado no
   agente, o turno ganha `campaign_handoff` (mesmo `transferToHuman`).
 
