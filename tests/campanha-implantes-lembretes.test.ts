@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   campaignLead: { findMany: vi.fn() },
   campaignOverride: { findMany: vi.fn() },
+  // Pausa de lembretes da conta (campanha): sem campanha, nada pausado.
+  campaign: { findMany: vi.fn(async (): Promise<unknown[]> => []) },
   leadAdOrigin: { findMany: vi.fn() },
   $transaction: vi.fn(),
   $executeRaw: vi.fn(),

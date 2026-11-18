@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Lembretes das consultas marcadas direto no Clinicorp.
@@ -12,6 +12,8 @@ const db = vi.hoisted(() => ({
   // Sem campanha: o lead segue a agenda normal (ver modules/campaigns/active.ts).
   campaignLead: { findMany: vi.fn() },
   campaignOverride: { findMany: async () => [] },
+  // Pausa de lembretes da conta (campanha): sem campanha, nada pausado.
+  campaign: { findMany: vi.fn(async (): Promise<unknown[]> => []) },
   tenantAction: { findMany: vi.fn() },
   reminderReceipt: { deleteMany: vi.fn() },
   agent: { findMany: vi.fn() },
@@ -540,6 +542,76 @@ describe("conferência imediatamente antes do envio", () => {
     const original = parseScheduleConfig(config);
     config.reminderEnabled = false;
     expect(await sendClinicorpConfirmation(CONTA, consulta(), original, { now: AGORA })).toMatchObject({ reason: "changed" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+  });
+});
+
+describe("campanha que pausa os lembretes de todos (evento)", () => {
+  // Evento de 28/09 00:00 a 29/09 23:59:59 (Brasília). AGORA = 28/09 09:00.
+  const evento = {
+    id: "evento", tenantId: CONTA, name: "Plantão de Implantes",
+    startsAt: new Date("2026-09-28T03:00:00Z"), endsAt: new Date("2026-09-30T02:59:59Z"),
+    rules: { reminders: "off", pauseAllReminders: true },
+  };
+  beforeEach(() => db.campaign.findMany.mockResolvedValue([evento]));
+  afterEach(() => db.campaign.findMany.mockImplementation(async (): Promise<unknown[]> => []));
+
+  it("paciente marcado direto no Clinicorp, que nem é lead, não recebe", async () => {
+    expect(await scanAndSendClinicorpReminders(AGORA)).toMatchObject({ sent: 0 });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(evolution.sendMessage).not.toHaveBeenCalled();
+    expect(db.clinicorpReminder.upsert).not.toHaveBeenCalled();
+    // Durante a pausa a conta nem consulta a agenda do Clinicorp.
+    expect(clinicorp.listClinicorpAgenda).not.toHaveBeenCalled();
+  });
+
+  it("consulta remarcada lá durante o evento também não recebe", async () => {
+    // Remarcada para amanhã: o "1 dia antes" já venceu, e sem a pausa sairia na hora.
+    db.clinicorpReminder.findMany.mockResolvedValue([
+      { clinicorpAppointmentId: consulta().id, startsAt: new Date("2026-09-29T14:00:00Z"), remindersSent: [UM_DIA] },
+    ]);
+    expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA }))
+      .toEqual({ sent: false, reason: "paused" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(db.clinicorpReminder.upsert).not.toHaveBeenCalled();
+  });
+
+  it("o que venceu durante o evento não sai depois que ele acaba", async () => {
+    // Campanha que termina às 23:59:00 e varredura às 23:59:30 de 29/09: a pausa
+    // acabou, mas o "1 dia antes" da consulta de 30/09 (vencido dia 29, dentro
+    // dela) ainda está no prazo até a meia-noite. Não pode escapar.
+    db.campaign.findMany.mockResolvedValue([{ ...evento, endsAt: new Date("2026-09-30T02:59:00Z") }]);
+    clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta({ startsAt: new Date("2026-09-30T11:00:00Z") })] });
+    expect(await scanAndSendClinicorpReminders(new Date("2026-09-30T02:59:30Z"))).toMatchObject({ sent: 0 });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    // Barrado antes de reservar o envio: nada fica "bloqueado" na fila.
+    expect(finishReminder).not.toHaveBeenCalled();
+  });
+
+  it("no dia seguinte volta ao normal", async () => {
+    clinicorp.listClinicorpAgenda.mockResolvedValue({ status: "ok", items: [consulta({ startsAt: new Date("2026-10-02T11:00:00Z") })] });
+    expect(await scanAndSendClinicorpReminders(new Date("2026-10-01T12:00:00Z"))).toMatchObject({ sent: 1 });
+    expect(meta.sendBroadcastTemplate).toHaveBeenCalledOnce();
+  });
+
+  it("o envio manual da equipe passa", async () => {
+    config.reminders = [{ minutesBefore: UM_DIA, sendTime: "16:00", template: "É amanhã." }];
+    expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA, operation: "send", userId: "u" }))
+      .toMatchObject({ sent: true });
+    expect(meta.sendBroadcastTemplate).toHaveBeenCalledOnce();
+  });
+
+  it("se a pausa for ligada depois do claim, bloqueia antes de enviar", async () => {
+    db.campaign.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([evento]);
+    expect(await sendClinicorpConfirmation(CONTA, consulta(), parseScheduleConfig(config), { now: AGORA }))
+      .toEqual({ sent: false, reason: "paused" });
+    expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
+    expect(finishReminder).toHaveBeenCalledWith(expect.anything(), "blocked", expect.objectContaining({ reason: expect.stringContaining("pausados") }));
+  });
+
+  it("sem conseguir ler as pausas, a conta espera a próxima volta", async () => {
+    db.campaign.findMany.mockRejectedValue(new Error("db fora"));
+    expect(await scanAndSendClinicorpReminders(AGORA)).toMatchObject({ sent: 0 });
     expect(meta.sendBroadcastTemplate).not.toHaveBeenCalled();
   });
 });

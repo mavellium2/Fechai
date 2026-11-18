@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Testes dos lembretes pré-consulta.
@@ -19,6 +19,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   campaignLead: { findMany: vi.fn() },
   campaignOverride: { findMany: vi.fn(async () => []) },
+  // Pausa de lembretes da conta (campanha): sem campanha, nada pausado.
+  campaign: { findMany: vi.fn(async (): Promise<unknown[]> => []) },
   tenantAction: { findMany: vi.fn() },
   agent: { findMany: vi.fn() },
   appointment: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
@@ -65,7 +67,7 @@ import {
 } from "@/modules/scheduling/config";
 import { parseReminderOverride, serializeReminderOverride } from "@/modules/scheduling/reminder-override";
 import { outsideMetaWindow } from "@/modules/scheduling/meta-reminder";
-import { finishReminder } from "@/modules/scheduling/reminder-dispatch";
+import { claimReminder, finishReminder } from "@/modules/scheduling/reminder-dispatch";
 import {
   dueReminders,
   reminderDueAt,
@@ -526,6 +528,78 @@ describe("Varredura (scanAndSendReminders)", () => {
     db.campaignLead.findMany.mockResolvedValue([campaignLink]);
     expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 1 });
     expect(provider.sendMessage).toHaveBeenCalledWith("inst-1", "5511999990000", "Lembrete desta consulta.");
+  });
+
+  describe("campanha que pausa os lembretes de todos (evento)", () => {
+    // Evento de 16/09 00:00 a 17/09 23:59:59 (Brasília). AGORA = 16/09 09:00.
+    const evento = {
+      id: "evento", tenantId: CONTA, name: "Plantão de Implantes",
+      startsAt: new Date("2026-09-16T03:00:00Z"), endsAt: new Date("2026-09-18T02:59:59Z"),
+      rules: { reminders: "off", pauseAllReminders: true },
+    };
+    beforeEach(() => db.campaign.findMany.mockResolvedValue([evento]));
+    afterEach(() => db.campaign.findMany.mockImplementation(async (): Promise<unknown[]> => []));
+
+    it("não envia nem marca, mesmo para quem não é lead de campanha", async () => {
+      acaoConfigurada();
+      consultas([consultaAmanha()]);
+      expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 0 });
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+      expect(db.appointment.update).not.toHaveBeenCalled();
+      expect(claimReminder).not.toHaveBeenCalled();
+    });
+
+    it("o que venceu durante a pausa não sai depois que ela acaba", async () => {
+      acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, template: "É amanhã." }] });
+      // Campanha que termina às 23:59:00 e varredura às 23:59:30: a pausa acabou,
+      // mas o "1 dia antes" da consulta de 18/09 (vencido às 09:00 de 17/09, dentro
+      // dela) ainda está no prazo até a meia-noite. Não pode escapar.
+      db.campaign.findMany.mockResolvedValue([{ ...evento, endsAt: new Date("2026-09-18T02:59:00Z") }]);
+      consultas([{ ...consultaAmanha(), startsAt: new Date("2026-09-18T12:00:00Z") }]);
+      expect(await scanAndSendReminders(new Date("2026-09-18T02:59:30Z"))).toMatchObject({ sent: 0 });
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+      // Barrado já na varredura: nem chega a reservar o envio na fila.
+      expect(claimReminder).not.toHaveBeenCalled();
+    });
+
+    it("depois da pausa volta ao normal", async () => {
+      acaoConfigurada({ reminders: [{ minutesBefore: UM_DIA, template: "É amanhã." }] });
+      consultas([{ ...consultaAmanha(), startsAt: new Date("2026-09-20T12:00:00Z") }]);
+      expect(await scanAndSendReminders(new Date("2026-09-19T12:30:00Z"))).toMatchObject({ sent: 1 });
+      expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("o envio manual da equipe passa durante a pausa", async () => {
+      acaoConfigurada();
+      consultas([consultaAmanha()]);
+      expect(await scanAndSendReminders(AGORA, { tenantId: CONTA, id: "appt-1", operation: "send", userId: "u" }))
+        .toMatchObject({ sent: 1 });
+      expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("se a pausa for ligada durante a varredura, bloqueia antes de enviar", async () => {
+      acaoConfigurada();
+      consultas([consultaAmanha()]);
+      db.campaign.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([evento]);
+      expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 0 });
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+      expect(finishReminder).toHaveBeenCalledWith(expect.anything(), "blocked", expect.objectContaining({ reason: expect.stringContaining("pausados") }));
+    });
+
+    it("sem conseguir ler as pausas, esta volta não envia", async () => {
+      acaoConfigurada();
+      consultas([consultaAmanha()]);
+      db.campaign.findMany.mockRejectedValue(new Error("db fora"));
+      expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 0 });
+      expect(provider.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("campanha sem a opção não mexe em quem não é lead dela", async () => {
+      acaoConfigurada();
+      consultas([consultaAmanha()]);
+      db.campaign.findMany.mockResolvedValue([{ ...evento, rules: { reminders: "off" } }]);
+      expect(await scanAndSendReminders(AGORA)).toMatchObject({ sent: 1 });
+    });
   });
 
   it.each(["Ortodontia", "Reavaliação", null])("lembrete próprio não contorna o público da conta: %s", async (serviceType) => {
