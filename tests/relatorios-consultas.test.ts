@@ -4,7 +4,7 @@ const db = vi.hoisted(() => ({
   lead: { findMany: vi.fn(), count: vi.fn(), groupBy: vi.fn() },
   conversation: { count: vi.fn(), findMany: vi.fn(), groupBy: vi.fn() },
   reportEvent: { findMany: vi.fn() }, appointment: { findMany: vi.fn() }, agent: { findMany: vi.fn() },
-  monthlyRoiReport: { findUnique: vi.fn() }, tenantServiceArea: { findUnique: vi.fn() },
+  monthlyRoiReport: { findUnique: vi.fn(), findFirst: vi.fn() }, tenantServiceArea: { findUnique: vi.fn() },
   reminderDispatch: { findMany: vi.fn() }, broadcastRecipient: { findMany: vi.fn() },
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
@@ -36,7 +36,7 @@ beforeEach(() => {
   db.conversation.findMany.mockResolvedValue([]); db.conversation.groupBy.mockResolvedValue([]); db.conversation.count.mockResolvedValue(0);
   db.appointment.findMany.mockResolvedValue([]); db.agent.findMany.mockResolvedValue([]);
   db.reportEvent.findMany.mockResolvedValue([]);
-  db.message.findMany.mockResolvedValue([]); db.monthlyRoiReport.findUnique.mockResolvedValue(null);
+  db.message.findMany.mockResolvedValue([]); db.monthlyRoiReport.findUnique.mockResolvedValue(null); db.monthlyRoiReport.findFirst.mockResolvedValue(null);
   db.tenantServiceArea.findUnique.mockResolvedValue(null);
   db.reminderDispatch.findMany.mockResolvedValue([]); db.broadcastRecipient.findMany.mockResolvedValue([]);
 });
@@ -78,8 +78,10 @@ describe("consultas do operacional", () => {
     expect(r.autonomyRate.current).toBe(0.5);
     expect(r.closed.reduce((n, b) => n + b.ai + b.human, 0)).toBe(3);
     expect(r.results.reduce((n, b) => n + b.appts, 0)).toBe(3);
+    // Mesmo recorte da coorte do mensal: não cancelado, lead real, conversa real quando existe.
     for (const call of db.appointment.findMany.mock.calls) {
-      expect(call[0].where).toMatchObject({ tenantId: "tenant", lead: { isTest: false }, conversation: { isTest: false } });
+      expect(call[0].where).toMatchObject({ tenantId: "tenant", status: { not: "canceled" }, lead: { isTest: false },
+        OR: [{ conversationId: null }, { conversation: { isTest: false } }] });
     }
     expect(db.appointment.findMany.mock.calls[0][0].where).toHaveProperty("createdAt");
     expect(JSON.stringify(db.conversation.groupBy.mock.calls)).not.toContain("updatedAt");
@@ -140,6 +142,39 @@ describe("consultas do operacional", () => {
     const r = await computePeriodReport("tenant", { ...resolveRange("mes", "2026-09-01", "2026-09-30"), prevFrom: null, prevTo: null });
     expect(r.kpis.evaluations).toBe(1);
     expect(db.monthlyRoiReport.findUnique.mock.calls[0][0].where).toEqual({ tenantId_month: { tenantId: "tenant", month: "2026-09" } });
+  });
+
+  it("mês sem revisão herda as premissas do último mês revisado, como o mensal", async () => {
+    // Outubro sem revisão: o mensal usava as premissas de setembro e o painel as vazias (23 × 24).
+    db.monthlyRoiReport.findFirst.mockResolvedValue({ month: "2026-09", assumptions: { ...EMPTY_ASSUMPTIONS, countUntypedAsEvaluations: true } });
+    const october = (day: number) => new Date(`2026-10-${String(day).padStart(2, "0")}T13:00:00Z`);
+    db.appointment.findMany.mockImplementation(async ({ select }) => select.attendance ? [] : [
+      { id: "typed", conversationId: null, createdAt: october(5), source: "agent", kind: "evaluation", serviceType: null, agentId: "a", lead: null },
+      { id: "untyped", conversationId: null, createdAt: october(6), source: "agent", kind: null, serviceType: null, agentId: "a", lead: null },
+    ]);
+    const r = await computePeriodReport("tenant", { ...resolveRange("mes", "2026-10-01", "2026-10-31"), prevFrom: null, prevTo: null });
+    expect(r.kpis.evaluations).toBe(2);
+    expect(db.monthlyRoiReport.findFirst.mock.calls[0][0]).toMatchObject({ where: { tenantId: "tenant", month: { lt: "2026-10" } }, orderBy: { month: "desc" } });
+    // Recorte que não é uma competência inteira não herda nada.
+    db.monthlyRoiReport.findFirst.mockClear();
+    const partial = await computePeriodReport("tenant", { ...resolveRange("mes", "2026-10-02", "2026-10-31"), prevFrom: null, prevTo: null });
+    expect(partial.kpis.evaluations).toBe(1);
+    expect(db.monthlyRoiReport.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("consulta sem conversa ligada conta no contexto pela conversa do lead", async () => {
+    db.message.findMany.mockResolvedValue([
+      { id: "u", conversationId: "conv", role: "user", sentBy: null, createdAt: date(2), whatsappMessageId: null },
+      { id: "a", conversationId: "conv", role: "assistant", sentBy: "agent", createdAt: new Date(+date(2) + 30_000), whatsappMessageId: null },
+    ]);
+    patientStarted({ conv: { at: date(2) } });
+    db.appointment.findMany.mockImplementation(async ({ select }) => select.attendance ? [] : [
+      { id: "orphan", conversationId: null, createdAt: date(3), source: "agent", kind: "evaluation", serviceType: null, agentId: "a",
+        lead: { conversation: { id: "conv" } } },
+    ]);
+    const r = await computePeriodReport("tenant", { ...resolveRange("mes", "2026-09-01", "2026-09-30"), prevFrom: null, prevTo: null });
+    expect(r.contexts.groups.find((g) => g.key === "inbound_new")).toMatchObject({ scheduledContacts: 1 });
+    expect(r.contexts.unattributedEvaluations).toBe(0);
   });
 });
 

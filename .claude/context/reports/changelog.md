@@ -2,6 +2,27 @@
 
 **Instrução:** Atualize aqui cada vez que mexer neste módulo.
 
+### [2026-11-20] — Painel e mensal com as mesmas premissas e o mesmo "agendou"
+
+**Motivo:** conferência no ar (Instituto do Sorriso, outubro/2026) achou o
+painel com 23 avaliações e o mensal com 24; a aba de leads com 29 "agendou"
+contra 23 no mensal.
+
+**Causas e correções:**
+- Outubro não tem revisão: o mensal herdava as premissas de setembro e o painel
+  usava as vazias. `monthly-assumptions.ts` (`periodAssumptions`,
+  `latestRevisionBefore`, `isAgentEvaluation`) é a regra única dos dois.
+- Agendamentos do painel com o recorte do mensal: não cancelado, consulta sem
+  conversa ligada pelo lead (o filtro `conversation: { isTest: false }` a descartava).
+- Aba de leads: agendou = avaliação do agente, não cancelada, criada na janela
+  (antes: qualquer agendamento de qualquer data). Envio automático fora das
+  respostas também ali. Script de conferência ganhou `scheduledLeads`.
+- Legenda do medidor de autonomia dizia "dos contatos atendidos".
+
+**Fica diferente de propósito:** "Motivos de perda" (só perdidos) × "Motivo
+principal de não agendar" (todos que não agendaram); consulta cancelada só no
+Clinicorp sai do mensal e não do painel.
+
 ### [2026-11-20] — Resolução autônoma só sobre o que o paciente iniciou
 
 **Motivo:** no Instituto do Sorriso (set–nov/2026) a resolução autônoma saía 3%

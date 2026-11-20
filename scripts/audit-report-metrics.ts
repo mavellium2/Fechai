@@ -21,7 +21,7 @@ async function main() {
   const range = { from: window.start, to: new Date(+window.end - 1), label: month, bucket: "dia" as const, prevFrom: null, prevTo: null };
   const [operational, quality, approved] = await Promise.all([
     computePeriodReport(tenantId, range, { assumptions: config, agentIds: config.agentIds ?? undefined }),
-    loadLeadQualityDetail(tenantId, { from: window.start, to: window.end }, { agentIds: config.agentIds ?? undefined }),
+    loadLeadQualityDetail(tenantId, { from: window.start, to: window.end }, { agentIds: config.agentIds ?? undefined, assumptions: config }),
     prisma.monthlyRoiReport.findUnique({ where: { tenantId_month: { tenantId, month } }, select: { status: true, snapshot: true } }),
   ]);
   const d = monthly.data!;
@@ -31,6 +31,8 @@ async function main() {
     aiOnly: { operational: operational.attendance.reduce((n, row) => n + row.ai, 0), monthly: d.service.aiOnly.value },
     transferred: { operational: operational.attendance.reduce((n, row) => n + row.human, 0), monthly: d.service.transferred.value },
     city: { quality: quality.quality.withCity, monthly: d.leads.withCity.value },
+    // "Agendou" da aba de leads = avaliação do agente criada no mês, como no mensal.
+    scheduledLeads: { quality: quality.quality.outcomes.scheduled, monthly: d.leads.population?.scheduled ?? null },
     contextAttended: { operational: operational.contexts.attended, monthly: d.service.contexts?.attended ?? null },
     contextBase: { operational: operational.contexts.active, monthly: d.service.contexts?.active ?? null },
     contextEvaluations: { operational: operational.contexts.attributedEvaluations, monthly: d.service.contexts?.attributedEvaluations ?? null },

@@ -137,7 +137,7 @@ export function ChartPanel({
             value={rate.current}
             label="Resolvido sem humano"
             delta={delta}
-            hint="Dos contatos atendidos no período."
+            hint="Das conversas que o paciente iniciou no período."
           />
         );
       }

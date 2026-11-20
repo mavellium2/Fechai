@@ -3,8 +3,8 @@ import { automatedMessageIds, CONTACT_CONTEXT_LABEL, PATIENT_CONTEXTS, summarize
 import { loadConversationStarts } from "./contact-context-store";
 import { contextEventMessageId } from "./contact-context-events";
 import { loadAutomatedSendEvents } from "./automated-sends";
-import { EMPTY_ASSUMPTIONS, parseMonthlyAssumptions, monthlyWindow, type MonthlyAssumptions } from "./monthly-config";
-import { evaluationOf } from "./monthly-data";
+import { type MonthlyAssumptions } from "./monthly-config";
+import { isAgentEvaluation, periodAssumptions } from "./monthly-assumptions";
 import { prisma } from "@/lib/prisma";
 import { dateLabel } from "@/lib/format";
 import { planOf } from "@/modules/billing/plans";
@@ -418,6 +418,11 @@ function listBuckets(from: Date, to: Date, unit: BucketUnit) {
 }
 
 type WindowMessage = { id: string; conversationId: string; role: string; sentBy: string | null; createdAt: Date; whatsappMessageId: string | null };
+
+/** Consulta sem conversa ligada se atribui à conversa do lead, como na coorte do mensal. */
+function bookingsOf(rows: readonly { id: string; conversationId: string | null; createdAt: Date; lead?: { conversation: { id: string } | null } | null }[]): ContextBooking[] {
+  return rows.map((a) => ({ id: a.id, createdAt: a.createdAt, conversationId: a.conversationId ?? a.lead?.conversation?.id ?? null }));
+}
 type WindowEvent = { conversationId: string; kind: string; createdAt: Date; dedupKey: string | null };
 
 /**
@@ -457,18 +462,13 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
   const agentScope = options.agentIds?.length ? { agentId: { in: options.agentIds } } : {};
   const leadScope = { tenantId, isTest: false, ...(options.agentIds?.length ? { conversation: { ...agentScope, isTest: false } } : {}) };
   const conversationScope = { tenantId, isTest: false, lead: { isTest: false }, ...agentScope };
-  let config = options.assumptions ?? EMPTY_ASSUMPTIONS;
-  if (!options.assumptions && from) {
-    const p = partsInZone(from, PANEL_TIME_ZONE);
-    const month = `${p.year}-${String(p.month).padStart(2, "0")}`;
-    const window = monthlyWindow(month, PANEL_TIME_ZONE);
-    if (+from === +window.start && +toExcl === +window.end) {
-      const revision = await prisma.monthlyRoiReport.findUnique({ where: { tenantId_month: { tenantId, month } }, select: { assumptions: true } });
-      config = parseMonthlyAssumptions(revision?.assumptions ?? EMPTY_ASSUMPTIONS);
-    }
-  }
-  const isEvaluation = (a: { source: string; agentId: string | null; kind: string | null; serviceType: string | null }) =>
-    a.source === "agent" && (!config.agentIds?.length || Boolean(a.agentId && config.agentIds.includes(a.agentId))) && evaluationOf(a, config).evaluation;
+  // Competência inteira: as premissas do mensal, inclusive as herdadas do último mês revisado.
+  const config = options.assumptions ?? await periodAssumptions(tenantId, from, toExcl);
+  const isEvaluation = (a: { source: string; agentId: string | null; kind: string | null; serviceType: string | null }) => isAgentEvaluation(a, config);
+  // Mesmo recorte de agendamentos do mensal: não cancelado, lead real e conversa
+  // real quando existe (a consulta sem conversa se liga ao contato pelo lead).
+  const appointmentScope = { tenantId, ...agentScope, status: { not: "canceled" },
+    lead: { isTest: false }, OR: [{ conversationId: null }, { conversation: { isTest: false } }] };
 
   const [
     leadRows,
@@ -488,14 +488,9 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
       select: { createdAt: true, conversation: { select: { id: true } } },
     }),
     prisma.appointment.findMany({
-      where: {
-        tenantId,
-        ...agentScope,
-        lead: { isTest: false }, conversation: { isTest: false },
-        createdAt: { gte: from ?? undefined, lt: toExcl },
-        status: { in: ["scheduled", "done"] },
-      },
-      select: { id: true, conversationId: true, createdAt: true, source: true, agentId: true, kind: true, serviceType: true },
+      where: { ...appointmentScope, createdAt: { gte: from ?? undefined, lt: toExcl } },
+      select: { id: true, conversationId: true, createdAt: true, source: true, agentId: true, kind: true, serviceType: true,
+        lead: { select: { conversation: { select: { id: true } } } } },
     }),
     prisma.conversation.groupBy({
       by: ["agentId"],
@@ -513,13 +508,7 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
     // período, pelo que alguém marcou. Antes era concluído × cancelado pela
     // data de criação — cancelar não é faltar, e "concluído" não dizia se veio.
     prisma.appointment.findMany({
-      where: {
-        tenantId,
-        ...agentScope,
-        lead: { isTest: false }, conversation: { isTest: false },
-        startsAt: { gte: from ?? undefined, lt: new Date(Math.min(toExcl.getTime(), Date.now())) },
-        status: { not: "canceled" },
-      },
+      where: { ...appointmentScope, startsAt: { gte: from ?? undefined, lt: new Date(Math.min(toExcl.getTime(), Date.now())) } },
       select: { startsAt: true, status: true, attendance: true },
     }),
     // Status atual dos leads novos; sem histórico de transição, não é uma etapa de conversão.
@@ -548,7 +537,7 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
   ]);
 
   const messages = orderedMsgs;
-  const { activity, contexts, records } = await classifyWindow(tenantId, from, toExcl, messages, handoffEvents, apptRows.filter(isEvaluation));
+  const { activity, contexts, records } = await classifyWindow(tenantId, from, toExcl, messages, handoffEvents, bookingsOf(apptRows.filter(isEvaluation)));
   const conversations = activity.active.size;
   const leads = leadRows.length;
   const scheduled = apptRows.length;
@@ -566,8 +555,9 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
         where: { ...leadScope, createdAt: { gte: prevFrom, lt: prevLt } },
       }),
       prisma.appointment.findMany({
-        where: { tenantId, ...agentScope, lead: { isTest: false }, conversation: { isTest: false }, createdAt: { gte: prevFrom, lt: prevLt }, status: { in: ["scheduled", "done"] } },
-        select: { id: true, conversationId: true, createdAt: true, source: true, agentId: true, kind: true, serviceType: true },
+        where: { ...appointmentScope, createdAt: { gte: prevFrom, lt: prevLt } },
+        select: { id: true, conversationId: true, createdAt: true, source: true, agentId: true, kind: true, serviceType: true,
+          lead: { select: { conversation: { select: { id: true } } } } },
       }),
       prisma.message.findMany({
         where: { role: { in: ["user", "assistant"] }, createdAt: { gte: prevFrom, lt: prevLt },
@@ -577,7 +567,7 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
       prisma.reportEvent.findMany({ where: { tenantId, createdAt: { gte: prevFrom, lt: prevLt }, conversation: conversationScope }, select: { conversationId: true, kind: true, createdAt: true, dedupKey: true } }),
     ]);
     // Mesma regra do período atual: comparar autonomia de bases diferentes inventaria uma variação.
-    const { activity, contexts: previousContexts } = await classifyWindow(tenantId, prevFrom, prevLt, prevMessages, prevHandoffs, prevAppointments.filter(isEvaluation));
+    const { activity, contexts: previousContexts } = await classifyWindow(tenantId, prevFrom, prevLt, prevMessages, prevHandoffs, bookingsOf(prevAppointments.filter(isEvaluation)));
     previousAutonomy = previousContexts.autonomy?.percent == null ? null : previousContexts.autonomy.percent / 100;
     prev = {
       attendedContacts: activity.attended.size,

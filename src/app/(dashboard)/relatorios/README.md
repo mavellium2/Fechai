@@ -736,6 +736,15 @@ Tudo começa na `page.tsx`, que resolve a janela (`?periodo=`/`?de=&ate=`), comp
   abordagens, lembretes e campanhas respondidos. Evento de transferência também
   retira de só IA, mesmo sem resposta da equipe. O período anterior usa a mesma
   regra (`classifyWindow`), senão a variação compararia bases diferentes.
+- **Mesmas premissas e o mesmo recorte de agendamentos do mensal.** Competência
+  inteira usa `periodAssumptions` (`monthly-assumptions.ts`): a revisão do mês
+  ou, sem ela, a do último mês revisado (`latestRevisionBefore`, a mesma função
+  que o mensal usa para herdar). Antes o painel caía nas premissas vazias quando
+  o mês não tinha revisão e contava avaliações com outros tipos (outubro/2026:
+  23 no painel × 24 no mensal). Agendamentos: não cancelados, lead real e
+  conversa real quando existe; a consulta sem conversa se liga ao contato pelo
+  lead. Ainda fica de fora do painel a consulta cancelada só no Clinicorp, que o
+  mensal lê e tira da coorte.
 - **Leads novos × contatos atendidos** (`leadReconciliation`): bases diferentes.
   Lead novo é cadastro criado no período — o contato que escreveu, mas também a
   abordagem a um número novo, o lembrete do Clinicorp para quem nunca conversou

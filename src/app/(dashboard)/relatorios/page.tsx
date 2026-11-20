@@ -31,6 +31,7 @@ import { FinancialView } from "./FinancialView";
 import { TriagePanel } from "./TriagePanel";
 import { LeadQualityView } from "./LeadQualityView";
 import { loadLeadQuality } from "@/modules/lead-insights/queries";
+import { periodAssumptions } from "@/modules/reports/monthly-assumptions";
 import { RangePicker } from "./RangePicker";
 import { StatusBreakdown } from "./StatusBreakdown";
 import { ContactContextSummary } from "./ContactContextSummary";
@@ -134,7 +135,9 @@ export default async function RelatoriosPage({
     affiliateOnly ? 1 : prisma.lead.count({ where: { tenantId, isTest: false } }),
     view === "operacional" ? computePeriodReport(tenantId, range) : null,
     view === "financeiro" ? computeFinancialSummary(tenantId, range) : null,
-    view === "leads" ? loadLeadQuality(tenantId, { from: range.from, to: new Date(range.to.getTime() + 1) }) : null,
+    // "Agendou" segue a regra e as premissas do mensal (competência inteira herda a revisão).
+    view === "leads" ? periodAssumptions(tenantId, range.from, new Date(range.to.getTime() + 1))
+      .then((assumptions) => loadLeadQuality(tenantId, { from: range.from, to: new Date(range.to.getTime() + 1) }, { assumptions })) : null,
     view === "afiliados" && affiliate ? getAffiliateOverview(affiliate.id) : null,
   ]);
 

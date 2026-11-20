@@ -86,9 +86,14 @@ que escreveram e receberam resposta atribuída à IA ou à equipe na janela,
 inclusive leads criados antes dela. Usa `contactActivity`, a mesma regra de
 `MonthlyReportData.service.contacts`. Não confundir com **leads novos**, que
 continuam sendo criação no período. Sem cidade reconhecida significa ausência
-de evidência reconhecida, não prova de que ninguém disse a cidade. Resultados
-do bloco legado de qualidade usam qualquer agendamento do contato; a coorte
-de avaliações do mensal usa tipo, origem, agentes e criação no mês.
+de evidência reconhecida, não prova de que ninguém disse a cidade. **Agendou
+segue a coorte do mensal (20/11/2026)**: só conta a avaliação marcada pelo
+agente (`isAgentEvaluation`, com as premissas do mês — a revisão ou a herdada),
+não cancelada e **criada dentro da janela**. Antes contava qualquer agendamento
+do contato, de qualquer data: outubro saía com 29 "agendou" contra 23 no mensal,
+e o número de um mês fechado mudava quando alguém marcava no mês seguinte.
+Envio automático (lembrete, disparo, follow-up) também não conta como resposta
+na população de atendidos, como no mensal.
 
 **Dentro/fora do raio e resultado são calculados na leitura, nunca gravados.**
 Gravá-los congelaria um palpite velho quando a clínica muda a área ou o lead
@@ -98,8 +103,9 @@ Sem área configurada o veredito é `unknown` — nunca "dentro" presumido — e
 painel/relatório avisam em vez de mostrar 0% fora do raio. Mesmo nome de cidade
 em outro estado é tratado como a mesma cidade (a UF é ignorada na comparação).
 
-**Resultado do lead** (`leadOutcome`), em ordem: agendou (qualquer agendamento
-não cancelado) > transbordou (`needsHuman` ou evento `handoff`) > perdeu >
+**Resultado do lead** (`leadOutcome`), em ordem: agendou (algum agendamento
+não cancelado na lista que a leitura entrega — em `loadLeadQualityDetail`, só a
+avaliação do agente criada na janela) > transbordou (`needsHuman` ou evento `handoff`) > perdeu >
 em andamento. **Perdeu** só com sinal explícito — motivo registrado pelo agente,
 triagem (`disqualifiedAt`), follow-up de quem recusou/pediu para parar, status
 `lost` — ou depois de `IDLE_AFTER_HOURS` (72h) sem resposta do contato

@@ -4,6 +4,11 @@ import { classifyCity } from "./service-area";
 import { leadOutcome, summarizeLeadQuality, type LeadQuality, type LeadRow } from "./summary";
 import type { LeadEvidence } from "@/modules/reports/monthly-evidence";
 import { contactActivity } from "@/modules/reports/contact-activity";
+import { automatedMessageIds, PURPOSE_KINDS } from "@/modules/reports/contact-context";
+import { contextEventMessageId } from "@/modules/reports/contact-context-events";
+import { loadAutomatedSendEvents } from "@/modules/reports/automated-sends";
+import { EMPTY_ASSUMPTIONS, type MonthlyAssumptions } from "@/modules/reports/monthly-config";
+import { isAgentEvaluation } from "@/modules/reports/monthly-assumptions";
 import { loadHistoricalCities } from "./historical-city-store";
 
 /**
@@ -15,7 +20,7 @@ import { loadHistoricalCities } from "./historical-city-store";
 export async function loadLeadQuality(
   tenantId: string,
   range: { from: Date | null; to: Date },
-  options: { agentIds?: string[]; now?: Date } = {},
+  options: { agentIds?: string[]; now?: Date; assumptions?: MonthlyAssumptions } = {},
 ): Promise<LeadQuality> {
   return (await loadLeadQualityDetail(tenantId, range, options)).quality;
 }
@@ -28,8 +33,10 @@ export async function loadLeadQuality(
 export async function loadLeadQualityDetail(
   tenantId: string,
   range: { from: Date | null; to: Date },
-  options: { agentIds?: string[]; now?: Date } = {},
+  options: { agentIds?: string[]; now?: Date; assumptions?: MonthlyAssumptions } = {},
 ): Promise<{ quality: LeadQuality; leads: LeadEvidence[] }> {
+  const config = options.assumptions ?? EMPTY_ASSUMPTIONS;
+  const inRange = (at: Date) => (!range.from || at >= range.from) && at < range.to;
   const [area, leads] = await Promise.all([
     getServiceArea(tenantId),
     prisma.lead.findMany({
@@ -43,14 +50,14 @@ export async function loadLeadQualityDetail(
       },
       select: {
         id: true, createdAt: true, status: true, disqualifiedAt: true, disqualifiedReason: true,
-        appointments: { select: { status: true } },
+        appointments: { select: { status: true, createdAt: true, source: true, agentId: true, kind: true, serviceType: true } },
         conversation: {
           select: {
             id: true, needsHuman: true, lastInboundAt: true, followUpReason: true,
             reportEvents: { where: { kind: "handoff" }, select: { id: true }, take: 1 },
             insight: { select: { city: true, cityKey: true, firstQuestionKey: true, lossReasonKey: true } },
             messages: { where: { role: { in: ["user", "assistant"] }, createdAt: { ...(range.from ? { gte: range.from } : {}), lt: range.to } },
-              select: { role: true, sentBy: true, createdAt: true } },
+              select: { id: true, role: true, sentBy: true, createdAt: true, whatsappMessageId: true } },
           },
         },
       },
@@ -58,7 +65,18 @@ export async function loadLeadQualityDetail(
     }),
   ]);
 
-  const attended = leads.filter((lead) => contactActivity(lead.conversation?.messages ?? []).replies.length > 0);
+  // Lembrete, disparo e follow-up não são resposta: a mesma população de atendidos do mensal.
+  const conversationIds = leads.flatMap((lead) => lead.conversation ? [lead.conversation.id] : []);
+  const [purposeEvents, sends] = await Promise.all([
+    conversationIds.length ? prisma.reportEvent.findMany({
+      where: { tenantId, conversationId: { in: conversationIds }, kind: { in: [...PURPOSE_KINDS] } }, select: { kind: true, dedupKey: true },
+    }) : [],
+    loadAutomatedSendEvents(tenantId, leads.flatMap((lead) => lead.conversation
+      ? lead.conversation.messages.map((m) => ({ ...m, conversationId: lead.conversation!.id })) : []), range.from, range.to),
+  ]);
+  const automated = new Set([...purposeEvents.flatMap((e) => { const id = contextEventMessageId(e.kind, e.dedupKey ?? ""); return id ? [id] : []; }),
+    ...automatedMessageIds(sends)]);
+  const attended = leads.filter((lead) => contactActivity(lead.conversation?.messages ?? [], automated).replies.length > 0);
   const historical = await loadHistoricalCities(tenantId,
     attended.flatMap((lead) => lead.conversation && !lead.conversation.insight?.cityKey ? [lead.conversation.id] : []), range.to);
 
@@ -67,7 +85,10 @@ export async function loadLeadQualityDetail(
     status: lead.status,
     disqualified: lead.disqualifiedAt !== null,
     disqualifiedReason: lead.disqualifiedReason,
-    appointments: lead.appointments,
+    // Agendou = avaliação marcada pelo agente, não cancelada, criada no período:
+    // a regra da coorte do mensal. Consulta antiga, futura ou só da equipe não é
+    // resultado desta janela.
+    appointments: lead.appointments.filter((a) => a.status !== "canceled" && inRange(a.createdAt) && isAgentEvaluation(a, config)),
     conversation: lead.conversation && {
       needsHuman: lead.conversation.needsHuman,
       lastInboundAt: lead.conversation.lastInboundAt,

@@ -3,6 +3,7 @@ import { loadConversationStarts } from "./contact-context-store";
 import type { ContextEvent, ContextMessage } from "./contact-context";
 import { contextEventMessageId } from "./contact-context-events";
 import { loadAutomatedSendEvents } from "./automated-sends";
+import { latestRevisionBefore } from "./monthly-assumptions";
 import { prisma } from "@/lib/prisma";
 import { readClinicorpReport, type ClinicorpReportData } from "@/modules/scheduling/clinicorp";
 import { dayKeyInZone, partsInZone } from "@/modules/scheduling/time";
@@ -431,10 +432,8 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
       revision: saved.updatedAt?.toISOString(), status: saved.status, finalizedAt: saved.finalizedAt?.toISOString() ?? null,
       sentAt: saved.sentAt?.toISOString() ?? null, meetingAt: saved.meetingAt?.toISOString() ?? null };
   }
-  const inherited = saved ? null : await prisma.monthlyRoiReport.findFirst({
-    where: { tenantId, month: { lt: month } }, orderBy: { month: "desc" },
-    select: { month: true, assumptions: true },
-  });
+  // A mesma herança do painel (`periodAssumptions`): o mês sem revisão usa a do último mês revisado.
+  const inherited = saved ? null : await latestRevisionBefore(tenantId, month);
   const assumptions = { ...(previewAssumptions ?? parseMonthlyAssumptions(saved?.assumptions ?? inherited?.assumptions ?? EMPTY_ASSUMPTIONS)) };
   const accountPrice = monthlyAccountPrice(tenant);
   const investmentSource = assumptions.investmentCents === null ? accountPrice.priceLabel : undefined;
@@ -472,7 +471,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
       .then((rows) => rows.map((g) => ({ ...g, answeredAt: g.answeredAt! }))),
     // Só o mês do relatório (não o comparativo), no mesmo escopo de agentes. É
     // um complemento: se falhar, o relatório sai sem o bloco em vez de não sair.
-    loadLeadQualityDetail(tenantId, { from: window.start, to: window.end }, { agentIds: assumptions.agentIds ?? undefined })
+    loadLeadQualityDetail(tenantId, { from: window.start, to: window.end }, { agentIds: assumptions.agentIds ?? undefined, assumptions })
       .catch((error) => { console.error("[monthly] qualidade dos leads indisponível", error); return undefined; }),
     // Quedas do WhatsApp que tocam a janela. Também complemento: sem a leitura,
     // a disponibilidade sai "sem registro" e o resto do relatório segue.

@@ -3,7 +3,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 const leadFindMany = vi.fn();
 vi.mock("@/modules/lead-insights/historical-city-store", () => ({ loadHistoricalCities: vi.fn(async () => new Map()) }));
-vi.mock("@/lib/prisma", () => ({ prisma: { lead: { findMany: (...args: unknown[]) => leadFindMany(...args) } } }));
+vi.mock("@/lib/prisma", () => ({ prisma: { lead: { findMany: (...args: unknown[]) => leadFindMany(...args) },
+  reportEvent: { findMany: async () => [] }, reminderDispatch: { findMany: async () => [] }, broadcastRecipient: { findMany: async () => [] } } }));
 vi.mock("@/modules/scheduling/clinicorp", () => ({ readClinicorpReport: vi.fn() }));
 vi.mock("@/modules/lead-insights/service-area-store", () => ({ getServiceArea: vi.fn(async () => ({ baseCity: "Marília", cities: [] })) }));
 import { PDFDocument } from "pdf-lib";
@@ -138,7 +139,7 @@ describe("leads do mês, um a um", () => {
       appointments: [], conversation: { id: `c-${id}`, needsHuman: false, lastInboundAt: new Date("2026-09-29T12:00:00Z"), followUpReason: null, reportEvents: [],
         insight: null, messages }, ...extra });
     leadFindMany.mockResolvedValueOnce([
-      lead("a", { appointments: [{ status: "scheduled" }] }),
+      lead("a", { appointments: [evaluation()] }),
       lead("b", { conversation: { id: "c-b", messages, needsHuman: false, lastInboundAt: null, followUpReason: null, reportEvents: [], insight: { city: "Garça", cityKey: "garca", firstQuestionKey: "preco", lossReasonKey: null } } }),
     ]);
     const { quality, leads } = await loadLeadQualityDetail("t1", { from: null, to: now }, { now });
@@ -147,4 +148,27 @@ describe("leads do mês, um a um", () => {
     expect(leads[1]).toEqual({ leadId: "b", conversationId: "c-b", createdAt: "2026-09-10T12:00:00.000Z", city: "Garça", verdict: "out", outcome: "lost", lossKey: "sumiu", doubtKey: "preco" });
     expect(Object.keys(leadFindMany.mock.calls[0][0].select)).not.toContain("name");
   });
+
+  it("agendou é a avaliação do agente criada no período, como na coorte do mensal", async () => {
+    const now = new Date("2026-10-30T12:00:00Z");
+    const range = { from: new Date("2026-09-01T03:00:00Z"), to: new Date("2026-10-01T03:00:00Z") };
+    const messages = [{ role: "user", sentBy: null, createdAt: new Date("2026-09-10T12:00:00Z") },
+      { role: "assistant", sentBy: "agent", createdAt: new Date("2026-09-10T12:00:30Z") }];
+    const lead = (id: string, appointments: object[]) => ({ id, createdAt: new Date("2026-09-10T12:00:00Z"), status: "new", disqualifiedAt: null, disqualifiedReason: null,
+      appointments, conversation: { id: `c-${id}`, needsHuman: false, lastInboundAt: new Date("2026-09-10T12:00:00Z"), followUpReason: null, reportEvents: [], insight: null, messages } });
+    leadFindMany.mockResolvedValueOnce([
+      lead("agent", [evaluation()]),
+      lead("later", [evaluation({ createdAt: new Date("2026-10-05T12:00:00Z") })]),
+      lead("before", [evaluation({ createdAt: new Date("2026-08-20T12:00:00Z") })]),
+      lead("team", [evaluation({ source: "manual" })]),
+      lead("treatment", [evaluation({ kind: "treatment" })]),
+      lead("canceled", [evaluation({ status: "canceled" })]),
+    ]);
+    const { leads } = await loadLeadQualityDetail("t1", range, { now });
+    expect(leads.filter((l) => l.outcome === "scheduled").map((l) => l.leadId)).toEqual(["agent"]);
+  });
 });
+
+function evaluation(extra: object = {}) {
+  return { status: "scheduled", createdAt: new Date("2026-09-10T12:05:00Z"), source: "agent", agentId: "a", kind: "evaluation", serviceType: null, ...extra };
+}
