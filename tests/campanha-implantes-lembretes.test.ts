@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * URG-03 — nenhum lembrete, confirmação ou aviso automático para leads da campanha
@@ -112,8 +112,12 @@ const knownLead = (id: string) => ({
   conversation: { id: "conv", lastInboundAt: new Date("2026-11-12T12:00:00Z"), followUpReason: null, variables: null, whatsappProvider: "meta" },
 });
 
+afterEach(() => vi.useRealTimers());
 beforeEach(() => {
   vi.clearAllMocks();
+  // A regra vale até 19/11/2026: o cenário é a véspera do evento, não o relógio real.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
   vi.spyOn(console, "error").mockImplementation(() => {});
   config = {
     timezone: "America/Sao_Paulo", reminderEnabled: true, reminders: ACCOUNT_REMINDERS, metaReminderTemplate: TEMPLATE,

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Pausa dos lembretes da conta por campanha (`pauseAllReminders`).
@@ -149,8 +149,12 @@ describe("leitura das pausas (loadReminderPauses)", () => {
 describe("salvar a pausa (saveCampaignRules)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Campanha encerrada não se edita: o cenário é antes do evento, não o relógio real.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
     mocks.updateMany.mockResolvedValue({ count: 1 });
   });
+  afterEach(() => vi.useRealTimers());
   const campaign = (endsAt: Date | null) => ({
     id: "evento", tenantId: "conta-1", name: "Plantão de Implantes", rules: { reminders: "off" },
     activatedAt: new Date("2026-11-16T17:27:00Z"), archivedAt: null, pausedAt: null,
