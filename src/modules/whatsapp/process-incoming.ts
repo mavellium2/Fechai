@@ -21,6 +21,7 @@ import { sendAgentReply } from "./send-agent-reply";
 import { handleSurveyReply } from "@/modules/satisfaction/capture";
 import { handleBlockButton, isBlockButton } from "./button-reply";
 import { isSurveyOutbound } from "@/modules/satisfaction/echo";
+import { isOwnReminderEcho } from "./automated-echo";
 import { recordLeadAdOrigin } from "@/modules/campaign-reports/record";
 
 export type IncomingWebhookResult = {
@@ -199,6 +200,11 @@ export async function processIncomingWhatsapp(
         select: { id: true },
       });
       if (echo) return ok({ ok: true, silent: "fromMe eco" });
+    }
+    // Lembrete enviado pela conta cujo histórico o worker ainda não gravou:
+    // não é a equipe escrevendo e não pausa o agente (nem cria cadastro).
+    if (await isOwnReminderEcho(tenantId, incoming.messageKeyId)) {
+      return ok({ ok: true, silent: "fromMe eco" });
     }
 
     const { conversation } = await getOrCreateConversation(

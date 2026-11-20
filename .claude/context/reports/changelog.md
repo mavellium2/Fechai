@@ -2,6 +2,43 @@
 
 **Instrução:** Atualize aqui cada vez que mexer neste módulo.
 
+### [2026-11-20] — Resolução autônoma só sobre o que o paciente iniciou
+
+**Motivo:** no Instituto do Sorriso (set–nov/2026) a resolução autônoma saía 3%
+(23 só IA × 720 com humano em 743 atendidos), com a IA respondendo 99% em menos
+de 1 minuto. O denominador misturava abordagens da atendente (489 no período),
+lembretes e disparos com as conversas que o paciente começou; e 1.169 leads novos
+contra 743 atendidos não tinham explicação na tela.
+
+**Mudanças:**
+- `contact-activity.ts`: `resolutionOf` (só IA, IA + humano, só humano) e
+  `automated` — mensagem de operação registrada não é resposta ao contato.
+- `contact-context.ts`: `resolution` por registro, contagens por grupo,
+  `autonomy` sobre `PATIENT_CONTEXTS` (nova entrada + base que voltou),
+  `automatedMessageIds`.
+- `automated-sends.ts` (novo): reconhece lembrete/disparo pelo id do WhatsApp
+  guardado na operação (`ReminderDispatch`, `BroadcastRecipient`), para o que
+  não tem `ReportEvent` de finalidade.
+- `service.ts`: `classifyWindow` (atual e anterior com a mesma regra), gráfico
+  IA × humano só com conversas iniciadas pelo paciente (`AttendancePoint`),
+  `leadReconciliation` (leads novos × atendidos, fechando nas duas pontas).
+- Mensal v2: mesmo conjunto de automáticos em `monthly-data.ts`, `automatedSends`
+  em `MonthlyInput`, quadro "Conversas que o paciente iniciou" no bloco 01 e
+  validação `autonomy_sum`.
+- Painel, CSV e `scripts/audit-report-metrics.ts` com a divisão e a conciliação.
+- WhatsApp: `isOwnReminderEcho` ignora o eco de lembrete que chega antes do
+  histórico (antes virava "equipe", pausava o agente e o worker não gravava).
+
+**Impacto:** sem schema novo. Os números ao vivo mudam: atendidos e só IA podem
+cair um pouco (envio automático depois da conversa deixa de contar como resposta
+humana, e o atendido só por lembrete não conta); a autonomia muda de base.
+Snapshots aprovados continuam congelados e sem o quadro até nova versão.
+
+**Validação:** testes novos em `relatorios-autonomia.test.ts`, cenário ponta a
+ponta em `relatorios-consultas.test.ts`, eco no webhook e validador. Não foi
+possível rodar contra o banco de produção neste workspace; a conferência real é
+`npx tsx scripts/audit-report-metrics.ts --tenant ID --month AAAA-MM`.
+
 ### [2026-11-01] — Leads por anúncio no relatório mensal v2 (parte 04)
 
 **Arquivos:**

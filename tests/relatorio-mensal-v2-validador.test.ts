@@ -16,7 +16,19 @@ describe("validador do relatório mensal v2 - bloqueantes", () => {
   it("a fixture de aceite fecha sem bloqueio", () => expect(keys(fresh())).toEqual([]));
   it("só agente + transferidas ≠ contatos", () => {
     const d = fresh(); d.service.aiOnly.value = 150;
-    expect(keys(d)).toEqual(["service_sum"]);
+    // O número adulterado também deixa de bater com a divisão por contexto.
+    expect(keys(d)).toEqual(["autonomy_sum", "service_sum"]);
+  });
+  it("só IA, IA + humano e só humano precisam fechar com os atendidos e a base do paciente", () => {
+    const d = fresh();
+    expect(d.service.contexts?.autonomy).toBeDefined();
+    d.service.contexts!.autonomy!.percent = 99;
+    expect(keys(d)).toEqual(["autonomy_sum"]);
+    const g = fresh(); const group = g.service.contexts!.groups.find((x) => x.attended > 0)!;
+    group.humanOnly = (group.humanOnly ?? 0) + 1;
+    expect(keys(g)).toContain("autonomy_sum");
+    const old = fresh(); delete old.service.contexts!.autonomy;
+    expect(keys(old)).toEqual([]);
   });
   it("total da coorte ≠ compareceram + faltaram + aguardando + não verificado", () => {
     const d = fresh(); d.schedule.cohort.no_show.total.value = 9;

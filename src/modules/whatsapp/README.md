@@ -101,7 +101,13 @@ um lugar só (`instances.ts`):
 - **Registro.** `Conversation.whatsappProvider` (`evolution` | `meta` | null) é
   gravado por `processIncomingWhatsapp` a cada mensagem do contato — a última
   vence — e também quando o atendente escreve pelo próprio celular. Eco da
-  própria resposta não conta. Disparos e o lembrete do Clinicorp criam a
+  própria resposta não conta, nem o eco de um **lembrete** cujo histórico o
+  worker ainda não gravou: `isOwnReminderEcho` (`automated-echo.ts`) reconhece
+  o id em `ReminderDispatch.messageId`, gravado logo após o envio, e o eco é
+  ignorado — sem isso ele virava "a equipe escreveu pelo celular", pausava o
+  agente para a resposta do paciente e o worker não conseguia gravar a mensagem
+  (id único já usado). Nunca lança; na falha o eco segue o caminho antigo.
+  Disparos e o lembrete do Clinicorp criam a
   conversa como da Meta (`onlyIfUnset`: quem já fala pelo QR não é tomado, porque
   o template não abre a janela de 24h). A primeira resposta manual a um contato
   cadastrado à mão também fixa o número por onde saiu.

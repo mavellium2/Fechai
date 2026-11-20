@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import { PURPOSE_KINDS } from "./contact-context";
 
-export type ContactPurpose = "contact_reminder" | "contact_campaign" | "contact_followup";
-const purposes = new Set<string>(["contact_reminder", "contact_campaign", "contact_followup"]);
+export type ContactPurpose = typeof PURPOSE_KINDS[number];
+const purposes = new Set<string>(PURPOSE_KINDS);
 export function contextEventMessageId(kind: string, dedupKey: string): string | undefined {
   return purposes.has(kind) && dedupKey.startsWith("contact-context:") ? dedupKey.split(":").at(-1) : undefined;
 }

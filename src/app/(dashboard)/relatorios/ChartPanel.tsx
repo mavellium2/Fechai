@@ -10,6 +10,7 @@ import { MeterChart } from "@/components/charts/MeterChart";
 import type {
   AiHumanPoint,
   AttendanceOutcomePoint,
+  AttendancePoint,
   FlowPoint,
   FunnelStep,
   HeatmapCell,
@@ -38,12 +39,12 @@ const DESCRIPTIONS: Record<Variant, string> = {
   flow: "Mensagens gravadas em conversas reais (o sandbox de teste não conta). Recebidas são mensagens do cliente (role user); enviadas são respostas do agente e mensagens manuais do painel (role assistant). Contadas pela data em que foram gravadas.",
   results: "Leads novos são contatos criados no período, sem o sandbox. Agendamentos são horários com status marcado ou concluído que começam no período.",
   donut: "Conversas com atividade no período, agrupadas pelo agente que as atendeu. Conversas sem agente vinculado aparecem como 'Sem agente'.",
-  attendance: "Contatos que o agente respondeu sozinho (resposta automática) contra contatos em que um humano respondeu pelo painel. Um contato atendido pela IA e pelo humano no mesmo período entra só em 'Precisou de humano'. O sandbox de teste não conta.",
+  attendance: "Só conversas que o paciente iniciou (novo contato ou contato da base que voltou a escrever), na data da chegada. Só IA: só o agente respondeu, sem pessoa nem transferência registrada. Com humano: o agente e a equipe (IA + humano) ou só a equipe (só humano). Abordagens da equipe, campanhas, lembretes e retomadas não entram: a conversa nasceu de nós. Envio automático (lembrete, disparo) não conta como resposta da equipe. O sandbox de teste não conta.",
   closed: "Leads que fecharam um horário efetivado (status 'Agendado' ou 'Concluído'), divididos por quem marcou: a IA, pela ferramenta de agendamento durante a conversa, ou o dono, manualmente no painel. Agendamentos cancelados não contam — antes contavam, o que divergia do KPI 'Agendamentos' ao lado. O sandbox de teste não conta.",
   funnel: "Conversas, leads engajados (2+ mensagens do lead), leads quentes e agendados, todos entre quem CHEGOU no período — o status é o de agora, não há histórico de quando cada lead mudou de etapa. O sandbox de teste não conta.",
   peakHours: "Mensagens do lead (role user) no período, agrupadas por dia da semana e hora, no fuso de Brasília. Mais escuro é mais mensagens. O sandbox de teste não conta.",
   firstResponseTime: "Tempo entre a mensagem do lead e a primeira resposta seguinte na mesma conversa (IA ou humano), agrupado em faixas. Conversas sem resposta no período não entram. O sandbox de teste não conta.",
-  autonomyRate: "Fração dos contatos atendidos no período que a IA resolveu sozinha, sem um humano responder pelo painel — mesma base do gráfico 'Atendimento: IA x humano', resumida num número.",
+  autonomyRate: "Das conversas que o paciente iniciou e foram respondidas no período, a fração que só a IA resolveu, sem uma pessoa responder nem transferência registrada. A base soma só IA, IA + humano e só humano — a mesma do gráfico 'Atendimento: IA x humano'. Abordagens da equipe, campanhas, lembretes e retomadas ficam fora; o período anterior usa a mesma regra.",
   followUpRecovery: "Conversas com um follow-up automático enviado no período e, destas, quantas tiveram uma resposta do lead depois do envio, dentro do mesmo período.",
   attendanceOutcome: "Consultas de pé cujo horário caiu no período, pelo comparecimento marcado na agenda (ou mapeado do Clinicorp): compareceu ou faltou. Agendar ou confirmar não conta como comparecimento — consulta que ninguém conferiu aparece como não verificada na tabela, e cancelada não entra.",
 };
@@ -74,7 +75,7 @@ export function ChartPanel({
   flow?: FlowPoint[];
   results?: ResultPoint[];
   slices?: { name: string; count: number }[];
-  attendance?: AiHumanPoint[];
+  attendance?: AttendancePoint[];
   closed?: AiHumanPoint[];
   funnel?: FunnelStep[];
   peakHours?: HeatmapCell[];
@@ -96,7 +97,7 @@ export function ChartPanel({
           <SeriesChart
             points={(attendance ?? []).map((p) => ({ key: p.key, label: p.label, a: p.ai, b: p.human }))}
             labelA="Só IA"
-            labelB="Precisou de humano"
+            labelB="Com humano"
             colorA="text-success"
             colorB="text-warn"
             empty="Nenhuma conversa com resposta no período."
@@ -195,12 +196,11 @@ export function ChartPanel({
     }
     if (variant === "attendance") {
       const points = attendance ?? [];
-      const tAi = points.reduce((s, p) => s + p.ai, 0);
-      const tHuman = points.reduce((s, p) => s + p.human, 0);
+      const total = (pick: (p: AttendancePoint) => number) => String(points.reduce((s, p) => s + pick(p), 0));
       return {
-        head: ["Período", "Só IA", "Precisou de humano"],
-        rows: points.map((p) => [p.label, String(p.ai), String(p.human)]),
-        foot: ["Total", String(tAi), String(tHuman)],
+        head: ["Período", "Só IA", "IA + humano", "Só humano"],
+        rows: points.map((p) => [p.label, String(p.ai), String(p.aiAndHuman), String(p.humanOnly)]),
+        foot: ["Total", total((p) => p.ai), total((p) => p.aiAndHuman), total((p) => p.humanOnly)],
       };
     }
     if (variant === "closed") {
@@ -306,8 +306,10 @@ export function ChartPanel({
     if (variant === "attendance") {
       const points = attendance ?? [];
       return [
-        ["Contatos só com resposta da IA", String(points.reduce((s, p) => s + p.ai, 0))],
-        ["Contatos com resposta humana", String(points.reduce((s, p) => s + p.human, 0))],
+        ["Iniciadas pelo paciente, só IA", String(points.reduce((s, p) => s + p.ai, 0))],
+        ["Iniciadas pelo paciente, IA + humano", String(points.reduce((s, p) => s + p.aiAndHuman, 0))],
+        ["Iniciadas pelo paciente, só humano", String(points.reduce((s, p) => s + p.humanOnly, 0))],
+        ["Abordagens, campanhas e lembretes", "fora da base"],
         ["Período coberto", `${points[0]?.label ?? "—"} a ${points[points.length - 1]?.label ?? "—"}`],
         ["Testes (sandbox)", "excluídos"],
       ];

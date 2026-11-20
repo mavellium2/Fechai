@@ -5,6 +5,7 @@ const db = vi.hoisted(() => ({
   conversation: { count: vi.fn(), findMany: vi.fn(), groupBy: vi.fn() },
   reportEvent: { findMany: vi.fn() }, appointment: { findMany: vi.fn() }, agent: { findMany: vi.fn() },
   monthlyRoiReport: { findUnique: vi.fn() }, tenantServiceArea: { findUnique: vi.fn() },
+  reminderDispatch: { findMany: vi.fn() }, broadcastRecipient: { findMany: vi.fn() },
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 import { computePeriodReport, resolveRange } from "@/modules/reports/service";
@@ -12,6 +13,22 @@ import { EMPTY_ASSUMPTIONS } from "@/modules/reports/monthly-config";
 import { loadLeadQualityDetail } from "@/modules/lead-insights/queries";
 import { loadHistoricalCities } from "@/modules/lead-insights/historical-city-store";
 const date = (day = 10) => new Date(`2026-09-${String(day).padStart(2, "0")}T13:00:00Z`);
+/**
+ * Histórico de `loadConversationStarts`: o contato escreveu primeiro, no dia
+ * da sua primeira mensagem na janela, e o cadastro nasceu ali. Sem isto o
+ * contexto é "não identificado" e a conversa fica fora da base da autonomia.
+ */
+function patientStarted(starts: Record<string, { at?: Date; role?: string; sentBy?: string | null }> = {}) {
+  db.conversation.findMany.mockImplementation(async ({ where, orderBy }) => {
+    // Outras leituras de conversa (follow-up) e a última mensagem antes da janela: não há.
+    if (!where?.id?.in || orderBy?.[0]?.createdAt === "desc") return [];
+    return (where.id.in as string[]).map((id) => {
+      const s = starts[id] ?? {};
+      return { id, lead: { createdAt: s.at ?? date(1) },
+        messages: [{ id: `${id}-first`, role: s.role ?? "user", sentBy: s.sentBy ?? null, createdAt: s.at ?? date(1) }] };
+    });
+  });
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -21,6 +38,7 @@ beforeEach(() => {
   db.reportEvent.findMany.mockResolvedValue([]);
   db.message.findMany.mockResolvedValue([]); db.monthlyRoiReport.findUnique.mockResolvedValue(null);
   db.tenantServiceArea.findUnique.mockResolvedValue(null);
+  db.reminderDispatch.findMany.mockResolvedValue([]); db.broadcastRecipient.findMany.mockResolvedValue([]);
 });
 
 describe("consultas do operacional", () => {
@@ -52,6 +70,7 @@ describe("consultas do operacional", () => {
       { createdAt: date(30), source: "manual", kind: "evaluation", serviceType: null, agentId: "a" },
       { createdAt: date(30), source: "agent", kind: "treatment", serviceType: null, agentId: "a" },
     ]);
+    patientStarted();
     const range = { ...resolveRange("mes", "2026-09-01", "2026-09-30"), prevFrom: null, prevTo: null };
     const r = await computePeriodReport("tenant", range, { assumptions: EMPTY_ASSUMPTIONS });
     expect(r.kpis).toMatchObject({ conversations: 3, attendedContacts: 2, responseRate: 2 / 3, inbound: 4, outbound: 3, scheduled: 3, evaluations: 1 });
@@ -66,6 +85,52 @@ describe("consultas do operacional", () => {
     expect(JSON.stringify(db.conversation.groupBy.mock.calls)).not.toContain("updatedAt");
     expect(db.message.findMany.mock.calls[0][0].where.conversation).toMatchObject({ tenantId: "tenant", isTest: false, lead: { isTest: false } });
   });
+  it("separa quem iniciou, mede a autonomia só no que o paciente começou e explica leads × atendidos", async () => {
+    const m = (id: string, conversationId: string, role: string, sentBy: string | null, day: number, minute = 0, whatsappMessageId: string | null = null) =>
+      ({ id, conversationId, role, sentBy, createdAt: new Date(+date(day) + minute * 60_000), whatsappMessageId });
+    db.message.findMany.mockResolvedValue([
+      // Paciente novo, só a IA respondeu.
+      m("a1", "ai", "user", null, 2), m("a2", "ai", "assistant", "agent", 2, 1),
+      // Paciente novo, IA e depois a recepção.
+      m("b1", "mixed", "user", null, 3), m("b2", "mixed", "assistant", "agent", 3, 1), m("b3", "mixed", "assistant", "human", 3, 9),
+      // Abordagem da atendente pelo celular: a conversa nasceu humana.
+      m("c1", "team", "assistant", "human", 4), m("c2", "team", "user", null, 4, 5), m("c3", "team", "assistant", "human", 4, 6),
+      // Lembrete do Clinicorp cujo eco foi gravado como "humano"; o paciente confirma e a IA responde.
+      m("d1", "reminder", "assistant", "human", 5, 0, "wa-reminder"), m("d2", "reminder", "user", null, 5, 10), m("d3", "reminder", "assistant", "agent", 5, 11),
+      // Escreveu e ninguém respondeu.
+      m("e1", "silent", "user", null, 6),
+      // Lembrete sem resposta do paciente.
+      m("f1", "unreplied", "assistant", null, 7, 0, "wa-reminder-2"),
+    ]);
+    db.reminderDispatch.findMany.mockResolvedValue([{ messageId: "wa-reminder" }, { messageId: "wa-reminder-2" }]);
+    patientStarted({
+      ai: { at: date(2) }, mixed: { at: date(3) }, team: { at: date(4), role: "assistant", sentBy: "human" },
+      reminder: { at: date(5), role: "assistant", sentBy: "human" }, silent: { at: date(6) }, unreplied: { at: date(7), role: "assistant", sentBy: null },
+    });
+    // Leads novos: os seis acima mais um cadastro sem mensagem e um sem conversa.
+    db.lead.findMany.mockResolvedValue([...["ai", "mixed", "team", "reminder", "silent", "unreplied", "imported"]
+      .map((id) => ({ createdAt: date(2), conversation: { id } })), { createdAt: date(2), conversation: null }]);
+    const range = { ...resolveRange("mes", "2026-09-01", "2026-09-30"), prevFrom: null, prevTo: null };
+    const r = await computePeriodReport("tenant", range, { assumptions: EMPTY_ASSUMPTIONS });
+
+    const group = (key: string) => r.contexts.groups.find((g) => g.key === key);
+    expect(group("outbound_human")).toMatchObject({ contacts: 1, attended: 1, humanOnly: 1 });
+    expect(group("outbound_reminder")).toMatchObject({ contacts: 2, attended: 1, aiOnly: 1 });
+    expect(r.contexts.autonomy).toEqual({ aiOnly: 1, aiAndHuman: 1, humanOnly: 0, base: 2, percent: 50 });
+    expect(r.autonomyRate.current).toBe(0.5);
+    // O gráfico IA × humano usa a mesma base: a abordagem da equipe não é "precisou de humano".
+    expect(r.attendance.reduce((n, b) => n + b.ai, 0)).toBe(1);
+    expect(r.attendance.reduce((n, b) => n + b.aiAndHuman, 0)).toBe(1);
+    expect(r.attendance.reduce((n, b) => n + b.humanOnly, 0)).toBe(0);
+    expect(r.kpis.attendedContacts).toBe(4);
+
+    const lr = r.leadReconciliation;
+    expect(lr).toMatchObject({ newLeads: 8, attended: 4, newAttended: 4, existingAttended: 0, unanswered: 1, noReply: 1, noMessages: 2 });
+    expect(lr.newAttended + lr.unanswered + lr.noReply + lr.noMessages).toBe(lr.newLeads);
+    expect(lr.newAttended + lr.existingAttended).toBe(lr.attended);
+    expect(lr.byContext.find((g) => g.key === "outbound_reminder")).toMatchObject({ leads: 2, attended: 1 });
+  });
+
   it("usa as regras da revisão mensal para avaliações de uma competência inteira", async () => {
     db.monthlyRoiReport.findUnique.mockResolvedValue({ assumptions: { ...EMPTY_ASSUMPTIONS, evaluationTypes: ["Check-up"], agentIds: ["chosen"] } });
     db.appointment.findMany.mockImplementation(async ({ select }) => select.attendance ? [] : [

@@ -158,6 +158,8 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
   const leads = d.leads;
   const sat = d.satisfaction;
   const satReliable = Boolean(sat && !sat.smallSample);
+  // Ausente em snapshot fechado antes da divisão por iniciativa: o quadro some.
+  const autonomy = s.contexts?.autonomy;
   const { estimatedReturn: er, financialSummary: financial } = monthlyFinancialPresentation(d, r.assumptions);
   const hasLeads = leads.firstDoubts.length > 0 || leads.reasons.length > 0 || shown(leads.outOfArea) || Boolean(d.campaigns);
   const role = OWNER_ROLE[r.decisionMakerRole ?? ""];
@@ -205,6 +207,15 @@ export function MonthlyReportDocument({ report: r }: { report: MonthlyReport; pr
             <Figure value={valued(s.transferred)} label="passadas para a recepção" />
             {shown(s.availabilityPercent) && <Figure value={formatPercent(s.availabilityPercent.value)} label="do mês com o agente no ar" />}
           </div>
+          {autonomy && autonomy.base > 0 && <div className="space-y-2 break-inside-avoid">
+            <Table head={["Conversas que o paciente iniciou", monthName]} rows={[
+              ["Resolvidas só pelo agente", formatCount(autonomy.aiOnly)],
+              ["Agente e equipe", formatCount(autonomy.aiAndHuman)],
+              ["Só a equipe", formatCount(autonomy.humanOnly)],
+              ["Resolução autônoma", formatPercent(autonomy.percent)],
+            ]} />
+            <p className="text-xs text-neutral">Resolução autônoma: das {formatCount(autonomy.base)} conversas que o paciente iniciou e foram respondidas, as que só o agente resolveu, sem resposta da equipe nem transferência. Abordagens da equipe, campanhas, lembretes e retomadas não entram nessa base; envio automático não conta como resposta da equipe.</p>
+          </div>}
           <Table head={["Tempo devolvido à equipe", monthName]} strongLast rows={[
             [`Áudios ouvidos pelo agente (${valued(s.time.audios)})`, <>{formatSpan(s.time.audioSeconds.value)}<Seal status={s.time.audioSeconds.status} /></>],
             ...(shown(s.time.longestAudioSeconds) ? [["Maior áudio do mês", formatSpan(s.time.longestAudioSeconds.value)]] : []),

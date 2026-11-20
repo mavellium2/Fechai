@@ -1,4 +1,5 @@
 import { normalizeLabel } from "./monthly-config";
+import { autonomyOf, PATIENT_CONTEXTS } from "./contact-context";
 import type { MonthlyReport } from "./monthly";
 import type { MonthlyReportData, Split } from "./monthly-data";
 import { allowedNumbers, hasFullDate, unknownNumbers } from "./monthly-text-guard";
@@ -44,6 +45,18 @@ export function validateMonthlyReport(data: MonthlyReportData, texts: Texts): Mo
       || ctx.groups.some((g) => g.scheduledContacts > g.contacts
         || g.conversionPercent !== (g.contacts && g.key !== "unknown" ? Math.round(g.scheduledContacts / g.contacts * 1000) / 10 : null))) {
       add("blocking", "contexts_sum", "Conversão por contexto", "As bases, avaliações ou taxas por contexto não fecham com os registros do mês.", "Reimporte os dados; não combine bases diferentes na conversão.");
+    }
+    // Snapshot anterior à divisão não tem estes campos: nada a conferir.
+    if (ctx.autonomy) {
+      const split = (g: typeof ctx.groups[number]) => (g.aiOnly ?? 0) + (g.aiAndHuman ?? 0) + (g.humanOnly ?? 0);
+      const patient = ctx.groups.filter((g) => PATIENT_CONTEXTS.includes(g.key));
+      const expected = autonomyOf({ aiOnly: patient.reduce((n, g) => n + (g.aiOnly ?? 0), 0),
+        aiAndHuman: patient.reduce((n, g) => n + (g.aiAndHuman ?? 0), 0), humanOnly: patient.reduce((n, g) => n + (g.humanOnly ?? 0), 0) });
+      if (ctx.groups.some((g) => split(g) !== g.attended)
+        || ctx.groups.reduce((n, g) => n + (g.aiOnly ?? 0), 0) !== (s.aiOnly.value ?? 0)
+        || (["aiOnly", "aiAndHuman", "humanOnly", "base", "percent"] as const).some((k) => ctx.autonomy![k] !== expected[k])) {
+        add("blocking", "autonomy_sum", "Resolução autônoma", "Só IA, IA + humano e só humano não fecham com os contatos atendidos ou com as conversas iniciadas pelo paciente.", "Reimporte os dados; a autonomia usa só as conversas que o paciente iniciou.");
+      }
     }
   }
 

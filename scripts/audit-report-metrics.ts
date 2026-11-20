@@ -34,14 +34,24 @@ async function main() {
     contextAttended: { operational: operational.contexts.attended, monthly: d.service.contexts?.attended ?? null },
     contextBase: { operational: operational.contexts.active, monthly: d.service.contexts?.active ?? null },
     contextEvaluations: { operational: operational.contexts.attributedEvaluations, monthly: d.service.contexts?.attributedEvaluations ?? null },
-    attendanceChart: { chart: operational.attendance.reduce((n, row) => n + row.ai + row.human, 0), kpi: operational.kpis.attendedContacts },
+    // O gráfico IA × humano usa só conversas iniciadas pelo paciente (base da autonomia).
+    attendanceChart: { chart: operational.attendance.reduce((n, row) => n + row.ai + row.human, 0), base: operational.contexts.autonomy?.base ?? null },
+    autonomyBase: { operational: operational.contexts.autonomy?.base ?? null, monthly: d.service.contexts?.autonomy?.base ?? null },
+    autonomyAiOnly: { operational: operational.contexts.autonomy?.aiOnly ?? null, monthly: d.service.contexts?.autonomy?.aiOnly ?? null },
+    leadsSide: { leads: operational.kpis.leads, parts: operational.leadReconciliation.newAttended + operational.leadReconciliation.unanswered
+      + operational.leadReconciliation.noReply + operational.leadReconciliation.noMessages },
+    attendedSide: { attended: operational.kpis.attendedContacts, parts: operational.leadReconciliation.newAttended + operational.leadReconciliation.existingAttended },
     appointmentsChart: { chart: operational.closed.reduce((n, row) => n + row.ai + row.human, 0), kpi: operational.kpis.scheduled },
   };
   const inconsistent = Object.entries(checks).filter(([, values]) => new Set(Object.values(values)).size > 1).map(([name]) => name);
   // Only aggregate numbers and report metadata; never messages, lead names or phone numbers.
   const snapshot = approved?.snapshot as { data?: typeof d } | null;
+  // Quem iniciou × quem resolveu, por contexto: só contagens.
+  const initiators = operational.contexts.groups.filter((g) => g.contacts > 0)
+    .map((g) => ({ context: g.key, contacts: g.contacts, attended: g.attended, aiOnly: g.aiOnly, aiAndHuman: g.aiAndHuman, humanOnly: g.humanOnly }));
   console.log(JSON.stringify({ tenantId, month, agentIds: config.agentIds, timezone: config.timezone,
-    source: "live", operational: operational.kpis, checks, inconsistent,
+    source: "live", operational: operational.kpis, autonomy: operational.contexts.autonomy, initiators,
+    leadReconciliation: operational.leadReconciliation, checks, inconsistent,
     recognizedHistoricalCities: quality.leads.filter((lead) => lead.cityMessageId).length,
     approved: approved?.status === "ready" ? { source: "frozen-snapshot", contacts: snapshot?.data?.service.contacts.total.value,
       evaluations: snapshot?.data?.schedule.cohort.total.total.value, withCity: snapshot?.data?.leads.withCity.value } : null,

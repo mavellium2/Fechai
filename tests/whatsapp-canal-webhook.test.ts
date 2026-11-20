@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   getMediaAsBase64: vi.fn(),
   transcribeAudio: vi.fn(),
   handleBlockButton: vi.fn(),
+  dispatchFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -35,6 +36,7 @@ vi.mock("@/lib/prisma", () => ({
       update: mocks.messageUpdate,
     },
     conversation: { update: mocks.conversationUpdate },
+    reminderDispatch: { findFirst: mocks.dispatchFindFirst },
   },
 }));
 vi.mock("@/lib/rate-limit", () => ({ rateLimit: vi.fn(async () => ({ allowed: true })) }));
@@ -104,6 +106,7 @@ beforeEach(() => {
   mocks.runAgentTurn.mockResolvedValue({ reply: "Claro! Qual dia fica bom?", status: "ok", replyMessageId: "m-resp" });
   mocks.speakReply.mockResolvedValue({ spoken: false });
   mocks.handleBlockButton.mockResolvedValue({ handled: true });
+  mocks.dispatchFindFirst.mockResolvedValue(null);
   conversa(null);
 });
 
@@ -263,6 +266,28 @@ describe("Canal da conversa na entrada", () => {
     await processIncomingWhatsapp({ ...BASE, isFromMe: true, messageKeyId: undefined }, fakeProvider("evolution"));
 
     expect(canaisGravados()).toEqual([]);
+  });
+
+  it("eco de lembrete que chegou antes do histórico não vira a equipe nem pausa o agente", async () => {
+    conversa(null);
+    mocks.dispatchFindFirst.mockResolvedValue({ id: "dispatch-1" });
+
+    const result = await processIncomingWhatsapp({ ...BASE, isFromMe: true, messageKeyId: "key-lembrete" }, fakeProvider("evolution"));
+
+    expect(result.body).toMatchObject({ silent: "fromMe eco" });
+    expect(mocks.dispatchFindFirst).toHaveBeenCalledWith({ where: { tenantId: "tenant-1", messageId: "key-lembrete" }, select: { id: true } });
+    expect(mocks.appendMessage).not.toHaveBeenCalled();
+    expect(mocks.getOrCreateConversation).not.toHaveBeenCalled();
+    expect(mocks.conversationUpdate).not.toHaveBeenCalled();
+  });
+
+  it("sem conseguir conferir o lembrete, o eco segue o caminho de antes", async () => {
+    conversa(null);
+    mocks.dispatchFindFirst.mockRejectedValue(new Error("banco fora do ar"));
+
+    const result = await processIncomingWhatsapp({ ...BASE, isFromMe: true }, fakeProvider("evolution"));
+
+    expect(result.body).toMatchObject({ silent: "manual pelo whatsapp" });
   });
 
   it("atendente escrevendo pelo próprio celular assume a conversa nesse número", async () => {

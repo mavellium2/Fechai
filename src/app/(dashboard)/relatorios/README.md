@@ -94,6 +94,32 @@ antes de fechar (`contexts_sum`); resumo com taxa fora das bases calculadas ou
 origem presumida é recusado. Não há taxa geral 15/300 apresentada como conversão
 de 130 novas entradas. Exemplo testado: 15/130 = 11,5%, com 300 atendidos totais.
 
+**Quem resolveu e resolução autônoma (20/11/2026).** Cada registro de contexto
+leva `resolution` (`contact-activity.ts`, `resolutionOf`): `ai_only` (só o
+agente respondeu, sem transbordo), `ai_and_human` (agente e equipe, ou o agente
+passou para a equipe) e `human_only` (só a equipe). Cada grupo traz as três
+contagens, que somam os atendidos do grupo; `ai_only` é o contrário de
+"transferido", então o total de só IA bate com `service.aiOnly`. A **resolução
+autônoma** (`contexts.autonomy`) é só IA ÷ conversas **iniciadas pelo paciente**
+e respondidas (`PATIENT_CONTEXTS`: nova entrada e contato da base que voltou).
+Abordagem da equipe, do agente, campanha, lembrete, follow-up, continuidade e
+contexto desconhecido ficam fora da base — a abordagem da atendente não é "a IA
+precisou de humano", a conversa já nasceu humana. Sem base, `percent` é `null`,
+nunca zero. O fechamento recusa divisão que não fecha (`autonomy_sum`).
+Snapshot anterior não tem `autonomy` e o quadro some do documento.
+
+**Envio automático não é resposta.** Mensagem cujo id tem finalidade registrada
+(`contact_reminder | contact_campaign | contact_followup`) não conta como
+resposta ao contato (`automatedMessageIds`), mesmo gravada com `sentBy: "human"`
+(o disparo sai assim). Antes, um disparo para quem já tinha conversado tirava o
+contato de "só IA". Para o que não tem `ReportEvent` — envio anterior ao registro
+de finalidade, ou eco do lembrete que chegou ao webhook antes de o worker gravar
+a mensagem e ficou como "a equipe escreveu" —, `automated-sends.ts` casa o
+`whatsappMessageId` da mensagem com `ReminderDispatch.messageId` e
+`BroadcastRecipient.whatsappMessageId` (prova pelo id da operação, nunca pelo
+texto; só leitura; falha devolve vazio). O operacional e o mensal usam o mesmo
+conjunto, então só IA + transferidas = atendidos = soma dos contextos.
+
 Origem de aquisição **não registrada**: sem marcação, nenhum contato é chamado
 de tráfego pago e contato antigo não é chamado de base qualificada. Leituras
 novas não produzem recomendações de anúncios a partir dessa população misturada.
@@ -703,10 +729,20 @@ Tudo começa na `page.tsx`, que resolve a janela (`?periodo=`/`?de=&ate=`), comp
   dentro da janela. `contact-activity.ts` é compartilhado com o motor mensal v2.
   Taxa de resposta = atendidos / contatos que escreveram; duas mensagens do
   contato não provam resposta. Envio proativo não é atendimento.
-- Atendimento IA × humano conta cada contato uma vez no período, na primeira
-  entrada. Humano em outro dia retira esse contato de “só IA”. A soma do gráfico
-  fecha no KPI; autonomia usa a mesma população, não somas duplicadas por dia.
-  Evento de transferência também retira de só IA, mesmo sem resposta da equipe.
+- Atendimento IA × humano conta cada conversa **iniciada pelo paciente** uma vez
+  no período, na chegada, em só IA, IA + humano e só humano. Humano em outro dia
+  retira esse contato de “só IA”. A soma do gráfico fecha na base da autonomia
+  (`contexts.autonomy.base`), não no KPI de atendidos, que também inclui
+  abordagens, lembretes e campanhas respondidos. Evento de transferência também
+  retira de só IA, mesmo sem resposta da equipe. O período anterior usa a mesma
+  regra (`classifyWindow`), senão a variação compararia bases diferentes.
+- **Leads novos × contatos atendidos** (`leadReconciliation`): bases diferentes.
+  Lead novo é cadastro criado no período — o contato que escreveu, mas também a
+  abordagem a um número novo, o lembrete do Clinicorp para quem nunca conversou
+  e o disparo. Atendido é quem escreveu e recebeu resposta, inclusive cadastro
+  antigo. Fecha nas duas pontas: `newAttended + unanswered + noReply + noMessages
+  = newLeads` e `newAttended + existingAttended = attended`; `byContext` abre os
+  leads novos por quem iniciou. O card fica logo abaixo da tabela de contextos.
 - Competência completa compara com o mês civil anterior inteiro (setembro ×
   agosto), como o mensal; intervalos parciais mantêm janela de mesma duração.
 - Total de agendamentos e os dois gráficos usam **createdAt**, não startsAt;
@@ -812,12 +848,13 @@ recontados localmente.
 - **KPIs**: conversas ativas (por `updatedAt`), leads novos, agendamentos (`Appointment` com `startsAt` no período e `status in ["scheduled","done"]`), mensagens recebidas/enviadas (`role user/assistant`), taxa de resposta (conversas com 2+ mensagens do lead), leads quentes e "precisam de você" (**estado atual**, não do período).
 - **`flow`**: recebidas × enviadas por bucket.
 - **`results`**: leads novos × agendamentos por bucket.
-- **`attendance`** (atendimento IA×humano): contatos **exclusivos por bucket**. Um contato que recebeu resposta da IA E do humano no mesmo bucket entra só em "humano" (`ai = aiSet.size − humanSet.size`). Base: `Message.sentBy` em `["agent","human"]`.
+- **`attendance`** (atendimento IA×humano): conversas **iniciadas pelo paciente**, uma por período, no bucket da chegada (`AttendancePoint`: `ai` = só IA, `human` = `aiAndHuman` + `humanOnly`). Sai dos registros de contexto (`classifyWindow`), não de uma contagem à parte.
 - **`closed`** (leads fechados IA×humano): agendamentos **efetivados** (`status in ["scheduled","done"]`) criados no período, por `Appointment.source` — `"agent"` → IA, senão humano. Alinhado ao KPI "Agendamentos" desde 2026-08-11 — antes contava cancelado como fechado (ver CHANGELOG).
 - **`funnel`**: Conversas (do período) → Leads engajados (leads criados no período com 2+ mensagens, capado no total de leads criados) → Leads quentes (status `hot`, dos criados no período) → Agendados (soma de `results.appts`). **Estado atual** dos leads que chegaram na janela — não há histórico de transição de status, então não é velocidade de funil.
 - **`peakHours`**: mensagens `role: "user"` do período, uma célula por (dia da semana 0-6, hora 0-23), no fuso do painel.
 - **`firstResponseTime`**: por conversa, a primeira mensagem `user` pendente vs. a primeira `assistant` seguinte, bucketado em faixas (`<1min, 1-5min, 5-30min, 30min-2h, +2h`), separado por `sentBy` (IA/humano). Um par por conversa — a segunda pergunta de uma conversa já respondida não conta de novo.
-- **`autonomyRate`**: `{ current, previous }` — fração `ai/(ai+human)` da mesma base de `attendance`, resumida num número por período (atual e anterior).
+- **`autonomyRate`**: `{ current, previous }` — `contexts.autonomy.percent / 100`: só IA ÷ conversas iniciadas pelo paciente e respondidas, a mesma base de `attendance`. Atual e anterior com a mesma regra.
+- **`leadReconciliation`**: leads novos × contatos atendidos, com as duas somas fechadas (ver acima).
 - **`followUpRecovery`**: `{ sent, recovered }` — conversas com `followUpSentAt` no período (`sent`) e, destas, quantas tiveram uma mensagem `user` com `createdAt` depois do envio, **dentro do mesmo período** (`recovered`). Não olha além da janela selecionada — consistente com o resto do relatório.
 - **`attendanceOutcome`**: agendamentos concluídos × cancelados, por bucket, base `createdAt`.
 - **Deltas**: comparação contra a janela anterior do mesmo tamanho (`prevFrom/prevTo`).

@@ -1,5 +1,5 @@
 import { contactActivity, contactWasTransferred } from "./contact-activity";
-import { summarizeContactContexts, type ContactContextSummary } from "./contact-context";
+import { automatedMessageIds, summarizeContactContexts, type ContactContextSummary } from "./contact-context";
 import { partsInZone } from "@/modules/scheduling/time";
 import { attendanceOf, parseKind } from "@/modules/scheduling/dimensions";
 import { doubtLabel, lossLabel } from "@/modules/lead-insights/categories";
@@ -253,11 +253,14 @@ export function buildMonthlyReportData(input: MonthlyInput, time: MonthlyTimeMet
   }
 
   /* ----------------------------- Atendimento ----------------------------- */
+  // Lembrete, disparo e follow-up não são resposta ao contato (mesma regra do operacional).
+  const contextEvents = [...input.events, ...(input.automatedSends ?? [])];
+  const automated = automatedMessageIds(contextEvents);
   type Contact = { bucket: Bucket; arrival: Date; transferred: boolean; agentSeconds: number | null; receptionSeconds: number | null };
   const contacts = new Map<string, Contact>();
   const bands = HOUR_BANDS.map(() => 0);
   for (const conversation of conversations) {
-    const { messages, first, replies } = contactActivity(conversation.messages.filter((m) => inMonth(m.createdAt)));
+    const { messages, first, replies } = contactActivity(conversation.messages.filter((m) => inMonth(m.createdAt)), automated);
     if (!first) continue;
     // Mensagem nossa antes de o contato escrever (lembrete, disparo) não é resposta.
     if (!replies.length) continue;
@@ -442,7 +445,7 @@ export function buildMonthlyReportData(input: MonthlyInput, time: MonthlyTimeMet
       outside: arrivals.filter((c) => c.bucket === "outside").length, unclassified: arrivals.filter((c) => c.bucket === "unclassified").length };
   });
   const within = (seconds: number) => transferred.length ? Math.round(answered.filter((c) => c.receptionSeconds! <= seconds).length / transferred.length * 1000) / 10 : null;
-  const contexts = summarizeContactContexts({ start, end, conversations, events: input.events,
+  const contexts = summarizeContactContexts({ start, end, conversations, events: contextEvents,
     bookings: evidence.cohort.filter((a) => !a.earlier).map((a) => ({ id: a.appointmentId, conversationId: a.conversationId, createdAt: new Date(a.createdAt) })) });
   evidence.contexts = contexts.records;
   const satisfaction = buildSatisfaction(input, evidence);

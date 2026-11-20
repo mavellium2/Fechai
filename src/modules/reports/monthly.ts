@@ -1,7 +1,8 @@
 import { loadHistoricalCities } from "@/modules/lead-insights/historical-city-store";
 import { loadConversationStarts } from "./contact-context-store";
-import type { ContextMessage } from "./contact-context";
+import type { ContextEvent, ContextMessage } from "./contact-context";
 import { contextEventMessageId } from "./contact-context-events";
+import { loadAutomatedSendEvents } from "./automated-sends";
 import { prisma } from "@/lib/prisma";
 import { readClinicorpReport, type ClinicorpReportData } from "@/modules/scheduling/clinicorp";
 import { dayKeyInZone, partsInZone } from "@/modules/scheduling/time";
@@ -185,6 +186,11 @@ export type MonthlyInput = {
   clinicorp: ClinicorpReportData;
   /** Área de atendimento (dentro/fora da área): só o relatório v2. */
   area?: ServiceArea | null;
+  /**
+   * Lembretes e disparos reconhecidos pelo id da operação (`automated-sends.ts`),
+   * no formato dos eventos de finalidade. Ausente = só os eventos registrados.
+   */
+  automatedSends?: ContextEvent[];
 };
 
 /** Função pura compartilhada pelo painel, fechamento e PDF. Valores em centavos. */
@@ -451,7 +457,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
       needsHuman: true, lastInboundAt: true, followUpReason: true,
       insight: { select: { city: true, cityKey: true, firstQuestionKey: true, lossReasonKey: true } },
       messages: { where: { createdAt: { gte: start, lt: end }, role: { in: ["user", "assistant"] } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: { id: true, role: true, sentBy: true, createdAt: true, audioUrl: true, audioSeconds: true } } } }),
+        select: { id: true, role: true, sentBy: true, createdAt: true, audioUrl: true, audioSeconds: true, whatsappMessageId: true } } } }),
     prisma.appointment.findMany({ where: { tenantId, source: "agent", lead: { isTest: false },
       OR: [{ startsAt: { gte: start, lt: end } }, { createdAt: { gte: start, lt: end } }] },
       select: { id: true, agentId: true, conversationId: true, leadId: true, source: true, serviceType: true, status: true,
@@ -501,21 +507,24 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
   const unheardIds = new Set(unheard.map((m) => m.id));
   const missingCities = rawConversations.filter((c) => !c.insight?.cityKey).map((c) => c.id);
   const missingCityIds = new Set(missingCities);
-  const [historicalCities, previousCities, conversationStarts, previousStarts] = await Promise.all([
+  const [historicalCities, previousCities, conversationStarts, previousStarts, automatedSends] = await Promise.all([
     loadHistoricalCities(tenantId, missingCities, window.end),
     loadHistoricalCities(tenantId, missingCities, previousWindow.end),
     loadConversationStarts(tenantId, conversationIds, window.end, window.start),
     loadConversationStarts(tenantId, conversationIds, previousWindow.end, previousWindow.start),
+    // Uma leitura para os dois meses; o id do WhatsApp não segue adiante.
+    loadAutomatedSendEvents(tenantId, rawConversations.flatMap((c) => c.messages.map((m) => ({ ...m, conversationId: c.id }))), start, end),
   ]);
   const conversations = rawConversations.map((c) => ({ ...c,
     firstMessage: conversationStarts.get(c.id) ?? null,
     insight: historicalCities.has(c.id) ? { ...c.insight, city: historicalCities.get(c.id)!.city, cityKey: historicalCities.get(c.id)!.cityKey,
       firstQuestionKey: c.insight?.firstQuestionKey ?? null, lossReasonKey: c.insight?.lossReasonKey ?? null } : c.insight, firstInbound: firstById.get(c.id) ?? null,
-    messages: c.messages.map(({ audioUrl, audioSeconds, ...m }) => ({ ...m,
-      audio: audioUrl || audioSeconds != null || unheardIds.has(m.id) ? { seconds: audioSeconds, heard: !unheardIds.has(m.id) } : null })) }));
+    // O id do WhatsApp só serviu a `loadAutomatedSendEvents`; não segue para o motor.
+    messages: c.messages.map(({ id, role, sentBy, createdAt, audioUrl, audioSeconds }) => ({ id, role, sentBy, createdAt,
+      audio: audioUrl || audioSeconds != null || unheardIds.has(id) ? { seconds: audioSeconds, heard: !unheardIds.has(id) } : null })) }));
   const now = new Date();
   const trackingSince = new Date(Math.max(tenant.createdAt.getTime(), tenant.reportTrackingStartedAt.getTime()));
-  const { metrics: automaticCurrent, evidence, data } = evaluateMonthlyMetrics({ start: window.start, end: window.end, now, trackingSince, accountCreatedAt: tenant.createdAt, config: assumptions, conversations, appointments, events, gaps, surveys, campaigns, uptime, clinicorp, area });
+  const { metrics: automaticCurrent, evidence, data } = evaluateMonthlyMetrics({ start: window.start, end: window.end, now, trackingSince, accountCreatedAt: tenant.createdAt, config: assumptions, conversations, appointments, events, gaps, surveys, campaigns, uptime, clinicorp, area, automatedSends });
   if (lead) { evidence.leads = lead.leads; evidence.leadPopulation = "attended"; }
   capEvidence(evidence);
   const previousSnapshot = previousSaved?.status === "ready" && previousSaved.snapshot ? previousSaved.snapshot as unknown as MonthlyReport : null;
@@ -524,7 +533,7 @@ export async function computeMonthlyReport(tenantId: string, month: string, useS
     if (!missingCityIds.has(c.id)) return previousContact;
     const old = previousCities.get(c.id);
     return { ...previousContact, insight: { city: old?.city ?? null, cityKey: old?.cityKey ?? null, firstQuestionKey: c.insight?.firstQuestionKey ?? null, lossReasonKey: c.insight?.lossReasonKey ?? null } };
-  }), appointments, events, gaps, uptime, clinicorp, area });
+  }), appointments, events, gaps, uptime, clinicorp, area, automatedSends });
   // Comparativo só com o mês anterior inteiro medido: conta ativa e eventos
   // registrados desde o dia 1. Senão a coluna some, em vez de sair zerada.
   if (trackingSince <= previousWindow.start) data.comparison = monthlyComparison(previousData);

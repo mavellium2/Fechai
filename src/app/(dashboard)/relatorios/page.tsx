@@ -34,6 +34,7 @@ import { loadLeadQuality } from "@/modules/lead-insights/queries";
 import { RangePicker } from "./RangePicker";
 import { StatusBreakdown } from "./StatusBreakdown";
 import { ContactContextSummary } from "./ContactContextSummary";
+import { LeadReconciliationCard } from "./LeadReconciliationCard";
 import { SatisfactionView } from "./SatisfactionView";
 import { loadSatisfaction } from "@/modules/satisfaction/queries";
 import { getSurveySettings } from "@/modules/satisfaction/settings-store";
@@ -324,6 +325,10 @@ export default async function RelatoriosPage({
           </FadeIn>
 
           <FadeIn>
+            <LeadReconciliationCard data={report.leadReconciliation} />
+          </FadeIn>
+
+          <FadeIn>
             <div className="grid gap-6 lg:grid-cols-2">
               <ChartPanel
                 variant="flow"
@@ -345,7 +350,7 @@ export default async function RelatoriosPage({
               <ChartPanel
                 variant="attendance"
                 title="Atendimento: IA x humano"
-                hint="Contatos que a IA atendeu sozinha contra os que precisaram de uma pessoa."
+                hint="Conversas que o paciente iniciou: resolvidas só pela IA contra as que tiveram uma pessoa. Abordagens da equipe, campanhas e lembretes ficam fora."
                 attendance={report.attendance}
               />
               <ChartPanel
@@ -383,7 +388,7 @@ export default async function RelatoriosPage({
               <ChartPanel
                 variant="autonomyRate"
                 title="Resolução autônoma"
-                hint="Fração dos contatos atendidos só pelo agente, sem resposta humana nem transferência registrada."
+                hint="Das conversas que o paciente iniciou e foram respondidas, quantas só o agente resolveu, sem resposta humana nem transferência registrada."
                 autonomyRate={report.autonomyRate}
               />
               <ChartPanel

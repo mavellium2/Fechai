@@ -1,7 +1,8 @@
 import { periodContactActivity } from "./contact-activity";
-import { summarizeContactContexts, type ContactContextSummary } from "./contact-context";
+import { automatedMessageIds, CONTACT_CONTEXT_LABEL, PATIENT_CONTEXTS, summarizeContactContexts, type ContactContext, type ContactContextSummary, type ContextBooking } from "./contact-context";
 import { loadConversationStarts } from "./contact-context-store";
 import { contextEventMessageId } from "./contact-context-events";
+import { loadAutomatedSendEvents } from "./automated-sends";
 import { EMPTY_ASSUMPTIONS, parseMonthlyAssumptions, monthlyWindow, type MonthlyAssumptions } from "./monthly-config";
 import { evaluationOf } from "./monthly-data";
 import { prisma } from "@/lib/prisma";
@@ -176,6 +177,36 @@ export type ResultPoint = { key: string; label: string; leads: number; appts: nu
  * fechados pela IA contra os marcados manualmente (`closed`).
  */
 export type AiHumanPoint = { key: string; label: string; ai: number; human: number };
+/**
+ * Atendimento das conversas que o paciente iniciou, na data da chegada:
+ * `ai` = só IA; `human` = `aiAndHuman` + `humanOnly`.
+ */
+export type AttendancePoint = AiHumanPoint & { aiAndHuman: number; humanOnly: number };
+
+/**
+ * Por que "leads novos" e "contatos atendidos" não batem: são bases diferentes.
+ * Leads novos = cadastros criados no período (inclusive por lembrete, disparo,
+ * abordagem ou importação); atendidos = quem escreveu e recebeu resposta,
+ * inclusive cadastros antigos. Fecha nas duas pontas:
+ * `newAttended + existingAttended = attended` e
+ * `newAttended + unanswered + noReply + noMessages = newLeads`.
+ */
+export type LeadContactReconciliation = {
+  newLeads: number;
+  attended: number;
+  /** Leads novos que escreveram e foram respondidos no período. */
+  newAttended: number;
+  /** Atendidos cujo cadastro é anterior ao período (retornos da base). */
+  existingAttended: number;
+  /** Lead novo que escreveu e não recebeu resposta no período. */
+  unanswered: number;
+  /** Lead novo que só recebeu mensagem nossa (abordagem, lembrete, disparo) e não respondeu. */
+  noReply: number;
+  /** Lead novo sem mensagem no período (cadastro manual, importação, histórico). */
+  noMessages: number;
+  /** Leads novos com mensagem no período, pelo início da atividade (mesmos grupos de contexto). */
+  byContext: { key: ContactContext; label: string; leads: number; attended: number }[];
+};
 
 export type PeriodKpis = {
   attendedContacts: number;
@@ -219,13 +250,15 @@ export type AttendanceOutcomePoint = { key: string; label: string; attended: num
 
 export type PeriodReport = {
   contexts: ContactContextSummary;
+  /** Leads novos × contatos atendidos, com a diferença explicada. */
+  leadReconciliation: LeadContactReconciliation;
   kpis: PeriodKpis;
   flow: FlowPoint[];
   results: ResultPoint[];
   byAgent: { name: string; count: number }[];
   byStatus: { status: string; count: number }[];
-  /** Contatos atendidos só pela IA × contatos em que um humano respondeu. */
-  attendance: AiHumanPoint[];
+  /** Conversas iniciadas pelo paciente: só IA × com humano (IA + humano, só humano). */
+  attendance: AttendancePoint[];
   /** Agendamentos fechados pela IA (`source: agent`) × manuais (`source: manual`), só scheduled/done. */
   closed: AiHumanPoint[];
   /** Conversas → leads engajados → leads quentes → agendados, todos CRIADOS no período. */
@@ -234,7 +267,11 @@ export type PeriodReport = {
   peakHours: HeatmapCell[];
   /** Tempo entre a mensagem do lead e a primeira resposta seguinte, por faixa. */
   firstResponseTime: ResponseTimeBucket[];
-  /** Resolução autônoma: fração de contatos que a IA atendeu sozinha no período. */
+  /**
+   * Resolução autônoma: das conversas que o paciente iniciou e foram respondidas,
+   * a fração que só a IA respondeu, sem pessoa nem transbordo (`contexts.autonomy`).
+   * Abordagem da equipe, campanha, lembrete e follow-up não entram na base.
+   */
   autonomyRate: { current: number; previous: number | null };
   /** Follow-ups enviados no período e quantos tiveram resposta do lead depois. */
   followUpRecovery: { sent: number; recovered: number };
@@ -380,6 +417,34 @@ function listBuckets(from: Date, to: Date, unit: BucketUnit) {
   return out;
 }
 
+type WindowMessage = { id: string; conversationId: string; role: string; sentBy: string | null; createdAt: Date; whatsappMessageId: string | null };
+type WindowEvent = { conversationId: string; kind: string; createdAt: Date; dedupKey: string | null };
+
+/**
+ * Atendimento e iniciativa da janela numa passada só. Os mesmos envios
+ * automáticos (finalidade registrada ou id da operação) saem das respostas nos
+ * dois lados, então só IA + transferidas = atendidos = soma dos contextos.
+ */
+async function classifyWindow(tenantId: string, from: Date | null, toExcl: Date, messages: readonly WindowMessage[],
+  rawEvents: readonly WindowEvent[], bookings: readonly ContextBooking[]) {
+  const recorded = rawEvents.map((e) => ({ conversationId: e.conversationId, kind: e.kind, createdAt: e.createdAt,
+    messageId: contextEventMessageId(e.kind, e.dedupKey ?? "") }));
+  const byConversation = new Map<string, WindowMessage[]>();
+  for (const m of messages) {
+    const rows = byConversation.get(m.conversationId) ?? [];
+    rows.push(m); byConversation.set(m.conversationId, rows);
+  }
+  const [sends, starts] = await Promise.all([
+    loadAutomatedSendEvents(tenantId, messages, from, toExcl),
+    loadConversationStarts(tenantId, [...byConversation.keys()], toExcl, from),
+  ]);
+  const events = [...recorded, ...sends];
+  const activity = periodContactActivity(messages, recorded.filter((e) => e.kind === "handoff").map((e) => e.conversationId), automatedMessageIds(events));
+  const { summary, records } = summarizeContactContexts({ start: from, end: toExcl,
+    conversations: [...byConversation].map(([id, messages]) => ({ id, messages, firstMessage: starts.get(id) })), bookings, events });
+  return { activity, contexts: summary, records };
+}
+
 /**
  * KPI + séries do período. Consultas semelhantes às da home, mas com janela
  * configurável e agregação por bucket em memória (mesmo custo da sparkline,
@@ -420,7 +485,7 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
   ] = await Promise.all([
     prisma.lead.findMany({
       where: { ...leadScope, createdAt: { gte: from ?? undefined, lt: toExcl } },
-      select: { createdAt: true },
+      select: { createdAt: true, conversation: { select: { id: true } } },
     }),
     prisma.appointment.findMany({
       where: {
@@ -470,7 +535,8 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
         createdAt: { gte: from ?? undefined, lt: toExcl },
         conversation: conversationScope,
       },
-      select: { id: true, conversationId: true, role: true, sentBy: true, createdAt: true },
+      // `whatsappMessageId` só para reconhecer lembrete/disparo pelo id da operação.
+      select: { id: true, conversationId: true, role: true, sentBy: true, createdAt: true, whatsappMessageId: true },
       orderBy: { createdAt: "asc" },
     }),
     // Conversas com follow-up enviado no período — base da "recuperação por follow-up".
@@ -482,16 +548,7 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
   ]);
 
   const messages = orderedMsgs;
-  const activity = periodContactActivity(messages, handoffEvents.filter((e) => e.kind === "handoff").map((e) => e.conversationId));
-  const contextMessages = new Map<string, typeof messages>();
-  for (const message of messages) {
-    const rows = contextMessages.get(message.conversationId) ?? [];
-    rows.push(message); contextMessages.set(message.conversationId, rows);
-  }
-  const starts = await loadConversationStarts(tenantId, [...contextMessages.keys()], toExcl, from);
-  const contexts = summarizeContactContexts({ start: from, end: toExcl,
-    conversations: [...contextMessages].map(([id, messages]) => ({ id, messages, firstMessage: starts.get(id) })),
-    bookings: apptRows.filter(isEvaluation), events: handoffEvents.map((e) => ({ ...e, messageId: contextEventMessageId(e.kind, e.dedupKey ?? "") })) }).summary;
+  const { activity, contexts, records } = await classifyWindow(tenantId, from, toExcl, messages, handoffEvents, apptRows.filter(isEvaluation));
   const conversations = activity.active.size;
   const leads = leadRows.length;
   const scheduled = apptRows.length;
@@ -510,17 +567,18 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
       }),
       prisma.appointment.findMany({
         where: { tenantId, ...agentScope, lead: { isTest: false }, conversation: { isTest: false }, createdAt: { gte: prevFrom, lt: prevLt }, status: { in: ["scheduled", "done"] } },
-        select: { id: true, source: true, agentId: true, kind: true, serviceType: true },
+        select: { id: true, conversationId: true, createdAt: true, source: true, agentId: true, kind: true, serviceType: true },
       }),
       prisma.message.findMany({
         where: { role: { in: ["user", "assistant"] }, createdAt: { gte: prevFrom, lt: prevLt },
           conversation: conversationScope },
-        select: { conversationId: true, role: true, sentBy: true, createdAt: true },
+        select: { id: true, conversationId: true, role: true, sentBy: true, createdAt: true, whatsappMessageId: true },
       }),
-      prisma.reportEvent.findMany({ where: { tenantId, kind: "handoff", createdAt: { gte: prevFrom, lt: prevLt }, conversation: conversationScope }, select: { conversationId: true } }),
+      prisma.reportEvent.findMany({ where: { tenantId, createdAt: { gte: prevFrom, lt: prevLt }, conversation: conversationScope }, select: { conversationId: true, kind: true, createdAt: true, dedupKey: true } }),
     ]);
-    const activity = periodContactActivity(prevMessages, prevHandoffs.map((e) => e.conversationId));
-    previousAutonomy = activity.attended.size ? activity.aiOnly.size / activity.attended.size : null;
+    // Mesma regra do período atual: comparar autonomia de bases diferentes inventaria uma variação.
+    const { activity, contexts: previousContexts } = await classifyWindow(tenantId, prevFrom, prevLt, prevMessages, prevHandoffs, prevAppointments.filter(isEvaluation));
+    previousAutonomy = previousContexts.autonomy?.percent == null ? null : previousContexts.autonomy.percent / 100;
     prev = {
       attendedContacts: activity.attended.size,
       evaluations: prevAppointments.filter(isEvaluation).length,
@@ -560,16 +618,23 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
   const results: ResultPoint[] = buckets.map((b) => ({ ...b, ...resultsMap.get(b.key)! }));
 
   // ── comparações IA × humano ────────────────────────────────────────────────
-  // Um contato por período, na data da primeira entrada. Resposta humana ou
-  // transferência registrada em qualquer dia retira o contato de só IA.
-  const attendanceMap = new Map(buckets.map((b) => [b.key, { ai: 0, human: 0 }]));
-  for (const [id, contact] of activity.contacts) {
-    const slot = attendanceMap.get(bucketStart(contact.first!.createdAt, bucket).toISOString());
+  // Só conversas que o paciente iniciou, uma por período, na data da chegada
+  // (mesma base da resolução autônoma). Abordagem da equipe não é "precisou de
+  // humano": a conversa já nasceu humana. Resposta humana ou transferência
+  // registrada em qualquer dia do período retira o contato de só IA.
+  const attendanceMap = new Map(buckets.map((b) => [b.key, { ai: 0, human: 0, aiAndHuman: 0, humanOnly: 0 }]));
+  for (const record of records) {
+    if (!record.resolution || !PATIENT_CONTEXTS.includes(record.context)) continue;
+    const slot = attendanceMap.get(bucketStart(new Date(record.firstAt), bucket).toISOString());
     if (!slot) continue;
-    if (activity.transferred.has(id)) slot.human++;
-    else slot.ai++;
+    if (record.resolution === "ai_only") slot.ai++;
+    else {
+      slot.human++;
+      if (record.resolution === "ai_and_human") slot.aiAndHuman++;
+      else slot.humanOnly++;
+    }
   }
-  const attendance: AiHumanPoint[] = buckets.map((b) => ({ ...b, ...attendanceMap.get(b.key)! }));
+  const attendance: AttendancePoint[] = buckets.map((b) => ({ ...b, ...attendanceMap.get(b.key)! }));
 
   const closedMap = new Map(buckets.map((b) => [b.key, { ai: 0, human: 0 }]));
   for (const a of closedAppts) {
@@ -649,9 +714,31 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
   }
   const firstResponseTime: ResponseTimeBucket[] = firstResponseCounts;
 
-  // ── resolução autônoma: fração dos contatos atendidos que a IA resolveu
-  // sozinha no período (mesma base de `attendance`, resumida num número) ────
-  const currentAutonomy = activity.attended.size ? activity.aiOnly.size / activity.attended.size : 0;
+  // ── resolução autônoma: das conversas iniciadas pelo paciente e
+  // respondidas, a fração só com a IA (mesma base de `attendance`) ──────────
+  const currentAutonomy = (contexts.autonomy?.percent ?? 0) / 100;
+
+  // ── leads novos × contatos atendidos: a diferença, explicada ─────────────
+  const recordById = new Map(records.map((r) => [r.conversationId, r]));
+  const newConversationIds = new Set(leadRows.flatMap((l) => l.conversation ? [l.conversation.id] : []));
+  const leadReconciliation: LeadContactReconciliation = {
+    newLeads: leads, attended: activity.attended.size, newAttended: 0, existingAttended: 0, unanswered: 0, noReply: 0,
+    noMessages: leads - newConversationIds.size, byContext: [],
+  };
+  const newByContext = new Map<ContactContext, { leads: number; attended: number }>();
+  for (const id of newConversationIds) {
+    const record = recordById.get(id);
+    if (!record) { leadReconciliation.noMessages++; continue; }
+    const group = newByContext.get(record.context) ?? { leads: 0, attended: 0 };
+    group.leads++;
+    if (activity.attended.has(id)) { leadReconciliation.newAttended++; group.attended++; }
+    else if (activity.active.has(id)) leadReconciliation.unanswered++;
+    else leadReconciliation.noReply++;
+    newByContext.set(record.context, group);
+  }
+  leadReconciliation.existingAttended = leadReconciliation.attended - leadReconciliation.newAttended;
+  leadReconciliation.byContext = (Object.keys(CONTACT_CONTEXT_LABEL) as ContactContext[])
+    .flatMap((key) => newByContext.has(key) ? [{ key, label: CONTACT_CONTEXT_LABEL[key], ...newByContext.get(key)! }] : []);
 
   // ── recuperação por follow-up: dos enviados no período, quantos tiveram
   // resposta do lead depois do envio (mesma janela — consistente com o resto
@@ -686,6 +773,7 @@ export async function computePeriodReport(tenantId: string, range: ReportRange, 
 
   return {
     contexts,
+    leadReconciliation,
     kpis: {
       attendedContacts: activity.attended.size,
       evaluations: apptRows.filter(isEvaluation).length,
