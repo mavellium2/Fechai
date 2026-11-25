@@ -1,6 +1,7 @@
 import * as React from "react";
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { actionFocus, actionText } from "./action";
 
 /**
  * Aviso em bloco: ícone + texto + papel ARIA correto.
@@ -49,7 +50,7 @@ export function Alert({
       </div>
       {onDismiss && (
         <button type="button" onClick={onDismiss} aria-label="Fechar aviso"
-          className="-my-1 -mr-2 shrink-0 rounded-control p-1 opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris">
+          className={cn("-my-1 -mr-2 shrink-0 rounded-control p-1 transition-colors focus-visible:outline-none focus-visible:ring-2", actionText, actionFocus)}>
           <X size={16} aria-hidden />
         </button>
       )}

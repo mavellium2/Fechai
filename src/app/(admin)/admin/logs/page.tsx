@@ -65,6 +65,7 @@ export default async function LogsPage({
       <div className="w-full space-y-6">
         <Header activeCount={blocked.length} tab={tab} />
         <FilterTabs
+          accent="signal"
           label="Alternar entre eventos e IPs bloqueados"
           options={tabs}
           active={tab}
@@ -158,6 +159,7 @@ export default async function LogsPage({
       />
 
       <FilterTabs
+        accent="signal"
         label="Alternar entre eventos e IPs bloqueados"
         options={tabs}
         active={tab}

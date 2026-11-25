@@ -1,5 +1,9 @@
 # CRM nativo — Histórico
 
+## 2026-11-25 — Laranja como cor de ação
+
+O laranja (`signal`) passou a marcar a ação no CRM: ícones de botão, lupa e limpar da busca, abas, filtros, menus e interruptores ligados. A ação principal de cada seção é a única preenchida (`variant="cta"`, texto `ink`); os botões secundários mantêm texto e borda brancos no painel escuro/`ink` no fundo claro, com laranja **só no ícone** e no foco (`variant="action"`). O nome do lead no card e nas tarefas continua branco/preto, nunca laranja. Foco, `disabled`, `loading` e contraste AA foram preservados nos dois fundos. A regra saiu do CRM e virou padrão do produto em [docs/plataforma/interface/cores-acao.md](../../plataforma/interface/cores-acao.md), com os primitivos `action.ts`, `Button`, `FilterTabs`, `Switch` e `SelectMenu` prontos para as próximas páginas.
+
 ## 2026-11-25 — Editar dados do contato sem perder o original do WhatsApp
 
 A equipe pode corrigir o nome e as variáveis do agente pelo card (**Editar contato**) e pela tela de Contatos. O nome do perfil do WhatsApp passou a ficar guardado à parte (`Lead.whatsappName`, só o webhook grava) e o telefone continua fixo. O valor editado vale e fica travado (`Lead.nameEditedAt`, `Conversation.editedVariables`): agente, resumo e webhook não sobrescrevem mais, e o prompt avisa que foi confirmado pela equipe. Em branco destrava. Cada edição grava `crm.contact_edited` na trilha só com as chaves alteradas. Schema novo: `db push` + `generate` nos dois processos (web e worker).

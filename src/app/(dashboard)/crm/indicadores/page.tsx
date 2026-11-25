@@ -41,9 +41,9 @@ export default async function HandoffIndicatorsPage({ searchParams }: { searchPa
         eyebrow="CRM"
         title="Indicadores do transbordo"
         hint="Quem assumiu os atendimentos transferidos pela IA, quanto tempo levou e quantos voltaram para a IA."
-        actions={<ButtonLink href="/crm" variant="outline"><ArrowLeft size={16} aria-hidden />Voltar ao CRM</ButtonLink>}
+        actions={<ButtonLink href="/crm" variant="action"><ArrowLeft size={16} aria-hidden />Voltar ao CRM</ButtonLink>}
       />
-      <FilterTabs label="Período" active={String(days)} href={(key) => `/crm/indicadores?dias=${key}`}
+      <FilterTabs accent="signal" label="Período" active={String(days)} href={(key) => `/crm/indicadores?dias=${key}`}
         options={PERIODS.map((period) => ({ key: String(period), label: `Últimos ${period} dias` }))} />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

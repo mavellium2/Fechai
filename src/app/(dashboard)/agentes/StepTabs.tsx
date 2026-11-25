@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { actionFocus } from "@/components/ui/action";
 import { cn } from "@/lib/utils";
 import { InfoHint } from "@/components/ui/info-hint";
 import { useUnsavedNavigation } from "@/components/ui/unsaved-changes";
@@ -65,8 +66,9 @@ export function StepTabs({ tabs }: { tabs: StepTab[] }) {
                 }}
                 className={cn(
                   "-mb-px rounded-t-control border-b-2 px-3 py-2 font-mono text-micro uppercase tracking-[0.15em] transition-colors",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris",
-                  on ? "border-iris text-white" : "border-transparent text-white/50 hover:text-white/80",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink",
+                  actionFocus,
+                  on ? "border-signal-ink panel:border-signal text-white" : "border-transparent text-white/50 hover:text-white/80",
                 )}
               >
                 {t.label}

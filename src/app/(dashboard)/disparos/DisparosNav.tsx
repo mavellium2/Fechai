@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { actionFocus } from "@/components/ui/action";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -28,9 +29,10 @@ export function DisparosNav({ actions }: { actions?: React.ReactNode }) {
               aria-current={on ? "page" : undefined}
               className={cn(
                 "whitespace-nowrap border-b-2 pb-3 pt-1 text-sm font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink",
+                actionFocus,
                 on
-                  ? "border-iris text-white"
+                  ? "border-signal-ink panel:border-signal text-white"
                   : "border-transparent text-white/55 hover:border-white/25 hover:text-white",
               )}
             >

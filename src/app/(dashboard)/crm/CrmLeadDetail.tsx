@@ -151,8 +151,8 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
       <ConversationSummary conversationId={conversation.id} state={{ summary: conversation.summary, summaryAt: conversation.summaryAt,
         summaryMsgCount: conversation.summaryMsgCount, messageCount: conversation._count.messages }} />
       {(history.before || params.antes) && <nav className="flex flex-wrap gap-2" aria-label="Páginas da conversa">
-        {history.before && <ButtonLink size="sm" variant="outline" prefetch={false} href={crmBoardHref(params, { antes: history.before })}>Mensagens anteriores</ButtonLink>}
-        {params.antes && <ButtonLink size="sm" variant="ghost" prefetch={false} href={crmBoardHref(params, { antes: null })}>Mensagens recentes</ButtonLink>}
+        {history.before && <ButtonLink size="sm" variant="action" prefetch={false} href={crmBoardHref(params, { antes: history.before })}>Mensagens anteriores</ButtonLink>}
+        {params.antes && <ButtonLink size="sm" variant="action" prefetch={false} href={crmBoardHref(params, { antes: null })}>Mensagens recentes</ButtonLink>}
       </nav>}
       {history.messages.length === 0 ? <p className={muted}>Nenhuma mensagem registrada.</p> :
         <ul className="space-y-3" aria-label="Histórico da conversa">
@@ -174,7 +174,7 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
         <div className="space-y-2 border-t border-ink/10 pt-3 text-sm text-neutral panel:border-white/10 panel:text-white/65">
           <p>{crmReplyPaused[reply.status]}</p>
           {reply.templates && (reply.status === "no_inbound" || reply.status === "window_closed") && (
-            <ButtonLink href="/disparos" variant="outline" size="sm">Usar modelo aprovado em Disparos</ButtonLink>
+            <ButtonLink href="/disparos" variant="action" size="sm">Usar modelo aprovado em Disparos</ButtonLink>
           )}
         </div>
       )}
@@ -244,7 +244,7 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
     <ol className="sla-timeline crm-history-timeline relative space-y-4 border-l border-ink/10 pl-4 text-sm panel:border-white/10">
       {timeline.map((event, i) => (
         <li key={event.id} className="sla-step relative break-words" style={{ "--i": i } as CSSProperties}>
-          <span aria-hidden className="sla-dot absolute -left-[1.3rem] top-1.5 size-2 rounded-full bg-iris" />
+          <span aria-hidden className="sla-dot absolute -left-[1.3rem] top-1.5 size-2 rounded-full bg-signal" />
           <p className="font-medium">{event.title}</p>
           {event.details && <p className="text-neutral panel:text-white/55">{event.details}</p>}
           <p className="text-neutral panel:text-white/55">{event.source && `${event.source} · `}<time dateTime={event.at.toISOString()}>{dateTimeLabel(event.at)}</time></p>

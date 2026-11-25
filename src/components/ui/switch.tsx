@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { actionFocus } from "./action";
 import { LoadingDots } from "./loading-dots";
 import type { ReactNode } from "react";
 
@@ -20,6 +21,7 @@ export function Switch({
   describedBy,
   className,
   thumbContent,
+  accent = "iris",
 }: {
   checked: boolean;
   onCheckedChange: (next: boolean) => void;
@@ -32,6 +34,8 @@ export function Switch({
   className?: string;
   /** Optional decorative content, such as the current theme icon. */
   thumbContent?: ReactNode;
+  /** `signal` nas telas que adotaram a cor de ação (CRM); `iris` é o padrão. */
+  accent?: "iris" | "signal";
 }) {
   return (
     <button
@@ -45,10 +49,11 @@ export function Switch({
       onClick={() => onCheckedChange(!checked)}
       className={cn(
         "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris focus-visible:ring-offset-2",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
         "focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink",
+        accent === "signal" ? actionFocus : "focus-visible:ring-iris",
         "disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "bg-iris" : "bg-neutral/40 panel:bg-white/20",
+        checked ? (accent === "signal" ? "bg-signal" : "bg-iris") : "bg-neutral/40 panel:bg-white/20",
         className,
       )}
     >

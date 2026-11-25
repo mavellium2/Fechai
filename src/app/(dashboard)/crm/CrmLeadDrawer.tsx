@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
+import { actionFocus, actionText } from "@/components/ui/action";
 import { ButtonLink } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +43,7 @@ export function CrmLeadDrawer({ title, meta, back, main, tabs }: {
           <h2 id="crm-lead-title" className="font-display text-xl font-semibold [overflow-wrap:anywhere]">{title}</h2>
           {meta}
         </div>
-        <ButtonLink href={back} variant="ghost" size="icon" aria-label="Voltar ao quadro"><X size={20} aria-hidden /></ButtonLink>
+        <ButtonLink href={back} variant="action" size="icon" aria-label="Voltar ao quadro"><X size={20} aria-hidden /></ButtonLink>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:overflow-hidden">
@@ -66,8 +67,9 @@ export function CrmLeadDrawer({ title, meta, back, main, tabs }: {
                   }}
                   className={cn(
                     "-mb-px border-b-2 px-3 py-3 font-mono text-micro uppercase tracking-[0.15em] transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris",
-                    on ? "border-iris text-ink panel:text-white" : "border-transparent text-neutral hover:text-ink panel:text-white/50 panel:hover:text-white/80",
+                    "focus-visible:outline-none focus-visible:ring-2",
+                    actionFocus,
+                    on ? `border-signal ${actionText}` : `border-transparent opacity-60 hover:opacity-100 ${actionText}`,
                   )}>
                   {tab.label}
                 </button>

@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
+import { actionSurface } from "./action";
 import { LoadingDots } from "./loading-dots";
 
 /**
@@ -26,8 +27,11 @@ const buttonVariants = cva(
       variant: {
         // primária de marca
         default: "bg-iris text-white enabled:hover:bg-iris/90",
-        // conversão (signup/assinar) — 1 por tela, no máximo
+        // conversão (signup/assinar) e ação principal da seção — 1 por tela, no máximo
         cta: "bg-signal text-white enabled:hover:bg-signal/90",
+        // cor de ação: tudo que é clicável. Laranja no texto e na borda, sem
+        // preencher, para não competir com o único CTA preenchido da tela.
+        action: actionSurface,
         outline: [
           "border border-ink/15 bg-white text-ink enabled:hover:bg-paper",
           "panel:border-white/20 panel:bg-transparent panel:text-white/80",

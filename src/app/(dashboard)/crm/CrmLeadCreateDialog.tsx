@@ -42,7 +42,7 @@ export function CrmLeadCreateDialog({ stages, defaultStageId, close }: {
           <h2 id={title} className="font-display break-words text-lg font-semibold">Adicionar lead</h2>
           <p className="mt-1 text-sm text-neutral panel:text-white/60">Cadastro manual: entra no quadro sem iniciar conversa.</p>
         </div>
-        <Button type="button" variant="ghost" size="icon" aria-label="Fechar" onClick={() => ref.current?.close()} disabled={pending}>
+        <Button type="button" variant="action" size="icon" aria-label="Fechar" onClick={() => ref.current?.close()} disabled={pending}>
           <X size={18} aria-hidden />
         </Button>
       </div>
@@ -56,13 +56,13 @@ export function CrmLeadCreateDialog({ stages, defaultStageId, close }: {
             placeholder="(11) 99999-9999" value={phone} onChange={(event) => setPhone(event.target.value)} readOnly={pending} />
         </Field>
         <Field label="Etapa inicial" htmlFor={`${title}-stage`} labelId={`${title}-stage-label`}>
-          <SelectMenu name="stageId" label="Etapa inicial" labelledBy={`${title}-stage-label`} value={stageId}
+          <SelectMenu name="stageId" accent="signal" label="Etapa inicial" labelledBy={`${title}-stage-label`} value={stageId}
             onChange={setStageId} disabled={pending} options={options} />
         </Field>
         <FormFeedback error={state?.error} info={state?.ok ? state.info : undefined} />
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => ref.current?.close()} disabled={pending}>Cancelar</Button>
-          <Button type="submit" loading={pending} loadingLabel="Adicionando lead" disabled={!stageId || !phone.trim()}>
+          <Button type="button" variant="action" onClick={() => ref.current?.close()} disabled={pending}>Cancelar</Button>
+          <Button type="submit" variant="cta" className="text-ink" loading={pending} loadingLabel="Adicionando lead" disabled={!stageId || !phone.trim()}>
             <Plus size={16} aria-hidden />Adicionar
           </Button>
         </div>

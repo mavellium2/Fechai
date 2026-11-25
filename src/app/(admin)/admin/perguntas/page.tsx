@@ -98,6 +98,7 @@ export default async function AdminPerguntasPage({ searchParams }: { searchParam
         <section className="space-y-4" aria-label={`Fila de ${selected.name}`}>
           <h2 className="font-display text-lg font-semibold text-white">{selected.name}</h2>
           <FilterTabs
+            accent="signal"
             label="Filtrar perguntas por situação"
             options={[
               { key: "open", label: "Na fila", count: counts.open },

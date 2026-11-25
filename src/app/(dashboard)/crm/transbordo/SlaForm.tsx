@@ -59,7 +59,7 @@ export function SlaForm({ sla, autoReturn, suggestedHours, hasSchedule }: {
               : "Ainda não há horário de atendimento cadastrado em Agentes: o tempo corre o dia todo até ele ser cadastrado."}
           </p>
         </div>
-        <Switch checked={businessHoursOnly} onCheckedChange={setBusinessHoursOnly} disabled={pending}
+        <Switch accent="signal" checked={businessHoursOnly} onCheckedChange={setBusinessHoursOnly} disabled={pending}
           label={`Contar só o horário de atendimento: ${businessHoursOnly ? "ligado" : "desligado"}`} describedBy={hoursDesc} />
       </div>
       <input type="hidden" name="businessHoursOnly" value={businessHoursOnly ? "on" : ""} />
@@ -71,7 +71,7 @@ export function SlaForm({ sla, autoReturn, suggestedHours, hasSchedule }: {
             Os donos da conta recebem um e-mail com o link de cada card escalonado. Sem nome, telefone ou conversa do contato.
           </p>
         </div>
-        <Switch checked={escalateByEmail} onCheckedChange={setEscalateByEmail} disabled={pending}
+        <Switch accent="signal" checked={escalateByEmail} onCheckedChange={setEscalateByEmail} disabled={pending}
           label={`Mandar o escalonamento por e-mail: ${escalateByEmail ? "ligado" : "desligado"}`} describedBy={emailDesc} />
       </div>
       <input type="hidden" name="escalateByEmail" value={escalateByEmail ? "on" : ""} />
@@ -85,7 +85,7 @@ export function SlaForm({ sla, autoReturn, suggestedHours, hasSchedule }: {
               Card em Fechado ou Perdido nunca volta. Desligado, nada muda.
             </p>
           </div>
-          <Switch checked={autoOn} onCheckedChange={setAutoOn} disabled={pending}
+          <Switch accent="signal" checked={autoOn} onCheckedChange={setAutoOn} disabled={pending}
             label={`Devolver para a IA automaticamente: ${autoOn ? "ligado" : "desligado"}`} describedBy={autoDesc} />
         </div>
         <input type="hidden" name="autoReturn" value={autoOn ? "on" : ""} />
@@ -102,7 +102,7 @@ export function SlaForm({ sla, autoReturn, suggestedHours, hasSchedule }: {
                 Fora do horário de atendimento cadastrado, o prazo da devolução não corre.
               </p>
             </div>
-            <Switch checked={autoBusinessHours} onCheckedChange={setAutoBusinessHours} disabled={pending}
+            <Switch accent="signal" checked={autoBusinessHours} onCheckedChange={setAutoBusinessHours} disabled={pending}
               label={`Contar só o horário de atendimento na devolução: ${autoBusinessHours ? "ligado" : "desligado"}`} describedBy={autoHoursDesc} />
           </div>
           <input type="hidden" name="autoReturnBusinessHoursOnly" value={autoBusinessHours ? "on" : ""} />
@@ -113,14 +113,14 @@ export function SlaForm({ sla, autoReturn, suggestedHours, hasSchedule }: {
                 Mesmo depois de alguém assumir, o contato que escreveu e ficou sem resposta nesse prazo volta para a IA.
               </p>
             </div>
-            <Switch checked={autoHuman} onCheckedChange={setAutoHuman} disabled={pending}
+            <Switch accent="signal" checked={autoHuman} onCheckedChange={setAutoHuman} disabled={pending}
               label={`Valer também para quem está em atendimento humano: ${autoHuman ? "ligado" : "desligado"}`} describedBy={autoHumanDesc} />
           </div>
           <input type="hidden" name="autoReturnHumanStage" value={autoHuman ? "on" : ""} />
         </div>
       </section>
 
-      <Button type="submit" loading={pending}>Salvar prazos</Button>
+      <Button type="submit" variant="cta" className="text-ink" loading={pending}>Salvar prazos</Button>
     </UnsavedForm>
   );
 }

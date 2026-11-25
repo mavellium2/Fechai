@@ -121,7 +121,7 @@ export function TenantShell({ navItems, brandHref, brandSubtitle, footerLabel, u
         </div>
         {context === "admin" && <header className="tenant-admin-header">
           <div className="tenant-admin-identity"><span className="tenant-admin-badge">Administração</span><span className="tenant-admin-user" title={userLabel}>{userLabel}</span></div>
-          <form action={signOutAction} onSubmit={onSignOut} data-leave-page><Button type="submit" variant="outline" size="sm">Sair</Button></form>
+          <form action={signOutAction} onSubmit={onSignOut} data-leave-page><Button type="submit" variant="action" size="sm"><LogOut size={16} aria-hidden />Sair</Button></form>
         </header>}
         <main id="conteudo" tabIndex={-1} className={`tenant-main ${agents ? "tenant-main-agents" : "tenant-content"} ${crmBoard ? "tenant-main-crm" : ""}`}>
           {children}

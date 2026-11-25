@@ -115,8 +115,8 @@ function ColumnCardList({ column, params, onBusy, children }: {
       {children(cards)}
       <li ref={sentinel} className="shrink-0 pt-1 text-center text-xs text-neutral panel:text-white/55">
         {loading && <span className="inline-flex items-center gap-1.5"><LoaderCircle size={13} aria-hidden className="animate-spin" />Carregando mais leads…</span>}
-        {!loading && error && <span role="alert" className="inline-flex flex-wrap items-center justify-center gap-2">{error} <Button type="button" variant="ghost" size="sm" onClick={() => void load()}>Tentar novamente</Button></span>}
-        {!loading && !error && cursor && <button type="button" onClick={() => void load()} className="hover:underline">Carregar mais leads</button>}
+        {!loading && error && <span role="alert" className="inline-flex flex-wrap items-center justify-center gap-2">{error} <Button type="button" variant="action" size="sm" onClick={() => void load()}>Tentar novamente</Button></span>}
+        {!loading && !error && cursor && <Button type="button" variant="action" size="sm" onClick={() => void load()}>Carregar mais leads</Button>}
       </li>
     </ul>
   );
@@ -212,7 +212,7 @@ export function CrmBoard({ columns, stages, lossReasons, params, searches, versi
         }`}>
         {columns.map((column, index) => (
           <section key={column.id} className={`${index ? "hidden md:flex" : "flex"} min-h-0 min-w-0 flex-col rounded-surface border px-3 py-3 md:h-full md:w-[clamp(15rem,21vw,19rem)] md:shrink-0 ${
-            hover === column.id ? "border-iris bg-iris/10" : "border-ink/10 bg-ink/[0.03] panel:border-white/10 panel:bg-white/[0.04]"
+            hover === column.id ? "border-signal bg-signal/10" : "border-ink/10 bg-ink/[0.03] panel:border-white/10 panel:bg-white/[0.04]"
           }`} aria-labelledby={`crm-column-${column.id}`} onDragOver={(event) => {
             if (!dragged.current || dragged.current.stageId === column.id || pending) return;
             event.preventDefault();
@@ -237,7 +237,7 @@ export function CrmBoard({ columns, stages, lossReasons, params, searches, versi
               {(cards) => cards.length === 0 ? (
                 <li className="py-4 text-sm text-neutral panel:text-white/55">Nenhum lead nesta etapa.</li>
               ) : cards.map((card) => (
-                <li key={card.id} data-crm-card={card.id} draggable={!pending} className={`min-w-0 shrink-0 rounded-control border border-ink/10 bg-white p-3 panel:border-white/10 panel:bg-ink ${dragging === card.id ? "opacity-45" : ""}`}
+                <li key={card.id} data-crm-card={card.id} draggable={!pending} className={`min-w-0 shrink-0 rounded-control border border-ink/10 bg-white p-3 transition-colors hover:border-signal/60 panel:border-white/10 panel:bg-ink panel:hover:border-signal/60 ${dragging === card.id ? "opacity-45" : ""}`}
                   onDragStart={(event) => {
                     dragged.current = card;
                     setDragging(card.id);
@@ -248,14 +248,14 @@ export function CrmBoard({ columns, stages, lossReasons, params, searches, versi
                     <GripVertical size={15} className="mt-0.5 hidden shrink-0 cursor-grab text-neutral md:block" aria-hidden />
                     <div className="min-w-0 flex-1">
                       <Link href={crmBoardHref(params, { lead: card.id })} prefetch={false} draggable={false}
-                        className="block text-sm font-medium [overflow-wrap:anywhere] hover:underline">{card.name}</Link>
+                        className="block text-sm font-medium text-ink [overflow-wrap:anywhere] hover:underline panel:text-white">{card.name}</Link>
                       <p className="mt-1 text-xs text-neutral panel:text-white/60">{card.phone}</p>
                     </div>
                     <div className="flex shrink-0 items-start">
-                      <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Mover ${card.name}`} title="Mover lead" onClick={() => setMove({ card })}>
+                      <Button type="button" variant="action" size="icon" disabled={pending} aria-label={`Mover ${card.name}`} title="Mover lead" onClick={() => setMove({ card })}>
                         <ArrowLeftRight size={15} aria-hidden />
                       </Button>
-                      <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Excluir ${card.name}`} title="Excluir lead" onClick={() => setDeleting(card)}>
+                      <Button type="button" variant="action" size="icon" disabled={pending} aria-label={`Excluir ${card.name}`} title="Excluir lead" onClick={() => setDeleting(card)}>
                         <Trash2 size={15} aria-hidden />
                       </Button>
                     </div>
@@ -274,8 +274,8 @@ export function CrmBoard({ columns, stages, lossReasons, params, searches, versi
               ))}
             </ColumnCardList>
             {column.kind !== "lost" && (
-              <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setCreateAt(column.id)}
-                className="mt-3 w-full shrink-0 justify-center border border-dashed border-ink/15 panel:border-white/15">
+              <Button type="button" variant="action" size="sm" disabled={pending} onClick={() => setCreateAt(column.id)}
+                className="mt-3 w-full shrink-0 justify-center border border-dashed border-signal/60 panel:border-signal/60">
                 <Plus size={15} aria-hidden />Adicionar lead
               </Button>
             )}
@@ -310,12 +310,12 @@ function MoveCardDialog({ move, stages, lossReasons, close, action, pending, sta
       <form action={action} className="mt-4 space-y-4">
         <input type="hidden" name="leadId" value={move.card.id} />
         <input type="hidden" name="fromStageId" value={move.card.stageId ?? ""} />
-        <SelectMenu name="stageId" label="Etapa de destino" value={to} onChange={setTo} disabled={pending}
+        <SelectMenu name="stageId" accent="signal" label="Etapa de destino" value={to} onChange={setTo} disabled={pending}
           options={[{ value: "", label: "Escolha a etapa de destino" }, ...stages.filter(({ id }) => id !== move.card.stageId)
             .map(({ id, name }) => ({ value: id, label: name }))]} />
         {lost && (
           <>
-            <SelectMenu name="reason" label="Motivo da perda" value={selectedReason} onChange={setReason} disabled={pending}
+            <SelectMenu name="reason" accent="signal" label="Motivo da perda" value={selectedReason} onChange={setReason} disabled={pending}
               options={[{ value: "", label: "Escolha o motivo da perda" }, ...lossReasons.map(({ key, label }) => ({ value: key, label }))]} />
             <Field label="Justificativa da perda" htmlFor={`${title}-note`}>
               <Textarea id={`${title}-note`} name="lossReasonNote" required maxLength={CRM_LOSS_NOTE_LIMIT} readOnly={pending}
@@ -325,8 +325,8 @@ function MoveCardDialog({ move, stages, lossReasons, close, action, pending, sta
         )}
         {state !== oldState && <FormFeedback error={state?.error} info={state?.info} />}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => ref.current?.close()} disabled={pending}>Cancelar</Button>
-          <Button type="submit" variant={lost ? "destructive" : "default"} loading={pending} disabled={!to || (lost && (!selectedReason || !note.trim()))}>
+          <Button type="button" variant="action" onClick={() => ref.current?.close()} disabled={pending}>Cancelar</Button>
+          <Button type="submit" variant={lost ? "destructive" : "cta"} loading={pending} disabled={!to || (lost && (!selectedReason || !note.trim()))}>
             {lost ? "Confirmar perda" : "Mover lead"}
           </Button>
         </div>

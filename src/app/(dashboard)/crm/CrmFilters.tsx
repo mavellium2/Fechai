@@ -39,12 +39,12 @@ export function CrmFiltersButton({ filters }: { filters: Filters }) {
   const { open, setOpen, panelId } = usePanel();
   const active = activeCount(filters);
   return (
-    <Button variant="outline" size="icon" aria-label="Filtros" title="Filtros" aria-expanded={open} aria-controls={panelId}
+    <Button variant="action" size="icon" aria-label="Filtros" title="Filtros" aria-expanded={open} aria-controls={panelId}
       onClick={() => setOpen(!open)} className="relative size-10 shrink-0 sm:w-auto sm:px-4">
       <Filter size={16} aria-hidden />
       <span className="hidden sm:inline">Filtros</span>
       {active > 0 && (
-        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-iris px-1 font-mono text-xs text-white">{active}</span>
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-signal px-1 font-mono text-xs text-ink">{active}</span>
       )}
     </Button>
   );
@@ -79,27 +79,27 @@ export function CrmFiltersPanel({ filters, stages, tags, users }: {
         periodo: basis, de: String(data.get("de") ?? ""), ate: String(data.get("ate") ?? "") });
     }} className="sticky top-0 z-20 grid min-w-0 grid-cols-1 items-end gap-3 rounded-surface border border-ink/10 bg-white p-3 shadow-lg panel:border-white/12 panel:bg-ink min-[400px]:grid-cols-2 sm:grid-cols-4 xl:grid-cols-[repeat(7,minmax(0,1fr))_auto]">
       <Field className="min-w-0" label="Etapa" htmlFor="crm-stage" labelId="crm-stage-label">
-        <SelectMenu multiple label="Etapa" labelledBy="crm-stage-label" placeholder="Todas as etapas" value={stage} onChange={setStage}
+        <SelectMenu multiple accent="signal" label="Etapa" labelledBy="crm-stage-label" placeholder="Todas as etapas" value={stage} onChange={setStage}
           options={stages.map(({ id, name }) => ({ value: id, label: name }))} />
       </Field>
       <Field className="min-w-0" label="Responsável" htmlFor="crm-assignee" labelId="crm-assignee-label">
-        <SelectMenu multiple label="Responsável" labelledBy="crm-assignee-label" placeholder="Todos os responsáveis" value={assignee} onChange={setAssignee}
+        <SelectMenu multiple accent="signal" label="Responsável" labelledBy="crm-assignee-label" placeholder="Todos os responsáveis" value={assignee} onChange={setAssignee}
           options={[...users.map(({ id, name }) => ({ value: id, label: name })),
             { value: CRM_ASSIGNEE_NONE, label: "Sem responsável" },
             { value: CRM_ASSIGNEE_UNIDENTIFIED, label: "Humano não identificado" },
             ...missingPeople.map((id) => ({ value: id, label: "Pessoa indisponível" }))]} />
       </Field>
       <Field className="min-w-0" label="Origem" htmlFor="crm-origin" labelId="crm-origin-label">
-        <SelectMenu multiple label="Origem" labelledBy="crm-origin-label" placeholder="Todas as origens" value={origin} onChange={setOrigin}
+        <SelectMenu multiple accent="signal" label="Origem" labelledBy="crm-origin-label" placeholder="Todas as origens" value={origin} onChange={setOrigin}
           options={Object.entries(CRM_ORIGIN_OPTIONS).map(([value, label]) => ({ value, label }))} />
       </Field>
       <Field className="min-w-0" label="Etiqueta" htmlFor="crm-tag" labelId="crm-tag-label">
-        <SelectMenu multiple label="Etiqueta" labelledBy="crm-tag-label" placeholder="Todas as etiquetas" value={tag} onChange={setTag}
+        <SelectMenu multiple accent="signal" label="Etiqueta" labelledBy="crm-tag-label" placeholder="Todas as etiquetas" value={tag} onChange={setTag}
           options={[...tags.map(({ id, name }) => ({ value: id, label: name })),
             ...missingTags.map((id) => ({ value: id, label: "Etiqueta indisponível" }))]} />
       </Field>
       <Field className="min-w-0" label="Período por" htmlFor="crm-period" labelId="crm-period-label">
-        <SelectMenu label="Período por" labelledBy="crm-period-label" value={basis} onChange={setBasis}
+        <SelectMenu accent="signal" label="Período por" labelledBy="crm-period-label" value={basis} onChange={setBasis}
           options={[{ value: "entrada", label: "Entrada do lead" }, { value: "atividade", label: "Última atividade" }]} />
       </Field>
       <Field className="min-w-0" label="De" htmlFor="crm-from">
@@ -110,13 +110,13 @@ export function CrmFiltersPanel({ filters, stages, tags, users }: {
       </Field>
       <div className="col-span-1 flex min-w-0 flex-wrap items-end justify-end gap-2 min-[400px]:col-span-2 sm:col-span-1">
         {activeCount(filters) > 0 && (
-          <Button type="button" variant="ghost" disabled={pending} onClick={() => {
+          <Button type="button" variant="action" disabled={pending} onClick={() => {
             setStage([]); setAssignee([]); setOrigin([]); setTag([]); setBasis("entrada");
             go({});
           }}>Limpar</Button>
         )}
-        <Button type="submit" loading={pending}>Aplicar</Button>
-        <Button type="button" variant="ghost" size="icon" aria-label="Fechar filtros" onClick={() => setOpen(false)}><X size={18} aria-hidden /></Button>
+        <Button type="submit" variant="cta" className="text-ink" loading={pending}>Aplicar</Button>
+        <Button type="button" variant="action" size="icon" aria-label="Fechar filtros" onClick={() => setOpen(false)}><X size={18} aria-hidden /></Button>
       </div>
     </form>
   );

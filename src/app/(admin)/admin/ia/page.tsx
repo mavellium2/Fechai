@@ -113,6 +113,7 @@ export default async function AdminIaPage({
       />
 
       <FilterTabs
+        accent="signal"
         label="Seções do painel de IA"
         options={TABS.map((t) => ({ key: t.key, label: t.label }))}
         active={tab}

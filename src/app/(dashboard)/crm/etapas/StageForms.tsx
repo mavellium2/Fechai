@@ -2,6 +2,7 @@
 
 import { useActionState, useId, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
+import { actionText } from "@/components/ui/action";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
@@ -31,7 +32,7 @@ export function CrmLossCatalogForm({ labels, revision }: { labels: string[]; rev
         <Textarea name="reasons" id={id} rows={Math.min(8, labels.length + 1)} value={draft ?? labels.join("\n")} readOnly={pending} required
           onChange={(event) => setDraft(event.target.value)} />
       </Field>
-      <Button type="submit" variant="outline" loading={pending}>Salvar motivos</Button>
+      <Button type="submit" variant="action" loading={pending}>Salvar motivos</Button>
     </UnsavedForm>
   );
 }
@@ -59,7 +60,7 @@ export function StageNameForm({ stage }: { stage?: Stage }) {
         {stage ? <><label htmlFor={id} className="sr-only">{label}</label>{input}</> : <Field label={label} htmlFor={id}>{input}</Field>}
       </div>
       {(!stage || changed || pending) && (
-        <Button type="submit" variant={stage ? "outline" : "default"} loading={pending}>{stage ? "Renomear" : "Criar etapa"}</Button>
+        <Button type="submit" variant={stage ? "action" : "cta"} loading={pending}>{stage ? "Renomear" : "Criar etapa"}</Button>
       )}
     </UnsavedForm>
   );
@@ -125,8 +126,8 @@ function StageOrderForm({ stage, previousId, nextId }: { stage: Stage; previousI
       <input type="hidden" name="stageId" value={stage.id} />
       <input type="hidden" name="beforeId" value={previousId ?? ""} />
       <input type="hidden" name="afterId" value={nextId ?? ""} />
-      <Button type="submit" variant="outline" size="icon" name="direction" value="up" disabled={!previousId || pending} aria-label={`Subir ${stage.name}`} title="Subir etapa"><ArrowUp size={16} aria-hidden /></Button>
-      <Button type="submit" variant="outline" size="icon" name="direction" value="down" disabled={!nextId || pending} aria-label={`Descer ${stage.name}`} title="Descer etapa"><ArrowDown size={16} aria-hidden /></Button>
+      <Button type="submit" variant="action" size="icon" name="direction" value="up" disabled={!previousId || pending} aria-label={`Subir ${stage.name}`} title="Subir etapa"><ArrowUp size={16} aria-hidden /></Button>
+      <Button type="submit" variant="action" size="icon" name="direction" value="down" disabled={!nextId || pending} aria-label={`Descer ${stage.name}`} title="Descer etapa"><ArrowDown size={16} aria-hidden /></Button>
     </form>
   );
 }
@@ -140,7 +141,7 @@ function ArchiveStageForm({ stage, destinations, action, pending, loading }: {
 
   return (
     <details>
-      <summary className="w-fit cursor-pointer text-sm text-neutral hover:text-ink panel:text-white/60 panel:hover:text-white">Arquivar etapa</summary>
+      <summary className={`w-fit cursor-pointer text-sm hover:underline ${actionText}`}>Arquivar etapa</summary>
       <form action={action} className="mt-3 flex flex-wrap items-end gap-3">
         <input type="hidden" name="intent" value="archive" />
         <input type="hidden" name="stageId" value={stage.id} />
@@ -148,6 +149,7 @@ function ArchiveStageForm({ stage, destinations, action, pending, loading }: {
         {needsDestination && (
           <div className="min-w-52 flex-1">
             <SelectMenu
+              accent="signal"
               label="Etapa que vai receber os leads"
               options={[{ value: "", label: "Escolha o destino dos leads" }, ...destinations.map((candidate) => ({ value: candidate.id, label: candidate.name }))]}
               value={selected}

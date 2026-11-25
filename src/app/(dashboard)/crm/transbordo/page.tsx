@@ -40,7 +40,7 @@ export default async function HandoffDeadlinesPage() {
         eyebrow="CRM"
         title="Prazos do transbordo"
         hint="Quanto tempo um lead pode esperar alguém da equipe antes de o Fechai avisar de novo ou devolver para a IA."
-        actions={<ButtonLink href="/crm" variant="outline"><ArrowLeft size={16} aria-hidden />Voltar ao CRM</ButtonLink>}
+        actions={<ButtonLink href="/crm" variant="action"><ArrowLeft size={16} aria-hidden />Voltar ao CRM</ButtonLink>}
       />
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <Card className="p-4 sm:p-6">
@@ -51,7 +51,7 @@ export default async function HandoffDeadlinesPage() {
           <ol className="sla-timeline relative space-y-5 border-l border-ink/10 pl-5 panel:border-white/10">
             {steps.map((step, i) => (
               <li key={step.title} className="sla-step relative" style={{ "--i": i } as React.CSSProperties}>
-                <span aria-hidden className={`absolute -left-[1.6rem] top-0.5 flex size-3 rounded-full ring-4 ring-white panel:ring-ink ${i === steps.length - 1 && autoReturn.hours === null ? "bg-ink/20 panel:bg-white/25" : "sla-dot bg-iris"}`} />
+                <span aria-hidden className={`absolute -left-[1.6rem] top-0.5 flex size-3 rounded-full ring-4 ring-white panel:ring-ink ${i === steps.length - 1 && autoReturn.hours === null ? "bg-ink/20 panel:bg-white/25" : "sla-dot bg-signal"}`} />
                 <p className="font-mono text-micro uppercase tracking-[0.15em] text-signal">{step.at}</p>
                 <p className="mt-1 text-sm font-medium">{step.title}</p>
                 <p className="mt-0.5 text-sm text-neutral panel:text-white/60">{step.text}</p>

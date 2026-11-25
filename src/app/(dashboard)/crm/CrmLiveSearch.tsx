@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
+import { actionFocus, actionText } from "@/components/ui/action";
 import { Input } from "@/components/ui/input";
 import { crmBoardHref, type CrmSearchParams } from "@/modules/crm/board-filters";
 
@@ -69,7 +70,7 @@ export function CrmLiveSearch({ params, term, name, label, placeholder, classNam
   return (
     <div role="search" className={`relative min-w-0 ${className ?? ""}`}>
       <label htmlFor={id} className="sr-only">{label}</label>
-      <Search size={15} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral panel:text-white/45" />
+      <Search size={15} aria-hidden className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${actionText}`} />
       {/*
        * `type="text"` é de propósito: `type="search"` faz Chromium/Edge desenharem
        * um x nativo dentro do campo, que aparecia junto do nosso botão de limpar.
@@ -78,10 +79,10 @@ export function CrmLiveSearch({ params, term, name, label, placeholder, classNam
        */}
       <Input id={id} type="text" inputMode="search" enterKeyHint="search" value={text}
         onChange={(event) => setText(event.target.value)} placeholder={placeholder}
-        className={`pl-9 ${text ? "pr-9" : ""} ${inputClassName ?? ""}`} />
+        className={`pl-9 focus-visible:border-signal-ink panel:focus-visible:border-signal ${actionFocus} ${text ? "pr-9" : ""} ${inputClassName ?? ""}`} />
       {text && (
         <button type="button" aria-label={`Limpar: ${label.toLowerCase()}`} title="Limpar busca"
-          onClick={clear} className="absolute right-1 top-1/2 -translate-y-1/2 rounded-control p-1.5 text-neutral hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris panel:hover:text-white">
+          onClick={clear} className={`absolute right-1 top-1/2 -translate-y-1/2 rounded-control p-1.5 focus-visible:outline-none focus-visible:ring-2 ${actionText} ${actionFocus}`}>
           <X size={14} aria-hidden />
         </button>
       )}

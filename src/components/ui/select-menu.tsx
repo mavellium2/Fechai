@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { actionBorder, actionFocus, actionText } from "./action";
 import {
   firstEnabledIndex,
   lastEnabledIndex,
@@ -91,6 +92,8 @@ type SelectMenuBaseProps = {
    * diga em algum lugar o que falta, senão o campo apagado não explica nada.
    */
   disabled?: boolean;
+  /** `signal` nas telas que adotaram a cor de ação; `iris` é o padrão. */
+  accent?: "iris" | "signal";
 };
 
 /**
@@ -127,6 +130,7 @@ export function SelectMenu({
   align = "start",
   size = "default",
   disabled = false,
+  accent = "iris",
 }: SelectMenuProps) {
   const [open, setOpen] = React.useState(false);
   // Opção sob o cursor do teclado. Só existe com o menu aberto; separada do
@@ -357,14 +361,19 @@ export function SelectMenu({
         className={cn(
           "flex w-full items-center gap-2 rounded-control border text-sm transition-colors",
           size === "sm" ? "h-8 px-2.5" : "h-10 px-3",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris",
-          "border-ink/15 bg-white text-ink hover:border-ink/25",
-          "panel:border-white/20 panel:bg-white/5 panel:text-white panel:hover:border-white/30",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+          "focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink",
           // Mesmo desabilitado dos campos de `input.tsx`: a borda de hover sai
           // junto, senão o controle apagado ainda reage ao mouse.
-          "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-ink/15",
-          "panel:disabled:hover:border-white/20",
-          open && "border-iris ring-2 ring-iris panel:border-iris",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          accent === "signal"
+            ? cn(actionText, actionBorder, actionFocus, "bg-transparent enabled:hover:bg-signal/10",
+              "disabled:hover:border-signal/60", open && "border-signal ring-2 ring-signal panel:ring-signal")
+            : cn("focus-visible:ring-iris",
+              "border-ink/15 bg-white text-ink hover:border-ink/25",
+              "panel:border-white/20 panel:bg-white/5 panel:text-white panel:hover:border-white/30",
+              "disabled:hover:border-ink/15 panel:disabled:hover:border-white/20",
+              open && "border-iris ring-2 ring-iris panel:border-iris"),
         )}
       >
         {Icon && (
@@ -446,7 +455,7 @@ export function SelectMenu({
                   className={cn(
                     "flex cursor-pointer items-center gap-2 rounded-control px-2.5 py-1.5 text-sm transition-colors",
                     o.disabled && "cursor-not-allowed opacity-40",
-                    isActive && !o.disabled && "bg-iris/10 panel:bg-white/10",
+                    isActive && !o.disabled && (accent === "signal" ? "bg-signal/10 panel:bg-signal/15" : "bg-iris/10 panel:bg-white/10"),
                     isSelected
                       ? "font-medium text-ink panel:text-white"
                       : "text-neutral panel:text-white/70",
@@ -463,7 +472,7 @@ export function SelectMenu({
                         cn(
                           "rounded-[3px] border",
                           isSelected
-                            ? "border-iris bg-iris text-white"
+                            ? (accent === "signal" ? "border-signal bg-signal text-ink panel:text-ink" : "border-iris bg-iris text-white")
                             : "border-ink/25 panel:border-white/25",
                         ),
                     )}
@@ -472,7 +481,9 @@ export function SelectMenu({
                       <Check
                         size={multiple ? 11 : 13}
                         aria-hidden
-                        className={multiple ? "text-white" : "text-iris"}
+                        className={multiple
+                          ? (accent === "signal" ? "text-ink" : "text-white")
+                          : (accent === "signal" ? "text-signal-ink panel:text-signal" : "text-iris")}
                       />
                     )}
                   </span>

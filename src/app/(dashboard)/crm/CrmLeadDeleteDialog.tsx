@@ -32,7 +32,7 @@ export function CrmLeadDeleteDialog({ lead, close }: { lead: CrmBoardCard; close
         <input type="hidden" name="leadId" value={lead.id} />
         <FormFeedback error={state?.error} info={state?.ok ? state.info : undefined} />
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => ref.current?.close()} disabled={pending}>Cancelar</Button>
+          <Button type="button" variant="action" onClick={() => ref.current?.close()} disabled={pending}>Cancelar</Button>
           <Button type="submit" variant="destructiveSolid" loading={pending} loadingLabel="Excluindo lead">
             <Trash2 size={16} aria-hidden />Excluir
           </Button>

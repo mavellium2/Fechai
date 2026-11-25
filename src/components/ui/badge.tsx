@@ -18,7 +18,8 @@ const badgeVariants = cva(
       tone: {
         neutral: "bg-ink/8 text-neutral panel:bg-white/10 panel:text-white/70",
         iris: "bg-iris/15 text-iris panel:bg-iris/25 panel:text-white",
-        signal: "bg-signal/15 text-signal",
+        // signal puro reprova AA sobre paper; a variante escurecida é a mesma cor de ação
+        signal: "bg-signal/15 text-signal-ink panel:text-signal",
         success: "bg-success/15 text-success",
         warn: "bg-warn/15 text-warn",
         danger: "bg-danger/15 text-danger",

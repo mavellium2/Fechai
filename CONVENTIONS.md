@@ -44,7 +44,8 @@ Definidos no `@theme` de `src/app/globals.css` (Tailwind v4, sem `tailwind.confi
 | `ink` | `#14171F` | texto principal |
 | `paper` | `#F7F8FB` | fundo padrão |
 | `iris` | `#4B3CF0` | marca: links, ícones ativos, wordmark, botão default |
-| `signal` | `#FF6B4A` | **só** CTA/conversão (`variant="cta"`) — 1 por tela |
+| `signal` | `#FF6B4A` | cor de ação: ícone de botão, CTA preenchido, filtros/abas/busca, interruptor ligado |
+| `signal-ink` | derivado de `signal` + `ink` | ícone/texto de ação sobre `paper` (AA); no painel use `panel:text-signal` |
 | `success` | `#1FC8A3` | só sucesso/confirmação |
 | `neutral` | `#6B7280` | texto secundário, bordas (`border-neutral/20`) |
 | `warn` / `danger` | funcionais | avisos / erros e destrutivo |
@@ -65,9 +66,9 @@ Estavam como valor solto espalhado (`rounded-md`/`lg`/`xl`/`2xl` misturados na m
 - `rounded-full` segue livre para pílulas (badge, filtro, switch, avatar).
 - **Nada de `rounded-[10px]` ou `text-[9px]`.** Se um valor novo parecer necessário, ele vira token aqui antes de virar classe.
 - Espaçamento em múltiplos de 4/8. A única exceção tolerada é ajuste **óptico** de ícone contra a primeira linha de texto (`mt-0.5`), sempre comentado no código.
-- **`signal` no painel é acento de marca** (sobrenome da rota, barra de progresso, ponto do wordmark); **ação primária no painel é `iris`** (`variant="default"`). `variant="cta"` em `signal` é exclusivo das telas de conversão (landing, cadastro, planos, onboarding), 1 por tela.
+- **`signal` marca a ação, não o conteúdo.** Botão/link secundário usa `variant="action"`: texto e borda brancos no painel escuro (`ink` no fundo claro) e **laranja só no ícone** e no foco. A ação principal da seção usa `variant="cta"` (preenchido), no máximo 1 por seção. Filtros, switches, menus e busca usam `accent="signal"`. Nome de lead/card e rótulos de botão/menu continuam branco/preto; no menu o laranja fica no ícone e no item ativo (painel e admin, via `tenant-shell.css`). `iris` segue como identidade (wordmark). Regra completa e exceções: [docs/plataforma/interface/cores-acao.md](docs/plataforma/interface/cores-acao.md).
 - Fontes: `font-display` (títulos/wordmark — Clash Display, fallback Space Grotesk), `font-sans` (corpo — Satoshi, fallback Plus Jakarta Sans), `font-mono` (dados/snippets/IDs — JetBrains Mono).
-- Texto sobre `iris`/`signal` é branco/`paper`; sobre `paper` é `ink` (contraste AA).
+- Texto sobre `iris` é branco/`paper`; sobre `paper` é `ink`. Sobre fundo `signal` preenchido use `ink` (branco reprova AA); ícone/texto de ação sobre `paper` usa `signal-ink` e no painel `panel:text-signal`/`panel:border-signal`. Não use `actionText` em nome de lead.
 - Indicador de carregando/sucesso é o `TypingToCheck` (assinatura "digitando → check") — não criar spinners.
 - Animações: ver `docs/plataforma/interface/animations.md` (Motion + IntersectionObserver; rolagem nativa — nada de lib de smooth-scroll; `prefers-reduced-motion` sempre).
 - Design system completo: skill `.claude/skills/design-ui/SKILL.md` (anti-padrões na seção 8, checklist na 9).

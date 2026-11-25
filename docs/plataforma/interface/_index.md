@@ -7,6 +7,7 @@ Reúne a navegação, aparência e feedback de salvamento que as telas do client
 | Casca do painel | [PanelShell](../../../src/components/shell/PanelShell.tsx) |
 | Navegação | [ShellNav](../../../src/components/shell/ShellNav.tsx) |
 | Convenções de interface | [CONVENTIONS.md](../../../CONVENTIONS.md) |
+| Cor de ação (laranja) | [Regra, tokens e exemplos](cores-acao.md) |
 | Estado de rascunho | [Proteção de alterações não salvas](../../../src/components/ui/UNSAVED_CHANGES.md) |
 
 ## Regras que afetam várias telas
@@ -15,6 +16,7 @@ Reúne a navegação, aparência e feedback de salvamento que as telas do client
 - A barra lateral no desktop e a gaveta no celular usam a navegação do painel. Tema e preferências têm contexto próprio no admin e no tenant.
 - O `ToastProvider` de `PanelShell` exibe feedback de salvamento. Use `useActionToast` com `useActionState` e `useSaveFeedback` com `requestSave` nos envios por fetch.
 - Em `<dialog>` modal, mantenha `FormFeedback` inline. O diálogo torna o toast externo inalcançável. [Contrato dos toasts](../../../src/components/ui/toast/TOASTS.md)
+- Tudo que é clicável ou pede atenção de ação usa laranja (`signal`/`signal-ink`); um CTA preenchido por seção. [Cor de ação](cores-acao.md)
 - Respeite a preferência por movimento reduzido. [Animações e bibliotecas](animations.md)
 
 ## Histórico

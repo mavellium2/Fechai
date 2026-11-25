@@ -1,14 +1,21 @@
 @import "tailwindcss";
 
 /*
- * Tokens de marca — ver docs/brand-guide.md e docs/CONVENTIONS.md (Tokens de marca).
+ * Tokens de marca — ver CONVENTIONS.md (Tokens de marca) e
+ * docs/plataforma/interface/cores-acao.md (cor de ação).
  * Tailwind v4: tokens ficam no @theme (não há tailwind.config.ts).
  */
 @theme {
   --color-ink: #14171f;
   --color-paper: #f7f8fb;
   --color-iris: #4b3cf0; /* primária de marca */
-  --color-signal: #ff6b4a; /* CTA/conversão — só em botões de ação */
+  --color-signal: #ff6b4a; /* cor de ação — tudo que é clicável/chama atenção */
+  /*
+   * Mesmo laranja, escurecido com ink para texto/borda sobre `paper`: o signal
+   * puro tem ~2.7:1 contra branco e reprova AA. No painel escuro (`panel:`)
+   * continua valendo o signal cheio (~6:1 contra `ink`). Derivado, não cor nova.
+   */
+  --color-signal-ink: color-mix(in srgb, var(--color-signal) 68%, var(--color-ink));
   --color-success: #1fc8a3;
   --color-neutral: #6b7280;
 

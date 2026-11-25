@@ -45,7 +45,7 @@ export function MobileNav({
     <>
       <Button
         type="button"
-        variant="ghost"
+        variant="action"
         size="icon"
         className="md:hidden"
         aria-label="Abrir menu de navegação"
@@ -74,7 +74,7 @@ export function MobileNav({
             </div>
             <Button
               type="button"
-              variant="ghost"
+              variant="action"
               size="icon"
               aria-label="Fechar menu"
               onClick={() => ref.current?.close()}

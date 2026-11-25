@@ -8,6 +8,10 @@
   --tenant-surface: #fff;
   --tenant-text: var(--color-ink);
   --tenant-accent: var(--color-iris);
+  /* Navegação: o clique é laranja, o rótulo continua ink/branco (ver
+     docs/plataforma/interface/cores-acao.md). signal-ink passa AA no fundo claro. */
+  --tenant-nav-accent: var(--color-signal-ink);
+  --tenant-nav-selected: color-mix(in srgb, var(--color-signal) 12%, var(--tenant-surface));
   --tenant-icon: #7d8799;
   --tenant-icon-bg: #f2efff;
   --tenant-row-selected: #e5e0fc;
@@ -33,6 +37,9 @@
   --tenant-surface: #191d28;
   --tenant-text: #f1f3fa;
   --tenant-accent: #ab9eff;
+  /* No painel escuro o signal cheio passa AA (~6:1) e é a mesma cor de ação. */
+  --tenant-nav-accent: var(--color-signal);
+  --tenant-nav-selected: color-mix(in srgb, var(--color-signal) 16%, var(--tenant-surface));
   --tenant-icon: #a0a9bc;
   --tenant-icon-bg: #292440;
   --tenant-row-selected: #342b60;
@@ -44,6 +51,8 @@
   color-scheme: dark;
 }
 .tenant-theme :where(button, a, input, textarea, summary):focus-visible { outline: 2px solid var(--tenant-accent); outline-offset: 3px; }
+/* Foco dos controles de navegação acompanha o laranja do clique. */
+.tenant-theme :where(.tenant-nav-link, .tenant-icon-button, .tenant-account summary, .tenant-account-menu a, .tenant-account-menu button, .tenant-theme-toggle, .impersonation-banner button):focus-visible { outline-color: var(--tenant-nav-accent); }
 .tenant-frame { display: flex; gap: 12px; height: 100dvh; padding: 12px; overflow: hidden; }
 .tenant-rail { width: 64px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--tenant-line); border-radius: 16px; background: var(--tenant-surface); transition: width 260ms cubic-bezier(.2,.8,.2,1); }
 .tenant-rail-expanded { width: 232px; }
@@ -51,21 +60,23 @@
 .tenant-wordmark { flex-shrink: 0; white-space: nowrap; }
 .tenant-rail :is(.tenant-rail-label, .tenant-nav-label) { min-width: 0; white-space: nowrap; opacity: 0; visibility: hidden; transform: translateX(-5px); transition: opacity 120ms ease, transform 200ms ease, visibility 0s 150ms; }
 .tenant-rail-expanded :is(.tenant-rail-label, .tenant-nav-label) { opacity: 1; visibility: visible; transform: none; transition: opacity 160ms ease 60ms, transform 240ms ease, visibility 0s; }
-.tenant-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 36px; border-radius: 10px; color: var(--tenant-muted); cursor: pointer; }
+.tenant-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 36px; border-radius: 10px; color: var(--tenant-nav-accent); cursor: pointer; }
 .tenant-icon-button:hover { background: var(--tenant-soft); }
 .tenant-pin { margin-left: auto; width: 32px; height: 32px; }
-.tenant-pin-on { color: var(--color-iris); }
-.tenant-theme .tenant-nav-link { justify-content: flex-start; gap: 12px; height: 40px; overflow: hidden; padding: 8px 10px; border-radius: 12px; font-family: var(--font-sans); font-size: 14px; font-weight: 500; text-transform: none; letter-spacing: normal; color: var(--tenant-text); }
-.tenant-nav-link svg { color: var(--tenant-icon); }
+.tenant-pin-on { color: var(--tenant-nav-accent); }
+.tenant-theme .tenant-nav-link { position: relative; justify-content: flex-start; gap: 12px; height: 40px; overflow: hidden; padding: 8px 10px; border-radius: 12px; font-family: var(--font-sans); font-size: 14px; font-weight: 500; text-transform: none; letter-spacing: normal; color: var(--tenant-text); }
+/* O rótulo permanece neutro; o laranja fica no ícone e na marca do item ativo. */
+.tenant-nav-link svg { color: var(--tenant-nav-accent); }
 .tenant-theme .tenant-nav-link:hover { background: var(--tenant-soft); }
-.tenant-theme .tenant-nav-active, .tenant-theme .tenant-nav-active:hover { color: var(--tenant-accent); background: var(--tenant-selected); }
-.tenant-nav-active svg { color: var(--tenant-accent); }
+.tenant-theme .tenant-nav-active, .tenant-theme .tenant-nav-active:hover { color: var(--tenant-text); background: var(--tenant-nav-selected); }
+.tenant-nav-active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 18px; transform: translateY(-50%); border-radius: 999px; background: var(--tenant-nav-accent); }
+.tenant-nav-active svg { color: var(--tenant-nav-accent); }
 .tenant-theme-slot { flex-shrink: 0; padding: 4px 8px; }
 .tenant-theme .tenant-theme-toggle { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; height: 40px; padding: 8px 66px 8px 10px; border-radius: 12px; color: var(--tenant-muted); font-size: 13px; font-weight: 500; white-space: nowrap; }
-.tenant-theme-current-icon { display: flex; flex-shrink: 0; color: var(--tenant-accent); transition: opacity 120ms ease; }
-.tenant-theme-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tenant-theme-current-icon { display: flex; flex-shrink: 0; color: var(--tenant-nav-accent); transition: opacity 120ms ease; }
+.tenant-theme-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--tenant-text); }
 .tenant-theme-toggle .tenant-theme-switch { position: absolute; top: 8px; right: 10px; transition: background-color 150ms ease, right 200ms ease; }
-.tenant-theme-switch svg { display: none; color: var(--color-iris); }
+.tenant-theme-switch svg { display: none; color: var(--tenant-nav-accent); }
 .tenant-rail:not(.tenant-rail-expanded) .tenant-theme-toggle { padding: 0; }
 .tenant-rail:not(.tenant-rail-expanded) .tenant-theme-current-icon { opacity: 0; visibility: hidden; }
 .tenant-rail:not(.tenant-rail-expanded) .tenant-theme-switch { right: 0; }
@@ -75,14 +86,15 @@
 .tenant-account summary { list-style: none; display: flex; align-items: center; justify-content: flex-start; gap: 10px; overflow: hidden; padding: 0 6px; cursor: pointer; border-radius: 10px; }
 .tenant-account summary::-webkit-details-marker { display: none; }
 .tenant-account-copy { display: block; }
-.tenant-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; font-size: 11px; font-weight: 600; color: var(--tenant-accent); background: var(--tenant-selected); }
+.tenant-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; font-size: 11px; font-weight: 600; color: var(--tenant-nav-accent); background: var(--tenant-nav-selected); }
 .tenant-account-menu { position: absolute; z-index: 40; left: 8px; bottom: 58px; width: 256px; padding: 6px; border: 1px solid var(--tenant-line); border-radius: 12px; background: var(--tenant-surface); box-shadow: 0 8px 30px #14171f14; }
-.tenant-account-menu a, .tenant-account-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.tenant-account-menu a, .tenant-account-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 8px; font-size: 13px; color: var(--tenant-text); cursor: pointer; }
+.tenant-account-menu a svg, .tenant-account-menu button svg { color: var(--tenant-nav-accent); }
 .tenant-account-menu a:hover, .tenant-account-menu button:hover { background: var(--tenant-soft); }
 .tenant-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
 .tenant-admin-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 12px; margin-bottom: 10px; padding: 10px 16px; border: 1px solid var(--tenant-line); border-radius: 12px; background: var(--tenant-surface); }
 .tenant-admin-identity { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 10px; }
-.tenant-admin-badge { padding: 3px 8px; border-radius: 6px; background: var(--tenant-selected); color: var(--tenant-accent); font-size: 11px; font-weight: 600; }
+.tenant-admin-badge { padding: 3px 8px; border-radius: 6px; background: var(--tenant-nav-selected); color: var(--tenant-nav-accent); font-size: 11px; font-weight: 600; }
 .tenant-admin-user { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--tenant-muted); }
 .tenant-main { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; overflow: auto; border: 1px solid var(--tenant-line); border-radius: 16px; background: var(--tenant-surface); }
 .tenant-content { padding: 28px; }

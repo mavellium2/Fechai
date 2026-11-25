@@ -48,9 +48,9 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
         actions={<div className="flex min-w-0 flex-nowrap items-center gap-2">
           <CrmGlobalSearch params={params} term={searches.global} />
           <CrmFiltersButton filters={filters} />
-          <ButtonLink href="/crm/indicadores" variant="outline" size="icon" aria-label="Indicadores do transbordo" title="Indicadores do transbordo" className="size-10 xl:h-10 xl:w-auto xl:px-4"><ChartNoAxesColumn size={16} aria-hidden /><span className="hidden xl:inline">Indicadores do transbordo</span></ButtonLink>
-          <ButtonLink href="/crm/transbordo" variant="outline" size="icon" aria-label="Prazos do transbordo" title="Prazos do transbordo" className="size-10 xl:h-10 xl:w-auto xl:px-4"><Timer size={16} aria-hidden /><span className="hidden xl:inline">Prazos do transbordo</span></ButtonLink>
-          <ButtonLink href="/crm/etapas" variant="outline" size="icon" aria-label="Configurar etapas" title="Configurar etapas" className="size-10 xl:h-10 xl:w-auto xl:px-4"><Settings2 size={16} aria-hidden /><span className="hidden xl:inline">Configurar etapas</span></ButtonLink>
+          <ButtonLink href="/crm/indicadores" variant="action" size="icon" aria-label="Indicadores do transbordo" title="Indicadores do transbordo" className="size-10 xl:h-10 xl:w-auto xl:px-4"><ChartNoAxesColumn size={16} aria-hidden /><span className="hidden xl:inline">Indicadores do transbordo</span></ButtonLink>
+          <ButtonLink href="/crm/transbordo" variant="action" size="icon" aria-label="Prazos do transbordo" title="Prazos do transbordo" className="size-10 xl:h-10 xl:w-auto xl:px-4"><Timer size={16} aria-hidden /><span className="hidden xl:inline">Prazos do transbordo</span></ButtonLink>
+          <ButtonLink href="/crm/etapas" variant="action" size="icon" aria-label="Configurar etapas" title="Configurar etapas" className="size-10 xl:h-10 xl:w-auto xl:px-4"><Settings2 size={16} aria-hidden /><span className="hidden xl:inline">Configurar etapas</span></ButtonLink>
         </div>}
       />
       {/* Escalonamento no painel (CRM-10): esperas que passaram do 2º prazo e seguem sem ninguém. */}
@@ -67,7 +67,7 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
           <ul className="space-y-1 text-sm">
             {reminders.slice(0, CRM_REMINDER_LIMIT).map(({ id, text, dueAt, lead }) => (
               <li key={id} className="[overflow-wrap:anywhere]">
-                <Link className="hover:underline" prefetch={false} href={crmBoardHref(params, { lead: lead.id, antes: null })}>
+                <Link className="text-ink hover:underline panel:text-white" prefetch={false} href={crmBoardHref(params, { lead: lead.id, antes: null })}>
                   {text} <span className="text-neutral panel:text-white/55">· {lead.name?.trim() || "Contato sem nome"} · <time dateTime={dueAt.toISOString()}>{dateTimeLabel(dueAt)}</time></span>
                 </Link>
               </li>
@@ -81,7 +81,7 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
       </div>
       {columns.length > 0 ? <CrmBoard columns={columns} stages={pipeline.stages} lossReasons={lossCatalog?.options ?? []} params={params} searches={searches} version={version} now={observedAt}
         sla={{ alertMinutes: sla.alertMinutes, escalateMinutes: sla.escalateMinutes }} /> : (
-        <Card><EmptyState title="Nenhuma etapa para exibir" description="Escolha uma etapa ativa para consultar os leads." action={<ButtonLink href="/crm" variant="outline">Limpar filtros</ButtonLink>} /></Card>
+        <Card><EmptyState title="Nenhuma etapa para exibir" description="Escolha uma etapa ativa para consultar os leads." action={<ButtonLink href="/crm" variant="cta" className="text-ink">Limpar filtros</ButtonLink>} /></Card>
       )}
       {detail && <CrmLeadDetail key={detail.id} lead={detail} params={params} now={now} />}
     </div>

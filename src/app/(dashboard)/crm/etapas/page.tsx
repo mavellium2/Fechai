@@ -22,7 +22,7 @@ export default async function CrmStagesPage() {
         eyebrow="CRM"
         title="Configurar etapas"
         description={pipeline.name}
-        actions={<ButtonLink href="/crm" variant="outline"><ArrowLeft size={16} aria-hidden />Voltar ao CRM</ButtonLink>}
+        actions={<ButtonLink href="/crm" variant="action"><ArrowLeft size={16} aria-hidden />Voltar ao CRM</ButtonLink>}
       />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Card className="p-4 sm:p-6">

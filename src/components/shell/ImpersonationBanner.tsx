@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { ChevronDown, ChevronUp, Eye } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { stopImpersonation } from "@/app/(admin)/actions";
 
@@ -39,12 +39,12 @@ export function ImpersonationBanner({ email }: { email: string }) {
         <Eye size={14} aria-hidden className="shrink-0 text-signal" />
         <span className="min-w-0 truncate">Admin como <span className="font-semibold">{email}</span></span>
         <form action={stopImpersonation} className="shrink-0">
-          <button type="submit" className="rounded-full px-2 py-1 font-medium text-signal hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris">
-            Voltar ao admin
+          <button type="submit" className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 font-medium text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal [&_svg]:text-signal">
+            <ArrowLeft size={14} aria-hidden />Voltar ao admin
           </button>
         </form>
         <button type="button" onClick={() => setCollapsed(false)} aria-label="Mostrar aviso de administrador"
-          className="shrink-0 rounded-full p-1.5 text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris">
+          className="shrink-0 rounded-full p-1.5 text-signal hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal">
           <ChevronUp size={14} aria-hidden />
         </button>
       </div>
@@ -54,7 +54,7 @@ export function ImpersonationBanner({ email }: { email: string }) {
   return (
     <div className="impersonation-banner flex shrink-0 flex-wrap items-center justify-between gap-3 border border-signal/30 bg-signal/10 px-4 py-3 md:px-5">
       <p className="flex min-w-0 items-center gap-2 text-xs leading-relaxed text-ink panel:text-white/85">
-        <Eye size={16} aria-hidden className="shrink-0 text-signal" />
+        <Eye size={16} aria-hidden className="shrink-0 text-signal-ink panel:text-signal" />
         <span className="min-w-0">
           <span className="impersonation-label">Acesso de administrador</span>
           <span className="impersonation-account">Visualizando como <span className="font-semibold break-all text-ink panel:text-white">{email}</span></span>
@@ -62,8 +62,8 @@ export function ImpersonationBanner({ email }: { email: string }) {
       </p>
       <div className="flex items-center gap-2">
         <form action={stopImpersonation}>
-          <Button variant="outline" size="sm" type="submit">
-            Voltar ao admin
+          <Button variant="action" size="sm" type="submit">
+            <ArrowLeft size={16} aria-hidden />Voltar ao admin
           </Button>
         </form>
         <Button variant="ghost" size="icon" onClick={() => setCollapsed(true)} aria-label="Recolher aviso de administrador" title="Recolher aviso">

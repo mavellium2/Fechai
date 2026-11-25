@@ -45,7 +45,7 @@ export function CrmAssumeLead({ leadId, conversationId }: { leadId: string; conv
       {(pending) => (
         <>
           <input type="hidden" name="conversationId" value={conversationId} />
-          <Button variant="outline" size="sm" type="submit" loading={pending}>Assumir atendimento</Button>
+          <Button variant="action" size="sm" type="submit" loading={pending}>Assumir atendimento</Button>
         </>
       )}
     </LeadForm>
@@ -65,7 +65,7 @@ export function CrmItWasMe({ leadId, conversationId }: { leadId: string; convers
           <p className="text-sm text-neutral panel:text-white/70">
             Alguém da equipe respondeu pelo celular da clínica e ainda não se identificou.
           </p>
-          <Button variant="outline" size="sm" type="submit" loading={pending}>Fui eu</Button>
+          <Button variant="action" size="sm" type="submit" loading={pending}>Fui eu</Button>
         </div>
       )}
     </LeadForm>
@@ -96,10 +96,10 @@ export function CrmHandoffControls({ leadId, conversationId, assignedUserId, can
               <input type="hidden" name="conversationId" value={conversationId} />
               <input type="hidden" name="expectedUserId" value={assignedUserId} />
               <Field className="min-w-40 flex-1" label="Transferir para" htmlFor="crm-transfer-to" labelId="crm-transfer-to-label">
-                <SelectMenu name="toUserId" label="Transferir para" labelledBy="crm-transfer-to-label" value={toUserId} onChange={setSelected}
+                <SelectMenu name="toUserId" accent="signal" label="Transferir para" labelledBy="crm-transfer-to-label" value={toUserId} onChange={setSelected}
                   disabled={pending} options={[{ value: "", label: "Selecione" }, ...others.map(({ id, name }) => ({ value: id, label: name }))]} />
               </Field>
-              <Button variant="outline" size="sm" type="submit" loading={pending} disabled={!toUserId}>Transferir</Button>
+              <Button variant="action" size="sm" type="submit" loading={pending} disabled={!toUserId}>Transferir</Button>
             </div>
           )}
         </LeadForm>
@@ -109,7 +109,7 @@ export function CrmHandoffControls({ leadId, conversationId, assignedUserId, can
           {(pending) => (
             <>
               <input type="hidden" name="conversationId" value={conversationId} />
-              <Button variant="outline" size="sm" type="submit" loading={pending}>Devolver para a IA</Button>
+              <Button variant="action" size="sm" type="submit" loading={pending}>Devolver para a IA</Button>
             </>
           )}
         </LeadForm>
@@ -133,7 +133,7 @@ export function CrmLeadTags({ leadId, tags, attached }: { leadId: string; tags: 
               <div className="flex max-w-full items-center gap-1 rounded-control bg-ink/5 py-0.5 pl-2 text-sm panel:bg-white/10">
                 <span className="min-w-0 break-all">{tag.name}</span>
                 <input type="hidden" name="tagId" value={tag.id} />
-                <Button type="submit" variant="ghost" size="icon" loading={pending} aria-label={`Remover etiqueta ${tag.name}`}><X size={14} aria-hidden /></Button>
+                <Button type="submit" variant="action" size="icon" loading={pending} aria-label={`Remover etiqueta ${tag.name}`}><X size={14} aria-hidden /></Button>
               </div>
             )}
           </LeadForm>
@@ -144,10 +144,10 @@ export function CrmLeadTags({ leadId, tags, attached }: { leadId: string; tags: 
           {(pending) => (
             <div className="flex flex-wrap items-end gap-2">
               <Field className="min-w-40 flex-1" label="Etiqueta existente" htmlFor="crm-tag-existing" labelId="crm-tag-existing-label">
-                <SelectMenu name="tagId" label="Etiqueta existente" labelledBy="crm-tag-existing-label" value={tagId} onChange={setSelected}
+                <SelectMenu name="tagId" accent="signal" label="Etiqueta existente" labelledBy="crm-tag-existing-label" value={tagId} onChange={setSelected}
                   disabled={pending} options={[{ value: "", label: "Selecione" }, ...eligible.map(({ id, name }) => ({ value: id, label: name }))]} />
               </Field>
-              <Button type="submit" variant="outline" loading={pending} disabled={!tagId}>Aplicar</Button>
+              <Button type="submit" variant="action" loading={pending} disabled={!tagId}>Aplicar</Button>
             </div>
           )}
         </LeadForm>
@@ -158,7 +158,7 @@ export function CrmLeadTags({ leadId, tags, attached }: { leadId: string; tags: 
             <Field className="min-w-40 flex-1" label="Nova etiqueta" htmlFor="crm-tag-new">
               <Input id="crm-tag-new" name="name" required maxLength={CRM_TAG_MAX} />
             </Field>
-            <Button type="submit" variant="outline" loading={pending}>Criar e aplicar</Button>
+            <Button type="submit" variant="action" loading={pending}>Criar e aplicar</Button>
           </div>
         )}
       </LeadForm>
@@ -179,10 +179,10 @@ export function CrmTaskForm({ leadId, users }: { leadId: string; users: Choice[]
             <Input className="min-w-0" id="crm-task-due" name="dueAt" type="datetime-local" required />
           </Field>
           <Field label="Responsável pela tarefa" htmlFor="crm-task-user" labelId="crm-task-user-label">
-            <SelectMenu name="assignedUserId" label="Responsável pela tarefa" labelledBy="crm-task-user-label" value={assignedUserId} onChange={setAssignee}
+            <SelectMenu name="assignedUserId" accent="signal" label="Responsável pela tarefa" labelledBy="crm-task-user-label" value={assignedUserId} onChange={setAssignee}
               disabled={pending} options={[{ value: "", label: "Sem responsável" }, ...users.map(({ id, name }) => ({ value: id, label: name }))]} />
           </Field>
-          <div className="sm:col-span-2"><Button type="submit" variant="outline" loading={pending}>Adicionar tarefa</Button></div>
+          <div className="sm:col-span-2"><Button type="submit" variant="action" loading={pending}>Adicionar tarefa</Button></div>
         </div>
       )}
     </LeadForm>
@@ -195,7 +195,7 @@ export function CrmCompleteTask({ leadId, taskId, label }: { leadId: string; tas
       {(pending) => (
         <>
           <input type="hidden" name="taskId" value={taskId} />
-          <Button type="submit" variant="outline" size="sm" loading={pending} aria-label={`Concluir tarefa ${label}`}>Concluir</Button>
+          <Button type="submit" variant="action" size="sm" loading={pending} aria-label={`Concluir tarefa ${label}`}>Concluir</Button>
         </>
       )}
     </LeadForm>
@@ -214,7 +214,7 @@ export function CrmContactProfile({ leadId, data }: { leadId: string; data: Cont
       <input type="hidden" name="leadId" value={leadId} />
       <input type="hidden" name="operation" value="profile" />
       <ContactProfileFields idPrefix={`crm-contato-${leadId}`} data={data} />
-      <Button type="submit" variant="outline" size="sm" loading={pending} loadingLabel="Salvando dados do contato">Salvar dados</Button>
+      <Button type="submit" variant="action" size="sm" loading={pending} loadingLabel="Salvando dados do contato">Salvar dados</Button>
       {!pending && <FormFeedback error={state?.error} info={state?.info} />}
     </form>
   );

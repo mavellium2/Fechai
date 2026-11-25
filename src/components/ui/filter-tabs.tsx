@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { actionBorder, actionFocus, actionText } from "./action";
 
 export type FilterOption = { key: string; label: string; count?: number };
 
@@ -16,6 +17,7 @@ export function FilterTabs({
   href,
   label,
   className,
+  accent = "iris",
 }: {
   options: FilterOption[];
   active: string;
@@ -24,7 +26,15 @@ export function FilterTabs({
   /** Nome do grupo para leitores de tela (ex.: "Filtrar conversas"). */
   label: string;
   className?: string;
+  /** `signal` nas telas que adotaram a cor de ação (CRM); `iris` é o padrão. */
+  accent?: "iris" | "signal";
 }) {
+  const onStyle = accent === "signal"
+    ? cn(actionText, actionBorder, "border bg-signal/10")
+    : "bg-iris text-white";
+  const offStyle = accent === "signal"
+    ? cn("border border-transparent bg-transparent hover:bg-signal/10", actionText)
+    : "bg-ink/5 text-neutral hover:text-ink panel:bg-white/10 panel:text-white/60 panel:hover:text-white";
   return (
     <nav aria-label={label} className={cn("flex flex-wrap gap-2", className)}>
       {options.map((o) => {
@@ -36,11 +46,10 @@ export function FilterTabs({
             aria-current={on ? "page" : undefined}
             className={cn(
               "rounded-full px-3 py-1.5 font-sans text-sm font-medium leading-5 transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris focus-visible:ring-offset-2",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
               "focus-visible:ring-offset-paper panel:focus-visible:ring-offset-ink",
-              on
-                ? "bg-iris text-white"
-                : "bg-ink/5 text-neutral hover:text-ink panel:bg-white/10 panel:text-white/60 panel:hover:text-white",
+              accent === "signal" ? actionFocus : "focus-visible:ring-iris",
+              on ? onStyle : offStyle,
             )}
           >
             {o.label}
