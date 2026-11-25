@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireCrmAccess } from "./access";
 import {
-  CRM_ASSIGNEE_NONE, CRM_ASSIGNEE_UNIDENTIFIED, CRM_COLUMN_SIZE, crmColumnPage, readCrmFilters, type CrmSearchParams,
+  CRM_ASSIGNEE_NONE, CRM_ASSIGNEE_UNIDENTIFIED, CRM_COLUMN_SIZE, readCrmFilters, readCrmSearches,
+  validCrmId, type CrmSearchParams,
 } from "./board-filters";
 import { DEFAULT_PIPELINE_KEY } from "./pipeline";
 import { activeCrm, realBoardLeads } from "./lead-scope";
@@ -27,7 +28,7 @@ function assigneeWhere(tenantId: string, assignee: string): Prisma.LeadWhereInpu
   return { conversation: { is: { tenantId, assignedUserId: assignee } } };
 }
 
-export function crmBoardWhere(tenantId: string, filters: ReturnType<typeof readCrmFilters>): Prisma.LeadWhereInput {
+export function crmBoardWhere(tenantId: string, filters: ReturnType<typeof readCrmFilters>, search = ""): Prisma.LeadWhereInput {
   const where = realBoardLeads(tenantId);
   const and: Prisma.LeadWhereInput[] = [];
   if (filters.stages.length) where.stageId = { in: filters.stages };
@@ -39,13 +40,13 @@ export function crmBoardWhere(tenantId: string, filters: ReturnType<typeof readC
       : origin === "desconhecida" ? { originChannel: null, adOrigin: { isNot: { tenantId } } }
         : { originChannel: origin }));
   if (and.length) where.AND = and;
-  if (filters.invalidRange) return { ...where, id: { in: [] } };
+  if (filters.invalidRange) return applyCrmSearch({ ...where, id: { in: [] } }, search);
 
   const { range } = filters;
-  if (!range.gte && !range.lt) return where;
-  if (filters.basis === "entrada") return { ...where, createdAt: range };
+  if (!range.gte && !range.lt) return applyCrmSearch(where, search);
+  if (filters.basis === "entrada") return applyCrmSearch({ ...where, createdAt: range }, search);
 
-  return {
+  return applyCrmSearch({
     ...where,
     AND: [...and, { OR: [
       { conversation: { is: { tenantId, messages: {
@@ -56,7 +57,24 @@ export function crmBoardWhere(tenantId: string, filters: ReturnType<typeof readC
         { conversation: null }, { conversation: { is: { tenantId, messages: { none: activity } } } },
       ] },
     ] }],
-  };
+  }, search);
+}
+
+/**
+ * Busca por nome ou telefone. O telefone é comparado só pelos dígitos digitados
+ * (o card mostra os quatro últimos), e a busca global soma com a da coluna —
+ * as duas entram como `AND`, sem afrouxar o escopo da conta.
+ */
+export function applyCrmSearch(where: Prisma.LeadWhereInput, search: string): Prisma.LeadWhereInput {
+  const term = search.trim();
+  if (!term) return where;
+  const digits = term.replace(/\D/g, "");
+  const clause: Prisma.LeadWhereInput = { OR: [
+    { name: { contains: term, mode: "insensitive" } },
+    ...(digits.length >= 3 ? [{ phone: { contains: digits } }] : []),
+  ] };
+  const previous = where.AND;
+  return { ...where, AND: previous ? [...(Array.isArray(previous) ? previous : [previous]), clause] : [clause] };
 }
 
 function cardSelect(tenantId: string) {
@@ -109,22 +127,60 @@ export async function getCrmBoard(params: CrmSearchParams) {
   if (!pipeline) notFound();
 
   const filters = readCrmFilters(params);
-  const where = crmBoardWhere(tenantId, filters);
+  const searches = readCrmSearches(params);
+  const where = crmBoardWhere(tenantId, filters, searches.global);
   const users = await listCrmUsers(tenantId);
   const userNames = new Map(users.map(({ id, name }) => [id, name]));
   const stages = pipeline.stages.filter((stage) => !filters.stages.length || filters.stages.includes(stage.id));
-  const counts = await prisma.lead.groupBy({ by: ["stageId"], where, _count: { _all: true } });
-  const totals = new Map(counts.map((item) => [item.stageId, item._count._all]));
   const columns = await Promise.all(stages.map(async (stage) => {
-    const total = totals.get(stage.id) ?? 0;
-    const page = crmColumnPage(params, stage.id, total);
-    const rows = total ? await prisma.lead.findMany({
-      where: { ...where, stageId: stage.id }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      skip: (page - 1) * CRM_COLUMN_SIZE, take: CRM_COLUMN_SIZE, select: cardSelect(tenantId),
-    }) : [];
-    return { ...stage, page, total, cards: rows.map((row) => boardCard({ tenantId, stageKind: stage.kind, userNames }, row)) };
+    const stageWhere = applyCrmSearch({ ...where, stageId: stage.id }, searches.columns[stage.id] ?? "");
+    const [total, rows] = await Promise.all([
+      prisma.lead.count({ where: stageWhere }),
+      prisma.lead.findMany({
+        where: stageWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: CRM_COLUMN_SIZE, select: cardSelect(tenantId),
+      }),
+    ]);
+    return {
+      ...stage, total, cursor: rows.length === CRM_COLUMN_SIZE ? rows[rows.length - 1].id : null,
+      cards: rows.map((row) => boardCard({ tenantId, stageKind: stage.kind, userNames }, row)),
+    };
   }));
-  return { pipeline, filters, columns, users, observedAt };
+  return { pipeline, filters, searches, columns, users, observedAt };
+}
+
+/**
+ * Próximo recorte de uma coluna para o carregamento sob demanda. A conta vem
+ * da action (nunca da URL), a busca global e a da coluna são relidas dos
+ * parâmetros e o cursor é o último card já carregado. Nada aqui grava.
+ */
+export async function listCrmBoardCards({ tenantId, params, stageId, cursor }: {
+  tenantId: string; params: CrmSearchParams; stageId: string; cursor: string;
+}) {
+  if (!validCrmId(stageId) || !validCrmId(cursor)) return { cards: [], cursor: null };
+  const pipeline = await prisma.pipeline.findUnique({
+    where: { tenantId_key: { tenantId, key: DEFAULT_PIPELINE_KEY }, tenant: activeCrm },
+    select: { stages: { where: { tenantId, archivedAt: null }, select: { id: true, kind: true } } },
+  });
+  const stage = pipeline?.stages.find((item) => item.id === stageId);
+  if (!stage) return { cards: [], cursor: null };
+
+  const filters = readCrmFilters(params);
+  const searches = readCrmSearches(params);
+  const where = applyCrmSearch(
+    crmBoardWhere(tenantId, filters, searches.global),
+    searches.columns[stageId] ?? "",
+  );
+  const rows = await prisma.lead.findMany({
+    where: { ...where, stageId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: CRM_COLUMN_SIZE, cursor: { id: cursor }, skip: 1, select: cardSelect(tenantId),
+  });
+  const users = await listCrmUsers(tenantId);
+  const userNames = new Map(users.map(({ id, name }) => [id, name]));
+  return {
+    cards: rows.map((row) => boardCard({ tenantId, stageKind: stage.kind, userNames }, row)),
+    cursor: rows.length === CRM_COLUMN_SIZE ? rows[rows.length - 1].id : null,
+  };
 }
 
 /** Pessoas da conta que podem ser responsáveis. Só id e nome, para o filtro e o card. */

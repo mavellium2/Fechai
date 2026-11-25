@@ -5,7 +5,8 @@ import { auth } from "@/auth";
 import { isFrameworkSignal } from "@/components/ui/toast/save-service";
 import type { ActionResult } from "@/components/ui/toast/types";
 import { requireCrmSession } from "@/modules/crm/access";
-import { CRM_TAG_MAX, CRM_TASK_MAX, validCrmId } from "@/modules/crm/board-filters";
+import { CRM_TAG_MAX, CRM_TASK_MAX, validCrmId, type CrmSearchParams } from "@/modules/crm/board-filters";
+import { listCrmBoardCards, type CrmBoardCard } from "@/modules/crm/board";
 import { editCrmLead, parseCrmTaskDue } from "@/modules/crm/lead-detail-actions";
 import { setLeadStage } from "@/modules/crm/lead-stage";
 import { claimCrmConversation } from "@/modules/crm/assignments";
@@ -47,6 +48,29 @@ export async function moveCrmCard(_previous: ActionResult | null, form: FormData
     if (isFrameworkSignal(error)) return { ok: false, code: "forbidden", error: "Você não tem acesso ao CRM." };
     console.error("[crm] falha ao mover card", error);
     return { ok: false, code: "server", error: "Não foi possível mover o lead. Tente novamente." };
+  }
+}
+
+/**
+ * Carrega o próximo recorte de uma coluna quando a pessoa rola a lista. É uma
+ * leitura: conta e permissão vêm da sessão, e filtros/buscas são relidos no
+ * servidor antes de montar a consulta. Nada é gravado nem revalidado aqui.
+ */
+export type CrmCardPageResult =
+  | { ok: true; cards: CrmBoardCard[]; cursor: string | null }
+  | { ok: false; error: string };
+
+export async function loadMoreCrmCards(params: CrmSearchParams, stageId: string, cursor: string): Promise<CrmCardPageResult> {
+  try {
+    if (!(await auth())?.user) return { ok: false, error: "Sua sessão expirou." };
+    const session = await requireCrmSession();
+    if (!validCrmId(stageId) || !validCrmId(cursor)) return { ok: false, error: "Não foi possível carregar mais leads." };
+    const result = await listCrmBoardCards({ tenantId: session.user.tenantId, params, stageId, cursor });
+    return { ok: true, ...result };
+  } catch (error) {
+    if (isFrameworkSignal(error)) return { ok: false, error: "Você não tem acesso ao CRM." };
+    console.error("[crm] falha ao carregar mais cards", error);
+    return { ok: false, error: "Não foi possível carregar mais leads. Tente novamente." };
   }
 }
 

@@ -39,11 +39,12 @@ export function CrmFiltersButton({ filters }: { filters: Filters }) {
   const { open, setOpen, panelId } = usePanel();
   const active = activeCount(filters);
   return (
-    <Button variant="outline" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>
+    <Button variant="outline" size="icon" aria-label="Filtros" title="Filtros" aria-expanded={open} aria-controls={panelId}
+      onClick={() => setOpen(!open)} className="relative size-10 shrink-0 sm:w-auto sm:px-4">
       <Filter size={16} aria-hidden />
-      Filtros
+      <span className="hidden sm:inline">Filtros</span>
       {active > 0 && (
-        <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-iris px-1 font-mono text-xs text-white">{active}</span>
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-iris px-1 font-mono text-xs text-white">{active}</span>
       )}
     </Button>
   );
@@ -76,7 +77,7 @@ export function CrmFiltersPanel({ filters, stages, tags, users }: {
       const data = new FormData(event.currentTarget);
       go({ etapa: stage.join(","), responsavel: assignee.join(","), origem: origin.join(","), etiqueta: tag.join(","),
         periodo: basis, de: String(data.get("de") ?? ""), ate: String(data.get("ate") ?? "") });
-    }} className="sticky top-0 z-20 grid min-w-0 grid-cols-2 items-end gap-3 rounded-surface border border-ink/10 bg-white p-3 shadow-lg panel:border-white/12 panel:bg-ink sm:grid-cols-4 xl:grid-cols-[repeat(7,minmax(0,1fr))_auto]">
+    }} className="sticky top-0 z-20 grid min-w-0 grid-cols-1 items-end gap-3 rounded-surface border border-ink/10 bg-white p-3 shadow-lg panel:border-white/12 panel:bg-ink min-[400px]:grid-cols-2 sm:grid-cols-4 xl:grid-cols-[repeat(7,minmax(0,1fr))_auto]">
       <Field className="min-w-0" label="Etapa" htmlFor="crm-stage" labelId="crm-stage-label">
         <SelectMenu multiple label="Etapa" labelledBy="crm-stage-label" placeholder="Todas as etapas" value={stage} onChange={setStage}
           options={stages.map(({ id, name }) => ({ value: id, label: name }))} />
@@ -107,7 +108,7 @@ export function CrmFiltersPanel({ filters, stages, tags, users }: {
       <Field className="min-w-0" label="Até" htmlFor="crm-to">
         <Input key={`ate-${filters.to}`} className="min-w-0" type="date" id="crm-to" name="ate" defaultValue={filters.to} />
       </Field>
-      <div className="col-span-2 flex items-end justify-end gap-2 sm:col-span-1">
+      <div className="col-span-1 flex min-w-0 flex-wrap items-end justify-end gap-2 min-[400px]:col-span-2 sm:col-span-1">
         {activeCount(filters) > 0 && (
           <Button type="button" variant="ghost" disabled={pending} onClick={() => {
             setStage([]); setAssignee([]); setOrigin([]); setTag([]); setBasis("entrada");

@@ -35,6 +35,7 @@ describe.skipIf(!testUrl)("CRM no PostgreSQL", () => {
   let editCrmStages: typeof import("@/modules/crm/stage-settings").editCrmStages;
   let moveLeadToStage: typeof import("@/modules/crm/automatic-stage").moveLeadToStage;
   let getCrmBoard: typeof import("@/modules/crm/board").getCrmBoard;
+  let listCrmBoardCards: typeof import("@/modules/crm/board").listCrmBoardCards;
   let getCrmLeadDetail: typeof import("@/modules/crm/lead-detail").getCrmLeadDetail;
   let listCrmReminders: typeof import("@/modules/crm/lead-detail").listCrmReminders;
   let editCrmLead: typeof import("@/modules/crm/lead-detail-actions").editCrmLead;
@@ -80,7 +81,7 @@ describe.skipIf(!testUrl)("CRM no PostgreSQL", () => {
     ({ getCrmOverview } = await import("@/modules/crm/access"));
     ({ editCrmStages } = await import("@/modules/crm/stage-settings"));
     ({ moveLeadToStage } = await import("@/modules/crm/automatic-stage"));
-    ({ getCrmBoard } = await import("@/modules/crm/board"));
+    ({ getCrmBoard, listCrmBoardCards } = await import("@/modules/crm/board"));
     ({ getCrmLeadDetail, listCrmReminders } = await import("@/modules/crm/lead-detail"));
     ({ editCrmLead, parseCrmTaskDue } = await import("@/modules/crm/lead-detail-actions"));
     ({ readCrmLossCatalog, updateCrmLossCatalog } = await import("@/modules/crm/loss-reasons"));
@@ -152,10 +153,11 @@ describe.skipIf(!testUrl)("CRM no PostgreSQL", () => {
     expect(duration).toBeLessThan(2_000);
     expect(board.columns.reduce((count, column) => count + column.total, 0)).toBe(5000);
     expect(board.columns.every(({ cards }) => cards.length === 20)).toBe(true);
-    const page2 = await getCrmBoard({ etapa: stageId, [`p_${stageId}`]: "2" });
-    expect(page2.columns).toHaveLength(1);
-    expect(page2.columns[0].page).toBe(2);
-    expect(page2.columns[0].cards[0].id).not.toBe(board.columns[0].cards[0].id);
+    const first = board.columns.find(({ id }) => id === stageId)!;
+    const next = await listCrmBoardCards({ tenantId, params: {}, stageId, cursor: first.cursor! });
+    expect(next.cards).toHaveLength(20);
+    expect(next.cards[0].id).not.toBe(first.cards[0].id);
+    expect(next.cursor).toBeTruthy();
 
     const ad = await getCrmBoard({ etapa: stageId, origem: "anuncio", de: "2026-01-07", ate: "2026-01-07" });
     expect(ad.columns[0].cards.map(({ id }) => id)).toEqual([lead.id]);

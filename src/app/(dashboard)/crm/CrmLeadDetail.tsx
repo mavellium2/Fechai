@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -234,10 +234,10 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
   );
 
   const historyTab = timeline.length === 0 ? <p className={muted}>Nenhum evento registrado.</p> : (
-    <ol className="space-y-4 border-l border-ink/10 pl-4 text-sm panel:border-white/10">
-      {timeline.map((event) => (
-        <li key={event.id} className="relative break-words">
-          <span aria-hidden className="absolute -left-[1.3rem] top-1.5 size-2 rounded-full bg-iris" />
+    <ol className="sla-timeline crm-history-timeline relative space-y-4 border-l border-ink/10 pl-4 text-sm panel:border-white/10">
+      {timeline.map((event, i) => (
+        <li key={event.id} className="sla-step relative break-words" style={{ "--i": i } as CSSProperties}>
+          <span aria-hidden className="sla-dot absolute -left-[1.3rem] top-1.5 size-2 rounded-full bg-iris" />
           <p className="font-medium">{event.title}</p>
           {event.details && <p className="text-neutral panel:text-white/55">{event.details}</p>}
           <p className="text-neutral panel:text-white/55">{event.source && `${event.source} · `}<time dateTime={event.at.toISOString()}>{dateTimeLabel(event.at)}</time></p>

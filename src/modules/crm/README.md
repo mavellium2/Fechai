@@ -45,7 +45,7 @@ O preenchimento usa o status atual do lead e a prioridade da conversa. Registra 
 
 Toda action e rota do CRM chama `requireCrmSession()`, que exige `crm:ver` ([`src/lib/permissions.ts`](../../lib/permissions.ts)). O teste estático `tests/crm-permissao.test.ts` falha se uma action exportada não chamar a guarda. O SEG-05 amplia a matriz com os novos papéis.
 
-Criação e movimentação de leads usam a trava compartilhada da conta. O arquivamento usa a trava exclusiva para impedir atribuições concorrentes à etapa. O Kanban em `/crm` tem paginação por coluna e filtros compartilháveis. Consulte o [guia funcional](../../../docs/painel/crm/telas.md) para os recursos que ainda dependem de outros cards.
+Criação e movimentação de leads usam a trava compartilhada da conta. O arquivamento usa a trava exclusiva para impedir atribuições concorrentes à etapa. O Kanban em `/crm` carrega cada coluna por lotes sob demanda (cursor pelo último card) e tem filtros e buscas compartilháveis na URL (`q`, `q_<etapa>`). As buscas filtram ao vivo (350 ms de debounce, `router.replace`) e ficam uma na linha do título e outra no cabeçalho de cada coluna; o grupo de controles do título não quebra em telas estreitas. Consulte o [guia funcional](../../../docs/painel/crm/telas.md) para os recursos que ainda dependem de outros cards.
 
 ## Cadastro e exclusão pelo quadro
 

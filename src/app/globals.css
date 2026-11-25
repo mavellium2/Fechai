@@ -205,9 +205,9 @@ html {
   }
 }
 
-/* Linha do tempo de /crm/transbordo: passos entram em sequência, a linha se
-   desenha de cima para baixo e as bolinhas ativas pulsam em onda (o tempo
-   correndo). `--i` é a posição do passo. Sem movimento para quem pediu menos. */
+/* Linhas do tempo do CRM (/crm/transbordo e histórico do lead): passos entram
+   em sequência, a linha se desenha de cima para baixo e as bolinhas pulsam em
+   onda. `--i` é a posição do passo. Sem movimento para quem pediu menos. */
 .sla-timeline::before {
   content: "";
   position: absolute;
@@ -232,6 +232,11 @@ html {
   animation: sla-pulse 2.8s ease-out infinite;
   animation-delay: calc(0.6s + var(--i) * 0.7s);
   opacity: 0;
+}
+/* O histórico pode ter até 20 eventos: a onda das bolinhas é mais curta para
+   os últimos não ficarem parados por tanto tempo. */
+.crm-history-timeline .sla-dot::after {
+  animation-delay: calc(0.6s + var(--i) * 0.12s);
 }
 @keyframes sla-line {
   from { transform: scaleY(0); }

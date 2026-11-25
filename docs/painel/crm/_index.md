@@ -1,6 +1,6 @@
 # CRM nativo
 
-O CRM organiza os leads em um quadro Kanban com colunas por etapa, totais e filtros compartilháveis. A ficha reúne dados declarados, origem, responsável, conversa, etiquetas, tarefas e linha do tempo. O superadmin libera o acesso por conta.
+O CRM organiza os leads em um quadro Kanban com colunas por etapa, totais, filtros compartilháveis e buscas que filtram ao vivo (geral na linha do título, por coluna no cabeçalho). Os cards vêm por lotes sob demanda. A ficha reúne dados declarados, origem, responsável, conversa, etiquetas, tarefas e linha do tempo. O superadmin libera o acesso por conta.
 
 | Aspecto | Onde |
 | --- | --- |

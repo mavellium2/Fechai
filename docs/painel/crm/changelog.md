@@ -1,5 +1,17 @@
 # CRM nativo — Histórico
 
+## 2026-11-25 — Busca ao vivo e cabeçalho responsivo
+
+As duas buscas do quadro passaram a filtrar enquanto se digita: `CrmLiveSearch` mantém o texto no cliente e, após 350 ms sem tecla, troca apenas `q` ou `q_<etapa>` com `router.replace`, preservando etapa, responsável, etiqueta, origem, período, datas e a outra busca. Usar `replace` evita uma entrada de histórico por letra; um texto digitado depois que uma busca saiu não é apagado pela resposta dela. A busca geral saiu de baixo dos filtros e foi para a linha do título **CRM**, dentro do mesmo grupo de controles. Esse grupo não quebra linha: a busca encolhe, os links viram ícone com rótulo acessível abaixo de `xl` e o botão **Filtros** vira ícone abaixo de `sm`, então não estoura a tela em 320 px. O painel de filtros aberto passou a uma coluna em telas estreitas, duas a partir de 400 px, quatro no `sm` e a faixa completa no `xl`, com `min-w-0` em todos os campos. Esses campos usam `type="text"` com `inputMode="search"` de propósito: com `type="search"`, Chromium e Edge desenhavam um x nativo ao lado do botão de limpar do produto, e apareciam dois. O wrapper `role="search"`, o rótulo e a tecla de busca do teclado continuam; só sobra o x acessível do componente.
+
+## 2026-11-25 — Buscas no quadro e carregamento sob demanda
+
+O paginador "1 de 5" de cada coluna saiu: o quadro agora carrega o próximo lote de 20 cards quando a lista chega ao fim, por cursor do último card já exibido, com a mesma ordenação e o mesmo DTO do primeiro lote. A leitura extra passa pela `loadMoreCrmCards`, que tira a conta da sessão, confere a etapa ativa e relê filtros e buscas no servidor; o pulso do quadro fica pausado enquanto o lote vem. Entrou a busca geral (`q`), que vale para todas as colunas, e a busca por coluna (`q_<etapa>`), que vale só para aquela etapa — as duas procuram nome ou telefone no banco, somam-se aos filtros e são preservadas nos links da ficha. Parâmetros `p_<etapa>` de URLs antigas são descartados.
+
+## 2026-11-25 — Animação na linha do tempo do histórico
+
+A aba **Histórico** da ficha do lead passou a usar a mesma animação da sequência de **Prazos do transbordo**: a linha se desenha de cima para baixo, os eventos entram em sequência e as bolinhas pulsam em onda. Como a ficha mostra até 20 eventos, a onda das bolinhas é mais curta para os últimos não ficarem parados; `prefers-reduced-motion` continua desligando todo o movimento.
+
 ## 2026-11-25 — Quadro com altura de tela, adicionar e excluir lead
 
 O Kanban de `/crm` passou a ocupar a altura disponível no desktop: cada coluna rola só a lista de cards, com título, contador, paginador e o botão **Adicionar lead** fixos, e a página não rola mais — a barra de rolagem horizontal do quadro fica sempre à vista. As colunas têm largura flexível e o fundo do quadro pode ser arrastado com o mouse para andar de lado. Cada coluna ganhou **Adicionar lead** e cada card, **Excluir**. O cadastro manual entra na etapa escolhida sem iniciar conversa, não duplica número existente e não aceita Perdido (a perda exige motivo). A exclusão é definitiva e restrita a lead sem conversa e sem agendamento, com o retrato guardado em `lead.deleted`. O layout depende da nova classe `tenant-main-crm` (`pathname === "/crm"`), que libera a rolagem da página no celular. Para testar com dados variados, `scripts/crm-demo-leads.ts` cria até 8 cards por etapa (simula sem `--apply` e remove com `--remove`).

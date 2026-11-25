@@ -4,7 +4,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/require-product", () => ({ requireProductAccess: vi.fn() }));
 
 import { crmBoardWhere } from "@/modules/crm/board";
-import { crmBoardHref, readCrmFilters } from "@/modules/crm/board-filters";
+import { CRM_SEARCH_MAX, crmBoardHref, readCrmFilters, readCrmSearches } from "@/modules/crm/board-filters";
 
 const tenantId = "conta-a";
 const unassigned = { OR: [{ conversation: null }, { conversation: { is: { tenantId, assignedUserId: null } } }] };
@@ -63,5 +63,42 @@ describe("filtro de responsável no Kanban", () => {
 
   it("o link compartilhado preserva o responsável", () => {
     expect(crmBoardHref({ responsavel: "sem", etapa: "e1" }, { lead: "l1" })).toBe("/crm?responsavel=sem&etapa=e1&lead=l1");
+  });
+});
+
+describe("busca no Kanban", () => {
+  it("lê a busca geral e a de cada etapa, aparadas e sem controle", () => {
+    expect(readCrmSearches({ q: "  Ana\u0000 ", q_e1: " 55119999 ", q_e2: "", "q_x' OR 1=1": "x", ["q_e3" as string]: ["a", "b"] }))
+      .toEqual({ global: "Ana", columns: { e1: "55119999" } });
+    expect(readCrmSearches({ q: "a".repeat(CRM_SEARCH_MAX + 20) }).global).toHaveLength(CRM_SEARCH_MAX);
+  });
+
+  it("soma a busca aos filtros sem sobrescrever o escopo da conta", () => {
+    const where = crmBoardWhere(tenantId, readCrmFilters({ responsavel: "user_1" }), " 55119999 ");
+    expect(where.tenantId).toBe(tenantId);
+    expect(where.OR).toEqual([{ conversation: null }, { conversation: { is: { tenantId, isTest: false } } }]);
+    expect(where.AND).toEqual([
+      { conversation: { is: { tenantId, assignedUserId: "user_1" } } },
+      { OR: [
+        { name: { contains: "55119999", mode: "insensitive" } },
+        { phone: { contains: "55119999" } },
+      ] },
+    ]);
+  });
+
+  it("o link compartilhado preserva as buscas e descarta paginação antiga", () => {
+    expect(crmBoardHref({ q: "ana", q_e1: "999", p_e1: "3", etapa: "e1" }, { lead: "l1" }))
+      .toBe("/crm?q=ana&q_e1=999&etapa=e1&lead=l1");
+  });
+
+  it("trocar o texto de uma busca não derruba os outros filtros", () => {
+    const href = crmBoardHref({
+      etapa: "e1,e2", responsavel: "user_1,sem", etiqueta: "t1", origem: "anuncio,widget",
+      periodo: "atividade", de: "2026-11-01", ate: "2026-11-30", q: "ana", q_e1: "999",
+    }, { q: "carla" });
+    expect(Object.fromEntries(new URL(href, "http://localhost").searchParams)).toEqual({
+      etapa: "e1,e2", responsavel: "user_1,sem", etiqueta: "t1", origem: "anuncio,widget",
+      periodo: "atividade", de: "2026-11-01", ate: "2026-11-30", q: "carla", q_e1: "999",
+    });
   });
 });

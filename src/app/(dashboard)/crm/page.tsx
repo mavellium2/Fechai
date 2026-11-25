@@ -18,6 +18,7 @@ import { crmDurationLabel } from "@/modules/crm/sla";
 import { CrmBoard } from "./CrmBoard";
 import { CrmEscalationAlert } from "./CrmEscalationAlert";
 import { CrmFiltersButton, CrmFiltersPanel, CrmFiltersProvider } from "./CrmFilters";
+import { CrmGlobalSearch } from "./CrmGlobalSearch";
 import { CrmLeadDetail } from "./CrmLeadDetail";
 
 export const metadata: Metadata = { title: "CRM" };
@@ -37,19 +38,20 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
     readHandoffSla(tenantId),
     countEscalatedWaits(tenantId),
   ]);
-  const { pipeline, filters, columns, users, observedAt } = board;
+  const { pipeline, filters, searches, columns, users, observedAt } = board;
 
   return (
     <CrmFiltersProvider>
     <div className="flex w-full min-w-0 max-w-full flex-col gap-5 md:min-h-0 md:flex-1">
       <div className="shrink-0 space-y-5">
       <PageHeader eyebrow="crm" title="CRM" hint="Acompanhe cada lead do primeiro contato ao fechamento, veja quem está aguardando a equipe e assuma o atendimento."
-        actions={<>
+        actions={<div className="flex min-w-0 flex-nowrap items-center gap-2">
+          <CrmGlobalSearch params={params} term={searches.global} />
           <CrmFiltersButton filters={filters} />
-          <ButtonLink href="/crm/indicadores" variant="outline"><ChartNoAxesColumn size={16} aria-hidden />Indicadores do transbordo</ButtonLink>
-          <ButtonLink href="/crm/transbordo" variant="outline"><Timer size={16} aria-hidden />Prazos do transbordo</ButtonLink>
-          <ButtonLink href="/crm/etapas" variant="outline"><Settings2 size={16} aria-hidden />Configurar etapas</ButtonLink>
-        </>}
+          <ButtonLink href="/crm/indicadores" variant="outline" size="icon" aria-label="Indicadores do transbordo" title="Indicadores do transbordo" className="size-10 xl:h-10 xl:w-auto xl:px-4"><ChartNoAxesColumn size={16} aria-hidden /><span className="hidden xl:inline">Indicadores do transbordo</span></ButtonLink>
+          <ButtonLink href="/crm/transbordo" variant="outline" size="icon" aria-label="Prazos do transbordo" title="Prazos do transbordo" className="size-10 xl:h-10 xl:w-auto xl:px-4"><Timer size={16} aria-hidden /><span className="hidden xl:inline">Prazos do transbordo</span></ButtonLink>
+          <ButtonLink href="/crm/etapas" variant="outline" size="icon" aria-label="Configurar etapas" title="Configurar etapas" className="size-10 xl:h-10 xl:w-auto xl:px-4"><Settings2 size={16} aria-hidden /><span className="hidden xl:inline">Configurar etapas</span></ButtonLink>
+        </div>}
       />
       {/* Escalonamento no painel (CRM-10): esperas que passaram do 2º prazo e seguem sem ninguém. */}
       {escalated > 0 && (
@@ -77,7 +79,7 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
       <CrmFiltersPanel filters={filters} stages={pipeline.stages} tags={detail?.tags ?? boardTags} users={users} />
       {filters.invalidRange && <p role="alert" className="text-sm text-danger">A data inicial precisa ser anterior ou igual à final.</p>}
       </div>
-      {columns.length > 0 ? <CrmBoard columns={columns} stages={pipeline.stages} lossReasons={lossCatalog?.options ?? []} params={params} version={version} now={observedAt}
+      {columns.length > 0 ? <CrmBoard columns={columns} stages={pipeline.stages} lossReasons={lossCatalog?.options ?? []} params={params} searches={searches} version={version} now={observedAt}
         sla={{ alertMinutes: sla.alertMinutes, escalateMinutes: sla.escalateMinutes }} /> : (
         <Card><EmptyState title="Nenhuma etapa para exibir" description="Escolha uma etapa ativa para consultar os leads." action={<ButtonLink href="/crm" variant="outline">Limpar filtros</ButtonLink>} /></Card>
       )}

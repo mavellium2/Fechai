@@ -1,20 +1,21 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { startTransition, useActionState, useCallback, useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeftRight, GripVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowLeftRight, GripVertical, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { FormFeedback } from "@/components/ui/alert";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { SelectMenu } from "@/components/ui/select-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { useActionToast } from "@/components/ui/toast";
 import type { ActionResult } from "@/components/ui/toast/types";
 import type { CrmBoardCard, getCrmBoard } from "@/modules/crm/board";
-import { CRM_COLUMN_SIZE, crmBoardHref, type CrmSearchParams } from "@/modules/crm/board-filters";
+import { crmBoardHref, type CrmSearchParams } from "@/modules/crm/board-filters";
 import { CRM_LOSS_NOTE_LIMIT } from "@/modules/crm/limits";
 import { crmSlaLabel, crmSlaLevel, crmWaitMinutes, type CrmSlaLevel, type CrmSlaLimits } from "@/modules/crm/sla";
-import { moveCrmCard } from "./actions";
+import { loadMoreCrmCards, moveCrmCard } from "./actions";
+import { CrmLiveSearch } from "./CrmLiveSearch";
 import { CrmLeadCreateDialog } from "./CrmLeadCreateDialog";
 import { CrmLeadDeleteDialog } from "./CrmLeadDeleteDialog";
 import { useCrmLiveRefresh } from "./useCrmLiveRefresh";
@@ -51,8 +52,78 @@ function SlaBadge({ since, now, limits }: { since: string | null; now: number; l
   );
 }
 
-export function CrmBoard({ columns, stages, lossReasons, params, version, now, sla }: {
-  columns: Board["columns"]; stages: Stage[]; lossReasons: LossReason[]; params: CrmSearchParams; version: string; now: number;
+/**
+ * Lista de uma coluna com carregamento sob demanda. O primeiro lote vem do
+ * servidor junto do quadro; os seguintes saem quando o fim da lista aparece.
+ * O pulso do quadro fica pausado enquanto há uma carga em voo (`onBusy`) para
+ * não trocar a base no meio da leitura.
+ */
+function ColumnCardList({ column, params, onBusy, children }: {
+  column: Board["columns"][number]; params: CrmSearchParams; onBusy: (busy: boolean) => void;
+  children: (cards: CrmBoardCard[]) => ReactNode;
+}) {
+  const [extra, setExtra] = useState<CrmBoardCard[]>([]);
+  const [cursor, setCursor] = useState(column.cursor);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const sentinel = useRef<HTMLLIElement>(null);
+  const busy = useRef(false);
+
+  // O remount pela `key` do quadro já descarta os lotes quando o primeiro lote
+  // muda (filtro, busca ou atualização do quadro). Só avisamos se uma carga
+  // ficou pelo caminho quando a coluna sai da tela.
+  useEffect(() => () => onBusy(false), [onBusy]);
+
+  const load = useCallback(async () => {
+    if (busy.current || !cursor) return;
+    busy.current = true;
+    setLoading(true);
+    setError("");
+    onBusy(true);
+    try {
+      const result = await loadMoreCrmCards(params, column.id, cursor);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      const known = new Set([...column.cards, ...extra].map(({ id }) => id));
+      const fresh = result.cards.filter(({ id }) => !known.has(id));
+      setExtra((current) => [...current, ...fresh]);
+      setCursor(result.cursor);
+    } finally {
+      busy.current = false;
+      setLoading(false);
+      onBusy(false);
+    }
+  }, [column.id, column.cards, extra, cursor, params, onBusy]);
+
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node || !cursor || loading) return;
+    // `root: null` cobre tanto a lista que rola sozinha no desktop quanto a
+    // rolagem da página no celular.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) void load();
+    }, { rootMargin: "240px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [cursor, loading, load]);
+
+  const cards = [...column.cards, ...extra];
+  return (
+    <ul className={`flex min-h-0 flex-col gap-2 ${cards.length ? "md:flex-1 md:overflow-y-auto md:overscroll-contain md:pr-1" : "md:flex-1"}`}>
+      {children(cards)}
+      <li ref={sentinel} className="shrink-0 pt-1 text-center text-xs text-neutral panel:text-white/55">
+        {loading && <span className="inline-flex items-center gap-1.5"><LoaderCircle size={13} aria-hidden className="animate-spin" />Carregando mais leads…</span>}
+        {!loading && error && <span role="alert" className="inline-flex flex-wrap items-center justify-center gap-2">{error} <Button type="button" variant="ghost" size="sm" onClick={() => void load()}>Tentar novamente</Button></span>}
+        {!loading && !error && cursor && <button type="button" onClick={() => void load()} className="hover:underline">Carregar mais leads</button>}
+      </li>
+    </ul>
+  );
+}
+
+export function CrmBoard({ columns, stages, lossReasons, params, searches, version, now, sla }: {
+  columns: Board["columns"]; stages: Stage[]; lossReasons: LossReason[]; params: CrmSearchParams; searches: Board["searches"]; version: string; now: number;
   /** Prazos da conta (CRM-10): as cores do selo seguem os mesmos limites dos avisos. */
   sla: CrmSlaLimits;
 }) {
@@ -66,13 +137,14 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
   const board = useRef<HTMLDivElement>(null);
   const pan = useRef<{ pointerId: number; x: number; left: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [state, submit, pending] = useActionState(async (previous: ActionResult | null, data: FormData) => {
     const result = await moveCrmCard(previous, data);
     if (result.ok) setMove(null);
     return result;
   }, null);
   useActionToast(state, pending, { entity: "lead", action: "update" });
-  useCrmLiveRefresh(version, Boolean(params.lead || move || dragging || pending || createAt || deleting));
+  useCrmLiveRefresh(version, Boolean(params.lead || move || dragging || pending || createAt || deleting || loadingMore));
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);
     return () => window.clearInterval(timer);
@@ -153,59 +225,54 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
             event.preventDefault();
             drop(column);
           }}>
-            <div className="mb-3 flex shrink-0 items-start justify-between gap-2">
+            <div className="mb-2 flex shrink-0 items-start justify-between gap-2">
               <h2 id={`crm-column-${column.id}`} className="min-w-0 break-words text-sm font-semibold">{column.name}</h2>
               <span className="rounded-control bg-ink/5 px-2 py-1 text-xs tabular-nums panel:bg-white/10" aria-label={`${column.total} leads`}>{column.total.toLocaleString("pt-BR")}</span>
             </div>
-            {column.cards.length === 0 ? <p className="py-4 text-sm text-neutral panel:text-white/55 md:flex-1">Nenhum lead nesta etapa.</p> : (
-              <ul className="flex min-h-0 flex-col gap-2 md:flex-1 md:overflow-y-auto md:overscroll-contain md:pr-1">
-                {column.cards.map((card) => (
-                  <li key={card.id} data-crm-card={card.id} draggable={!pending} className={`min-w-0 shrink-0 rounded-control border border-ink/10 bg-white p-3 panel:border-white/10 panel:bg-ink ${dragging === card.id ? "opacity-45" : ""}`}
-                    onDragStart={(event) => {
-                      dragged.current = card;
-                      setDragging(card.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", card.id);
-                    }} onDragEnd={endDrag}>
-                    <div className="flex items-start gap-2">
-                      <GripVertical size={15} className="mt-0.5 hidden shrink-0 cursor-grab text-neutral md:block" aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <Link href={crmBoardHref(params, { lead: card.id })} prefetch={false} draggable={false}
-                          className="block text-sm font-medium [overflow-wrap:anywhere] hover:underline">{card.name}</Link>
-                        <p className="mt-1 text-xs text-neutral panel:text-white/60">{card.phone}</p>
-                      </div>
-                      <div className="flex shrink-0 items-start">
-                        <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Mover ${card.name}`} title="Mover lead" onClick={() => setMove({ card })}>
-                          <ArrowLeftRight size={15} aria-hidden />
-                        </Button>
-                        <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Excluir ${card.name}`} title="Excluir lead" onClick={() => setDeleting(card)}>
-                          <Trash2 size={15} aria-hidden />
-                        </Button>
-                      </div>
+            <CrmLiveSearch params={params} term={searches.columns[column.id] ?? ""} name={`q_${column.id}`}
+              label={`Buscar em ${column.name}`} placeholder="Buscar nesta etapa"
+              className="mb-2 shrink-0" inputClassName="h-8 text-xs" />
+            <ColumnCardList key={`${column.id}:${column.cards.map(({ id }) => id).join(",")}`}
+              column={column} params={params} onBusy={setLoadingMore}>
+              {(cards) => cards.length === 0 ? (
+                <li className="py-4 text-sm text-neutral panel:text-white/55">Nenhum lead nesta etapa.</li>
+              ) : cards.map((card) => (
+                <li key={card.id} data-crm-card={card.id} draggable={!pending} className={`min-w-0 shrink-0 rounded-control border border-ink/10 bg-white p-3 panel:border-white/10 panel:bg-ink ${dragging === card.id ? "opacity-45" : ""}`}
+                  onDragStart={(event) => {
+                    dragged.current = card;
+                    setDragging(card.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", card.id);
+                  }} onDragEnd={endDrag}>
+                  <div className="flex items-start gap-2">
+                    <GripVertical size={15} className="mt-0.5 hidden shrink-0 cursor-grab text-neutral md:block" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <Link href={crmBoardHref(params, { lead: card.id })} prefetch={false} draggable={false}
+                        className="block text-sm font-medium [overflow-wrap:anywhere] hover:underline">{card.name}</Link>
+                      <p className="mt-1 text-xs text-neutral panel:text-white/60">{card.phone}</p>
                     </div>
-                    <p className="mt-2 text-xs text-neutral panel:text-white/60">{card.origin} · {timeInStage(card.stageSince, Math.max(now, clock))}</p>
-                    <p className={`mt-1 text-xs [overflow-wrap:anywhere] ${card.assignee.kind === "user" ? "text-ink panel:text-white/85" : "text-neutral panel:text-white/55"}`}>
-                      <span className="sr-only">Responsável: </span>{card.assignee.label}
-                    </p>
-                    {column.kind === "waiting_human" && <SlaBadge since={card.stageSince} now={Math.max(now, clock)} limits={sla} />}
-                    {card.tags.length > 0 && (
-                      <ul className="mt-2 flex flex-wrap gap-1" aria-label="Etiquetas">
-                        {card.tags.map((tag) => <li key={tag.id} className="min-w-0 rounded-control bg-ink/5 px-2 py-0.5 text-xs [overflow-wrap:anywhere] panel:bg-white/10">{tag.name}</li>)}
-                      </ul>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {column.total > CRM_COLUMN_SIZE && (
-              <nav className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-1" aria-label={`Páginas de ${column.name}`}>
-                {column.page > 1 && <ButtonLink size="sm" variant="ghost" scroll={false} prefetch={false}
-                  href={crmBoardHref(params, { [`p_${column.id}`]: String(column.page - 1) })}>Anterior</ButtonLink>}
-                <span className="text-xs text-neutral panel:text-white/55">{column.page} de {Math.ceil(column.total / CRM_COLUMN_SIZE)}</span>
-                {column.page * CRM_COLUMN_SIZE < column.total && <ButtonLink size="sm" variant="ghost" scroll={false} prefetch={false}
-                  href={crmBoardHref(params, { [`p_${column.id}`]: String(column.page + 1) })}>Próxima</ButtonLink>}
-              </nav>
-            )}
+                    <div className="flex shrink-0 items-start">
+                      <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Mover ${card.name}`} title="Mover lead" onClick={() => setMove({ card })}>
+                        <ArrowLeftRight size={15} aria-hidden />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Excluir ${card.name}`} title="Excluir lead" onClick={() => setDeleting(card)}>
+                        <Trash2 size={15} aria-hidden />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-neutral panel:text-white/60">{card.origin} · {timeInStage(card.stageSince, Math.max(now, clock))}</p>
+                  <p className={`mt-1 text-xs [overflow-wrap:anywhere] ${card.assignee.kind === "user" ? "text-ink panel:text-white/85" : "text-neutral panel:text-white/55"}`}>
+                    <span className="sr-only">Responsável: </span>{card.assignee.label}
+                  </p>
+                  {column.kind === "waiting_human" && <SlaBadge since={card.stageSince} now={Math.max(now, clock)} limits={sla} />}
+                  {card.tags.length > 0 && (
+                    <ul className="mt-2 flex flex-wrap gap-1" aria-label="Etiquetas">
+                      {card.tags.map((tag) => <li key={tag.id} className="min-w-0 rounded-control bg-ink/5 px-2 py-0.5 text-xs [overflow-wrap:anywhere] panel:bg-white/10">{tag.name}</li>)}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ColumnCardList>
             {column.kind !== "lost" && (
               <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setCreateAt(column.id)}
                 className="mt-3 w-full shrink-0 justify-center border border-dashed border-ink/15 panel:border-white/15">
