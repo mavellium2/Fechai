@@ -18,7 +18,7 @@ controle de publicação.
   pelo superadmin, comparecimento confirmado, receita apenas da chegada fora
   do horário humano, economia estimada declarada, fechamento em snapshot e
   PDF A4 no modelo revisado (todos os contatos contam; a receita conservadora
-  vale só no bloco opcional de retorno estimado). Contrato: [`docs/P-79-relatorio-mensal-roi.md`](../../../docs/P-79-relatorio-mensal-roi.md).
+  vale só no bloco opcional de retorno estimado). Contrato: [`docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md`](../../../docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md).
 - `monthly.ts` também recebe `gaps` (perguntas da fila P-87 aprovadas na
   janela: `agentId`, `firstAskedAt`, `answeredAt`) e calcula
   `gapsAnswered`/`gapAnswerSeconds` no mês da aprovação, no escopo de agentes.

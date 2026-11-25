@@ -1,8 +1,8 @@
 # .claude
 
-## Módulos Documentados
+## Contexto de manutenção
 
-Leia o `_index.md` antes do código-fonte.
+Comece pelo [índice de funcionalidades do Fechai](../docs/README.md). Os cadernos abaixo apoiam a manutenção com detalhes técnicos e histórico.
 
 - [painel](context/painel/_index.md) — navegação tenant/admin, temas e switch, tipografia e interface de Agentes v5
 

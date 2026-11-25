@@ -11,7 +11,7 @@
 - **Jobs:** BullMQ + Redis (worker de follow-up)
 - **RAG:** pgvector + embeddings OpenAI (`text-embedding-3-small`)
 
-> Estado e entregas recentes: [docs/CHANGELOG.md](./docs/CHANGELOG.md).
+> Estado e entregas recentes: [docs/projeto/CHANGELOG.md](docs/projeto/CHANGELOG.md).
 
 ## Quatro camadas (isoladas por `tenantId`)
 
@@ -49,7 +49,7 @@ Todas degradam com graça quando a env não está configurada (respostas canned 
 - **Laboratório administrativo local** — `npm run dev:test` usa o banco lógico
   separado `saas_test`. Ele não é criado na VPS por commit/push e não substitui
   uma implantação de homologação; ver
-  [docs/ambiente-de-testes-admin.md](./docs/ambiente-de-testes-admin.md).
+  [docs/plataforma/ambientes/ambiente-de-testes-admin.md](docs/plataforma/ambientes/ambiente-de-testes-admin.md).
 - **Vercel (app) + Railway/Fly.io (worker + Redis)** (compatível, não implementado) — alternativa
   gerenciada; o worker roda com `npm run worker` em qualquer um dos dois casos. Neste cenário a
   Evolution continua externa: use um host gerenciado da Evolution API e aponte

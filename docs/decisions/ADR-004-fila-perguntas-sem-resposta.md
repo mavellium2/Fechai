@@ -68,5 +68,5 @@ com a exigência de mascarar dados do paciente para quem não é da clínica.
 - Paráfrases podem ficar separadas; não há juntar/separar à mão.
 - Retomar pela Meta depois de 24h exigiria template — fora do escopo.
 
-Detalhes e operação: [P-87](../P-87-perguntas-sem-resposta.md) e
+Detalhes e operação: [P-87](../atendimento/perguntas-sem-resposta/P-87-perguntas-sem-resposta.md) e
 [knowledge-gaps/README.md](../../src/modules/knowledge-gaps/README.md).

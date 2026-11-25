@@ -30,11 +30,11 @@ npm run dev               # http://localhost:3001
 
 ## Documentação
 
-Comece por **[docs/INDEX.md](./docs/INDEX.md)** — ele aponta para o resto (arquitetura, convenções, decisões, changelog). Não leia o repositório inteiro.
+Comece pelo **[índice de funcionalidades](./docs/README.md)**. Cada área do painel tem um guia com regras, telas, consultas, ações e histórico.
 
 Deploy em produção (Docker, servidor Linux) → **[README.docker.md](./README.docker.md)**.
 Backup do banco em produção (diário 02:00 mantém 3, mensal dia 1 04:00 mantém 1) → **[deploy/BACKUP_SERVICE.md](./deploy/BACKUP_SERVICE.md)**.
-Laboratório administrativo com banco isolado → **[docs/ambiente-de-testes-admin.md](./docs/ambiente-de-testes-admin.md)**.
+Laboratório administrativo com banco isolado → **[docs/plataforma/ambientes/ambiente-de-testes-admin.md](docs/plataforma/ambientes/ambiente-de-testes-admin.md)**.
 
 > Push para `main` recria o app web e o worker na VPS, mas preserva o Postgres e
 > seu volume. Ele não cria o banco de laboratório nem aplica mudanças do Prisma

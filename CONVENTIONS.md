@@ -69,7 +69,7 @@ Estavam como valor solto espalhado (`rounded-md`/`lg`/`xl`/`2xl` misturados na m
 - Fontes: `font-display` (títulos/wordmark — Clash Display, fallback Space Grotesk), `font-sans` (corpo — Satoshi, fallback Plus Jakarta Sans), `font-mono` (dados/snippets/IDs — JetBrains Mono).
 - Texto sobre `iris`/`signal` é branco/`paper`; sobre `paper` é `ink` (contraste AA).
 - Indicador de carregando/sucesso é o `TypingToCheck` (assinatura "digitando → check") — não criar spinners.
-- Animações: ver `docs/animations.md` (Motion + IntersectionObserver; rolagem nativa — nada de lib de smooth-scroll; `prefers-reduced-motion` sempre).
+- Animações: ver `docs/plataforma/interface/animations.md` (Motion + IntersectionObserver; rolagem nativa — nada de lib de smooth-scroll; `prefers-reduced-motion` sempre).
 - Design system completo: skill `.claude/skills/design-ui/SKILL.md` (anti-padrões na seção 8, checklist na 9).
 
 ## Superfícies (claro x painel escuro)
@@ -105,4 +105,4 @@ Num componente novo, escreva o estilo claro e adicione a variante escura no mesm
 
 ## Definition of done por milestone
 
-`npm run build` passa → testes (se houver) passam → `docs/CHANGELOG.md` atualizado → só então próximo milestone.
+`npm run build` passa → testes (se houver) passam → `docs/projeto/CHANGELOG.md` atualizado → só então próximo milestone.

@@ -1,6 +1,6 @@
 # Módulo: lead-insights (inteligência de conversas)
 
-> Produto e implantação: [`docs/inteligencia-de-conversas.md`](../../../docs/inteligencia-de-conversas.md).
+> Produto e implantação: [`docs/resultados/qualidade-dos-leads/inteligencia-de-conversas.md`](../../../docs/resultados/qualidade-dos-leads/inteligencia-de-conversas.md).
 > Origem: Obsidian → Produto/Fechai/Fechai - Inteligência de Conversas (não estava disponível ao implementar; o escopo veio do pedido).
 
 ## O que faz

@@ -23,4 +23,4 @@ Para usar, saiba:
 - [ ] Cadeia: motor de dados valida → IA só redige (`monthlyAnalysisFacts`, `unbackedNumbers`) → PDF só do aprovado e versionado (`approvedDocument`, `loadApprovedReport`).
 - [ ] PDF/painel = `executiveSummary()`: 4 números + partes 01–06; a 05 aparece sempre e, sem incidente comprovado, diz `NO_INCIDENT`. O PDF inteiro flui.
 - [ ] Recepção, disponibilidade (`WhatsappIncident`; sem medição = não medido), chegadas pelo expediente, ações do mês anterior e fatos do caso: ver [domain.md](domain.md).
-- [ ] Guias: `src/app/(dashboard)/relatorios/README.md`, `src/modules/reports/README.md`, `docs/P-79-relatorio-mensal-roi.md`.
+- [ ] Guias: `src/app/(dashboard)/relatorios/README.md`, `src/modules/reports/README.md`, `docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md`.

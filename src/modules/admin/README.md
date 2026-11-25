@@ -60,7 +60,7 @@ A revisão individual carrega dados e premissas existentes e permite correções
 manuais dos indicadores atuais/anteriores antes do fechamento. Usa os
 componentes do painel e exporta PDF preto/cinza com logos locais. Operação,
 fórmulas, publicação no tenant, arquivos e limites estão no
-[contrato P-79](../../../docs/P-79-relatorio-mensal-roi.md).
+[contrato P-79](../../../docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md).
 Também preenche mensalidade ausente pelo preço atual da conta, respeita o
 mês do cadastro na primeira revisão e permite importar indicadores de um ou
 mais agentes. Horários cadastrados são sugestões para conferir com a equipe;
@@ -87,7 +87,7 @@ recebem o tenant por `.bind` e checam superadmin **e** `responders` a cada
 chamada; a resposta fica registrada como "Mavellium". Personificar a conta
 também mascara `/perguntas`. Resumo diário por e-mail em
 `KNOWLEDGE_GAPS_ADMIN_EMAIL`, só com contagens. Contrato:
-[P-87](../../../docs/P-87-perguntas-sem-resposta.md).
+[P-87](../../../docs/atendimento/perguntas-sem-resposta/P-87-perguntas-sem-resposta.md).
 
 ## O que NÃO faz
 

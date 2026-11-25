@@ -253,7 +253,7 @@ Ação. A entrada é `Tenant.createdAt`, em data curta de Brasília. O texto sob
 prazo/reunião e as colunas Entrega/Reunião foram retirados da listagem;
 seus registros permanecem na revisão individual.
 O PDF A4 segue o modelo revisado (ver "Modelo revisado: todos os leads, tudo
-que é mensurável" e "PDF e painel: a ordem do relatório"). Leia [`docs/P-79-relatorio-mensal-roi.md`](../../../../docs/P-79-relatorio-mensal-roi.md)
+que é mensurável" e "PDF e painel: a ordem do relatório"). Leia [`docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md`](../../../../docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md)
 antes de alterar a nova visão: **não usa a regra do Financeiro legado**.
 O relatório mede atendimento, agendamento e comparecimento; receita, economia e
 ROI são um bloco opcional (ver "O que o relatório mede e o bloco financeiro
@@ -275,7 +275,7 @@ de lá, só a marcação com `attendanceAt` conta. `kind` explícito vence
 `serviceType` × `evaluationTypes`, e `Appointment.procedure` vence a variável
 da conversa. Ver "Dimensões de um agendamento" em `modules/scheduling/README.md`.
 Eventos anteriores à implantação não são inventados. P-86 fica fora.
-A fila P-87 (`/perguntas`, [contrato](../../../../docs/P-87-perguntas-sem-resposta.md))
+A fila P-87 (`/perguntas`, [contrato](../../../../docs/atendimento/perguntas-sem-resposta/P-87-perguntas-sem-resposta.md))
 acrescenta a linha **Tempo médio para a equipe responder**: média de
 `answeredAt − firstAskedAt` das perguntas aprovadas na competência
 (`MonthlyMetrics.gapAnswerSeconds`/`gapsAnswered`, opcionais — snapshot antigo
@@ -717,7 +717,7 @@ trabalho da recepção assumido pelo agente. Regras que não se quebram:
 
 - **Operacional** (padrão): KPIs com delta vs. período anterior, gráficos (fluxo, resultados, atendimento IA×humano, leads fechados IA×humano, donut por agente, leads por status, funil de conversão, resolução autônoma, recuperação por follow-up, horários de pico, tempo até a primeira resposta, comparecimento/no-show — compareceu × faltou pelo horário da consulta, com "não verificado" na tabela; cancelada não entra) e exportação CSV.
 - **Financeiro**: retorno financeiro **estimado** do investimento no projeto — KPIs (Retorno, Investido, ROI, Ponto de equilíbrio), gráfico de retorno acumulado × investido, retorno por agente, retorno mês a mês e custo por lead fechado. O valor por lead é definido manualmente pelo dono da conta; sem ele, os gráficos que dependem desse valor mostram um estado vazio com a chamada para definir, nunca uma série de zeros. No fim da visão fica **"O que o agente filtrou"** (triagem): contatos que o agente encerrou por não serem clientes em potencial, e o tempo/dinheiro que isso poupou.
-- **ROI mensal** (`mensal`): competência mensal fechada pela Mavellium, com receita somente de avaliações realizadas de contatos que chegaram fora do horário humano, economia estimada, premissas por procedimento e PDF com resumo executivo (página 1) e análise detalhada. Contrato em `docs/P-79-relatorio-mensal-roi.md`.
+- **ROI mensal** (`mensal`): competência mensal fechada pela Mavellium, com receita somente de avaliações realizadas de contatos que chegaram fora do horário humano, economia estimada, premissas por procedimento e PDF com resumo executivo (página 1) e análise detalhada. Contrato em `docs/resultados/relatorio-mensal/P-79-relatorio-mensal-roi.md`.
 
 Tudo começa na `page.tsx`, que resolve a janela (`?periodo=`/`?de=&ate=`), computa os dados no servidor e entrega a props serializáveis aos componentes client.
 

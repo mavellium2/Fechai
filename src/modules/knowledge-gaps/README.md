@@ -1,6 +1,6 @@
 # Módulo: knowledge-gaps (perguntas sem resposta, P-87)
 
-> Operação, telas, autorização e implantação: [`docs/P-87-perguntas-sem-resposta.md`](../../../docs/P-87-perguntas-sem-resposta.md).
+> Operação, telas, autorização e implantação: [`docs/atendimento/perguntas-sem-resposta/P-87-perguntas-sem-resposta.md`](../../../docs/atendimento/perguntas-sem-resposta/P-87-perguntas-sem-resposta.md).
 > Por que foi feito assim: [ADR-004](../../../docs/decisions/ADR-004-fila-perguntas-sem-resposta.md).
 
 ## O que faz

@@ -15,4 +15,4 @@ Para usar, saiba:
 - [ ] Raio = lista de cidades por nome (`TenantServiceArea`); sem ela o veredito é `unknown`.
 - [ ] Sugestões de tráfego são regra (não IA), só com 10+ leads com cidade, sempre "sugestão, não promessa".
 - [ ] Relatório mensal: `MonthlyReport.leadQuality` no snapshot; PDF ganha 2ª página só com leads.
-- [ ] Guia completo: `src/modules/lead-insights/README.md` e `docs/inteligencia-de-conversas.md`.
+- [ ] Guia completo: `src/modules/lead-insights/README.md` e `docs/resultados/qualidade-dos-leads/inteligencia-de-conversas.md`.

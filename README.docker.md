@@ -211,7 +211,7 @@ schema e não exigem esse passo.
 
 O laboratório `saas_test` é local por padrão. Git envia código e documentação,
 nunca o conteúdo de um banco. Para uma homologação online, use outra instância
-do app e uma conexão própria, conforme `docs/ambiente-de-testes-admin.md`.
+do app e uma conexão própria, conforme `docs/plataforma/ambientes/ambiente-de-testes-admin.md`.
 
 O laboratório online já tem stack própria em `docker-compose.test.yml`. Depois
 de criar `.env.test-vps` a partir de `deploy/test.env.example` e configurar o
