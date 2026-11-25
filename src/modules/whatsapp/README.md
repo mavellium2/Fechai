@@ -144,6 +144,21 @@ um lugar só (`instances.ts`):
 - **Abrir `/integracoes` não cria instância na Evolution** de conta que só usa a
   Meta: com a Meta liberada e sem instância do QR, o código só é gerado no clique.
 
+### Resposta manual na ficha do CRM
+
+A ficha verifica a última entrada privada autenticada registrada em
+[`inbound-proof.ts`](inbound-proof.ts). Essa prova vem da mensagem do contato,
+com remetente, instância, aparelho receptor e data. Recuperação de histórico,
+mensagem da equipe, reação, grupo e widget ficam fora da prova. Uma entrada
+anterior que chega atrasada preserva a prova da entrada mais recente.
+
+No envio pelo CRM, o servidor confere bloqueio, pedido de parar e o canal
+habilitado. Na Evolution, a sessão ativa precisa estar pareada ao aparelho
+que recebeu o evento. Na Meta, o Phone Number ID precisa ser o mesmo e o envio
+em texto exige janela de 24 horas aberta. Para iniciar o contato ou reabrir a
+janela da Meta, use modelos aprovados em Disparos. Leia
+[as regras da ficha](../../../docs/painel/crm/actions.md#assumir-e-responder).
+
 ## Webhook oficial da Meta
 
 ### Conexão pelo botão da Meta (coexistência)
@@ -155,7 +170,7 @@ só fica conectada com `CLOUD_API`, `is_on_biz_app=true` e `CONNECTED`. O app do
 celular permanece ativo; nunca chamar register/deregister nesse fluxo.
 
 Configuração, deploy e links do app estão em
-[`docs/META_COEXISTENCIA.md`](../../../docs/META_COEXISTENCIA.md). Arquivos:
+[`docs/operacao/whatsapp/META_COEXISTENCIA.md`](../../../docs/operacao/whatsapp/META_COEXISTENCIA.md). Arquivos:
 `embedded-signup*.ts`, `/api/integrations/meta/signup`, callback compartilhado
 `/api/webhooks/whatsapp/meta` e `meta-webhook-handler.ts`. O callback antigo por
 tenant permanece disponível. No compartilhado, assinatura + WABA + telefone
@@ -238,6 +253,44 @@ Precisa de `EVOLUTION_WEBHOOK_URL` (a URL pública do `/api/webhooks/whatsapp`) 
 `webhookConfig()` devolve `null` e a instância é criada **sem** webhook — o
 produto funciona, só não recebe — em vez de entregar sem o header e tomar 401 em
 silêncio.
+
+## Quem escreveu no grupo e o `#vincular` da equipe (CRM-05)
+
+Em grupo, `fromPhone` é o id do grupo, não uma pessoa. O parser da Evolution
+põe quem escreveu em `groupSender`: `phone` quando `key.participant`,
+`key.participantAlt` ou `key.participantPn` trazem `@s.whatsapp.net`, e `lid`
+quando o WhatsApp endereça a pessoa por `@lid`. Num chat privado endereçado
+por `@lid`, o telefone continua vindo do JID alternativo e o LID vai em
+`contactLid`. Telefone nunca é inventado a partir de um LID.
+
+`processIncomingWhatsapp` trata a mensagem `#vincular CÓDIGO` (só QR, nunca
+`fromMe`) **antes** de "ignorar grupos" e antes de abrir conversa:
+`handleTeamLinkCommand` confirma o WhatsApp de quem é da equipe e devolve
+`handled`, e o comando nunca vira lead nem turno do agente. A regra de ignorar
+grupos é sobre o agente responder em grupo, não sobre ler um comando da
+equipe. A resposta sai só no grupo; no privado o Fechai fica calado, porque o
+eco `fromMe` de uma resposta privada abriria cadastro e conversa para o número
+da pessoa. Qualquer mensagem de grupo que traga número e LID juntos ensina o
+LID (`learnTeamMemberLid`, uma consulta por chave única, nunca lança). Regras
+em [`crm/team-whatsapp.ts`](../crm/team-whatsapp.ts).
+
+Logo depois, ainda antes de "ignorar grupos", vem o **grupo de transbordo**
+(CRM-08, [`crm/handoff-group.ts`](../crm/handoff-group.ts)): se o grupo é o
+escolhido na ação de transbordo de algum agente, ou já recebeu um aviso,
+`handleHandoffGroupEvent` devolve `handled` e **nada** dele vira conversa,
+cadastro, mensagem ou turno, nem com "ignorar grupos" desligado. Só são lidos
+"assumo" (e variações) e 👍 ligados a um aviso, e "#ia". Para isso o parser da
+Evolution entrega, só em grupo, `quotedMessageId`
+(`extendedTextMessage.contextInfo.stanzaId`, ou `data.contextInfo` em algumas
+versões) e `reactionTargetId` (`reactionMessage.key.id`). `sendGroupMessage`
+aceita a mensagem citada (`quoted` da Evolution) para as respostas.
+
+A **equipe respondendo pelo celular** da clínica (o `fromMe` privado que não é
+eco da IA, de lembrete nem da pesquisa) é gravada com `Message.sentVia =
+"phone"` e com o responsável da conversa em `sentByUserId` (null = humano não
+identificado). Ela pausa a IA, leva o card para Em atendimento humano e fecha a
+espera; se havia espera aberta, o grupo é perguntado "quem foi?" citando o
+aviso (CRM-09, [`crm/phone-reply.ts`](../crm/phone-reply.ts)).
 
 ## O QR gira — e a sessão tem contador
 

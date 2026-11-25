@@ -11,7 +11,7 @@ Duas ideias sustentam o módulo:
 
 ## Arquivos
 
-- `events.ts` — catálogo de eventos (`AUDIT_EVENTS`): a chave `dominio.acao`, o rótulo em português, o `kind` e se é revertível. Fonte única: a tela não escreve texto de evento à mão, e `revertAuditLog` consulta daqui se o evento aceita undo.
+- `events.ts` — catálogo de eventos (`AUDIT_EVENTS`): a chave `dominio.acao`, o rótulo em português, o `kind` e se é revertível. Fonte única: a tela não escreve texto de evento à mão, e `revertAuditLog` consulta daqui se o evento aceita undo. Os eventos `crm.*` e `handoff.*` (grupo "CRM e transbordo") são gravados por `crm/trail.ts`, direto pelo Prisma e com ator explícito (`OWNER`, `GROUP`, `PHONE` ou `SYSTEM`), porque nascem também no webhook e no worker; ver `docs/painel/crm/domain.md#trilha-do-crm-e-do-transbordo`.
 - `log.ts` — escrita. `recordAudit()` (evento avulso) e `recordChange()` (calcula o diff entre dois objetos e só grava se algo mudou). Resolve ator, tenant e IP sozinho a partir da sessão/headers.
 - `diff.ts` — `diffFields(before, after)`: reduz dois objetos aos campos que realmente mudaram. Comparação por valor (datas por timestamp, JSON por conteúdo), não por referência.
 - `query.ts` — leitura para o painel: `listAuditLogs(filters)` com paginação por cursor, `getAuditLog(id)` e `auditFilterOptions()`.

@@ -6,14 +6,16 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { payloadTooLarge } from "@/lib/rate-limit";
+import { payloadTooLarge, rateLimit } from "@/lib/rate-limit";
+import { requireProductAccess } from "@/lib/require-product";
 import { strongPassword } from "@/lib/password-schema";
 import { ensureAffiliate } from "@/modules/affiliates/service";
 import { getAccountRoles } from "@/modules/affiliates/roles";
 import { recordAudit, recordChange } from "@/modules/audit/log";
 import { getServiceArea, saveServiceArea } from "@/modules/lead-insights/service-area-store";
+import { cancelTeamWhatsappLink, removeTeamWhatsapp, startTeamWhatsappLink } from "@/modules/crm/team-whatsapp";
 
-type Result = { ok: boolean; error?: string; info?: string };
+type Result = { ok: boolean; error?: string; info?: string; code?: "validation" | "auth" | "forbidden" | "network" | "server" };
 
 const profileSchema = z.object({
   name: z.string().trim().min(1, "Informe seu nome"),
@@ -208,4 +210,54 @@ export async function saveServiceAreaAction(_prev: Result | null, formData: Form
   revalidatePath("/configuracoes");
   revalidatePath("/relatorios");
   return { ok: true, info: "Área de atendimento salva." };
+}
+
+// ------------------------------------------- WhatsApp pessoal na equipe (CRM-05)
+
+export type TeamWhatsappResult = Result & { linkCode?: string; expiresAt?: string; phone?: string };
+
+const TEAM_LINK_REFUSED: Record<"invalid" | "taken" | "already_verified", string> = {
+  invalid: "Informe um celular do Brasil com DDD, por exemplo (11) 98765-4321.",
+  taken: "Este número já está ligado a outra pessoa da equipe.",
+  already_verified: "Este número já está confirmado no seu usuário.",
+};
+
+/**
+ * Guarda o número como pendente e devolve o código de confirmação. O código só
+ * existe nesta resposta: no banco fica o hash. Só quem usa o produto chega aqui
+ * (`requireProductAccess`); quem só afilia não atende pelo grupo.
+ */
+export async function startTeamWhatsappAction(_prev: TeamWhatsappResult | null, formData: FormData): Promise<TeamWhatsappResult> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+
+  const { session } = await requireProductAccess();
+  const { id: userId, tenantId } = session.user;
+  if (!(await rateLimit("crm:team-link:start", `${tenantId}:${userId}`, 10, 3_600)).allowed) {
+    return { ok: false, code: "validation", error: "Muitos códigos gerados em pouco tempo. Tente de novo em uma hora." };
+  }
+  const result = await startTeamWhatsappLink(tenantId, userId, String(formData.get("phone") ?? ""));
+  if (result.status !== "started") return { ok: false, code: "validation", error: TEAM_LINK_REFUSED[result.status] };
+
+  await recordAudit({ event: "account.whatsapp_link_started", target: { type: "User", id: userId, label: session.user.email } });
+  revalidatePath("/configuracoes");
+  return { ok: true, info: "Código gerado. Mande a mensagem do seu WhatsApp.", linkCode: result.code,
+    expiresAt: result.expiresAt.toISOString(), phone: result.phone };
+}
+
+export async function cancelTeamWhatsappAction(): Promise<Result> {
+  const { session } = await requireProductAccess();
+  await cancelTeamWhatsappLink(session.user.tenantId, session.user.id);
+  revalidatePath("/configuracoes");
+  return { ok: true, info: "Pedido cancelado." };
+}
+
+export async function removeTeamWhatsappAction(): Promise<Result> {
+  const { session } = await requireProductAccess();
+  const removed = await removeTeamWhatsapp(session.user.tenantId, session.user.id);
+  if (removed) {
+    await recordAudit({ event: "account.whatsapp_removed", target: { type: "User", id: session.user.id, label: session.user.email } });
+  }
+  revalidatePath("/configuracoes");
+  return { ok: true, info: "WhatsApp desligado do seu usuário." };
 }

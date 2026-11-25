@@ -58,6 +58,12 @@ const incoming: IncomingMessage = {
   isFromMe: false,
 };
 
+const contactEvidence = {
+  tenantId: "tenant-1",
+  at: expect.any(Date),
+  proof: { provider: "evolution", externalId: "inst-1", sender: incoming.fromPhone, receiver: null },
+};
+
 const provider = {
   name: "evolution",
   getMediaAsBase64: mocks.getMediaAsBase64,
@@ -106,7 +112,7 @@ describe("áudio no histórico do WhatsApp", () => {
     expect(mocks.transcribeAudio).not.toHaveBeenCalled();
     // O arquivo do teste não é OGG e a Evolution não mandou duração: não medido.
     expect(mocks.appendMessage).toHaveBeenCalledWith(
-      "conversa-1", "user", "[Áudio]", undefined, "audio-in-1", "https://cdn.test/recebido.ogg", null,
+      "conversa-1", "user", "[Áudio]", undefined, "audio-in-1", "https://cdn.test/recebido.ogg", null, contactEvidence,
     );
     expect(mocks.runAgentTurn).not.toHaveBeenCalled();
   });
@@ -117,7 +123,7 @@ describe("áudio no histórico do WhatsApp", () => {
     await processIncomingWhatsapp(incoming, provider);
 
     expect(mocks.appendMessage).toHaveBeenCalledWith(
-      "conversa-1", "user", "[Áudio]", undefined, "audio-in-1", "https://cdn.test/recebido.ogg", null,
+      "conversa-1", "user", "[Áudio]", undefined, "audio-in-1", "https://cdn.test/recebido.ogg", null, contactEvidence,
     );
     expect(mocks.runAgentTurn).not.toHaveBeenCalled();
   });
@@ -127,8 +133,10 @@ describe("áudio no histórico do WhatsApp", () => {
 
     await processIncomingWhatsapp({ ...incoming, isFromMe: true, messageKeyId: "audio-out-1" }, provider);
 
+    // CRM-09: resposta pelo celular da clínica, sem responsável = não identificada.
     expect(mocks.appendMessage).toHaveBeenCalledWith(
       "conversa-1", "assistant", "Quero agendar", "human", "audio-out-1", "https://cdn.test/recebido.ogg", null,
+      undefined, { via: "phone", userId: null },
     );
     expect(mocks.runAgentTurn).not.toHaveBeenCalled();
     expect(mocks.conversationUpdate).toHaveBeenCalledWith({
@@ -164,7 +172,7 @@ describe("áudio no histórico do WhatsApp", () => {
 
     await processIncomingWhatsapp({ ...incoming, audioSeconds: 90 }, provider);
 
-    expect(mocks.appendMessage).toHaveBeenCalledWith("conversa-1", "user", "[Áudio]", undefined, "audio-in-1", null, 90);
+    expect(mocks.appendMessage).toHaveBeenCalledWith("conversa-1", "user", "[Áudio]", undefined, "audio-in-1", null, 90, contactEvidence);
     expect(mocks.runAgentTurn).not.toHaveBeenCalled();
   });
 

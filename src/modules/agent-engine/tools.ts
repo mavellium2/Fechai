@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { moveLeadToStage } from "@/modules/crm/automatic-stage";
 import { recordReportEvent } from "@/modules/reports/events";
 import { AvailabilityUnavailableError } from "@/modules/scheduling/availability-error";
 import type { LlmToolSchema } from "@/modules/ai";
@@ -14,7 +15,8 @@ import { dayKeyInZone as dayKeyOf, formatInZone, parseLocalDateTime } from "@/mo
 import { parseKind } from "@/modules/scheduling/dimensions";
 import { clinicorpConfirmationPending } from "@/modules/scheduling/clinicorp";
 import { DISQUALIFY_REASONS, parseReason } from "./disqualify";
-import { notifyHandoffGroup, handoffToolDescription, type HandoffConfig } from "./handoff";
+import { handoffPausesAgent, notifyHandoffGroup, handoffToolDescription, type HandoffConfig } from "./handoff";
+import type { HandoffTrigger } from "./handoff-notice";
 import { ACTION_BY_KEY, type ActionKey } from "./actions";
 import { offerAlternativeSlots, runSchedulingTool, SCHEDULING_TOOLS, schedulingToolAllowed } from "./scheduling-tools";
 import { allVariableDefinitions, parseVariableDefinitions, rememberConversationVariables, type VariableDefinition } from "./variables";
@@ -31,6 +33,7 @@ export type ToolContext = {
   tenantId: string;
   leadId: string;
   conversationId: string;
+  incomingMessageId?: string;
   /** Quem está atendendo — a agenda e a config de horário são por agente. */
   agentId: string | null;
   /** Resposta de segurança: encerra o turno sem deixar a IA confirmar uma falha. */
@@ -139,17 +142,26 @@ async function registerUnanswered(ctx: ToolContext, question: unknown) {
 /**
  * Marca "precisa de você" e avisa o grupo da equipe na TRANSIÇÃO — o
  * `needsHuman: false` no filtro é o que impede aviso repetido quando o LLM
- * chama a tool de novo. Usada por `handoff_human` e pela regra "passar para a
- * equipe" das perguntas sem resposta.
+ * chama a tool de novo. Usada por `handoff_human`, pela regra "passar para a
+ * equipe" das perguntas sem resposta e pela regra da campanha.
+ *
+ * Com "Enquanto aguarda humano, a IA: pausa" (CRM-06), a mesma escrita liga
+ * `agentPaused`: a resposta deste turno ainda sai (é a despedida), e a próxima
+ * mensagem do contato não recebe IA até alguém devolver a conversa.
  */
-export async function transferToHuman(ctx: ToolContext, reason?: string) {
+export async function transferToHuman(ctx: ToolContext, reason?: string, trigger: HandoffTrigger = "agent") {
+  const at = new Date();
+  const pause = await handoffPausesAgent(ctx.tenantId, ctx.agentId);
   const marked = await prisma.conversation.updateMany({
     where: { id: ctx.conversationId, tenantId: ctx.tenantId, needsHuman: false },
-    data: { needsHuman: true },
+    data: pause ? { needsHuman: true, agentPaused: true } : { needsHuman: true },
   });
   if (marked.count > 0) {
+    await moveLeadToStage(ctx.tenantId, ctx.leadId, "waiting_human", "ai", {
+      reason: "handoff", conversationId: ctx.conversationId, key: ctx.incomingMessageId, at,
+    });
     await recordReportEvent({ tenantId: ctx.tenantId, conversationId: ctx.conversationId, kind: "handoff" });
-    await notifyHandoffGroup(ctx.tenantId, ctx.agentId, ctx.conversationId, { reason });
+    await notifyHandoffGroup(ctx.tenantId, ctx.agentId, ctx.conversationId, { reason, trigger });
   }
 }
 
@@ -184,7 +196,7 @@ export async function runToolHandler(
   }
   if (key === CAMPAIGN_HANDOFF) {
     if (ctx.dryRun) return "Simulação: a conversa seria passada para a equipe. Diga que a equipe vai entrar em contato.";
-    await transferToHuman(ctx, str(args.reason) ?? "Lead da campanha quer data ou horário fora da campanha");
+    await transferToHuman(ctx, str(args.reason) ?? "Lead da campanha quer data ou horário fora da campanha", "campaign");
     return "Conversa passada para a equipe. Diga ao contato que a equipe vai entrar em contato.";
   }
   if (key === "report_unanswered") {
@@ -193,14 +205,15 @@ export async function runToolHandler(
     // equipe. No teste também marca — é o comportamento que o dono quer ver.
     const handOff = gap.mode === "handoff";
     if (handOff) {
-      await transferToHuman(ctx, `Pergunta que o agente não soube responder: ${str(args.question) ?? "ver conversa"}`)
+      await transferToHuman(ctx, `Pergunta que o agente não soube responder: ${str(args.question) ?? "ver conversa"}`, "unanswered")
         .catch((err) => console.error("[tools] transbordo da pergunta sem resposta falhou", err));
     }
     return unansweredToolResult(gap.status, handOff);
   }
   if (key === LEAD_INSIGHT_TOOL) {
     // Nunca lança e nunca derruba o turno: o registro é um brinde do atendimento.
-    return leadInsightToolResult(await recordLeadInsight({
+    const at = new Date();
+    const result = await recordLeadInsight({
       tenantId: ctx.tenantId,
       conversationId: ctx.conversationId,
       city: args.city,
@@ -209,7 +222,12 @@ export async function runToolHandler(
       firstQuestionText: args.first_question_text,
       lossReasonCategory: args.loss_reason_category,
       lossReasonText: args.loss_reason_text,
-    }));
+    });
+    if (result.status === "saved" && result.fields.includes("lossReason")
+      && (args.loss_reason_category === "concorrente" || args.loss_reason_category === "sem_interesse")) {
+      await moveLeadToStage(ctx.tenantId, ctx.leadId, "lost", "ai", { reason: "declared_loss", conversationId: ctx.conversationId, key: ctx.incomingMessageId, at });
+    }
+    return leadInsightToolResult(result);
   }
   if (key === "remember_variables") {
     try {
@@ -526,7 +544,8 @@ const TOOLS: Record<ActionKey, ToolDef> = {
     },
     handler: async (ctx, args) => {
       // Avisa quando entra em prioridade, uma vez mesmo se o LLM repetir a tool.
-      await transferToHuman(ctx, typeof args.reason === "string" ? args.reason : undefined);
+      await transferToHuman(ctx, typeof args.reason === "string" ? args.reason : undefined,
+        args.unanswered === true ? "unanswered" : "agent");
 
       if (args.unanswered === true) {
         const gap = await registerUnanswered(ctx, args.question ?? args.reason);
@@ -563,10 +582,14 @@ const TOOLS: Record<ActionKey, ToolDef> = {
       // `disqualifiedAt: null` no filtro mantém o PRIMEIRO carimbo: se o
       // contato voltar e o agente desqualificar de novo, a data original é a
       // que conta — senão o mesmo contato entraria no relatório de dois meses.
-      await prisma.lead.updateMany({
+      const at = new Date();
+      const marked = await prisma.lead.updateMany({
         where: { id: ctx.leadId, tenantId: ctx.tenantId, disqualifiedAt: null },
-        data: { disqualifiedAt: new Date(), disqualifiedReason: reason },
+        data: { disqualifiedAt: at, disqualifiedReason: reason },
       });
+      if (marked?.count) {
+        await moveLeadToStage(ctx.tenantId, ctx.leadId, "lost", "ai", { reason: "disqualified", conversationId: ctx.conversationId, key: ctx.incomingMessageId, at });
+      }
 
       // A conversa NÃO é marcada como `needsHuman` — o ponto da triagem é
       // exatamente não ocupar uma pessoa. Também não encerramos a conversa: se

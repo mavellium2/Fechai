@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { crmOriginLabel } from "@/modules/crm/lead-origin";
 import { getWhatsAppProviderForInstance } from "@/modules/whatsapp/meta-config";
 import {
   findWhatsappChannel,
@@ -7,6 +8,7 @@ import {
   pickWhatsappChannel,
 } from "@/modules/whatsapp/instances";
 import type { WhatsAppGroup } from "@/modules/whatsapp/provider";
+import { openHandoffNotice, recordHandoffNoticeSent, type HandoffTrigger } from "./handoff-notice";
 
 /**
  * Configuração da ação "Transferir para humano", guardada em `TenantAction.config`
@@ -33,7 +35,15 @@ export type HandoffConfig = {
    * (`handoffToolDescription`). Vazio: o agente decide sozinho, como antes.
    */
   groupReason: string;
+  /**
+   * O que a IA faz enquanto a conversa espera alguém da equipe (CRM-06):
+   * `continue` (padrão, o comportamento de sempre) ou `pause` (para de
+   * responder até alguém devolver a conversa para o agente).
+   */
+  whileWaiting: HandoffWhileWaiting;
 };
+
+export type HandoffWhileWaiting = "continue" | "pause";
 
 export const MAX_GROUP_NAME = 100;
 export const MAX_GROUP_REASON = 500;
@@ -43,6 +53,7 @@ export const DEFAULT_HANDOFF_CONFIG: HandoffConfig = {
   groupId: null,
   groupName: null,
   groupReason: "",
+  whileWaiting: "continue",
 };
 
 /** Aceita o JID completo (`120363...@g.us`) ou só os dígitos, e normaliza. */
@@ -77,15 +88,19 @@ export function parseHandoffConfig(raw: unknown): HandoffConfig {
     groupName,
     groupReason:
       typeof c.groupReason === "string" ? c.groupReason.trim().slice(0, MAX_GROUP_REASON) : "",
+    // Só "pause" explícito pausa: valor ausente, antigo ou estranho mantém a IA
+    // respondendo, que é o que toda conta fazia antes desta opção existir.
+    whileWaiting: c.whileWaiting === "pause" ? "pause" : "continue",
   };
 }
 
 /** Resumo em uma linha — usado no card da ação, fechado. */
 export function describeHandoff(cfg: HandoffConfig): string {
-  if (!cfg.notifyGroup || !cfg.groupId) return "marca a conversa como “precisa de você”";
+  const pause = cfg.whileWaiting === "pause" ? " e pausa a IA" : "";
+  if (!cfg.notifyGroup || !cfg.groupId) return `marca a conversa como “precisa de você”${pause}`;
   return cfg.groupName
-    ? `também avisa a equipe no grupo “${cfg.groupName}”`
-    : "também avisa a equipe em um grupo do WhatsApp";
+    ? `também avisa a equipe no grupo “${cfg.groupName}”${pause}`
+    : `também avisa a equipe em um grupo do WhatsApp${pause}`;
 }
 
 const HANDOFF_TOOL_BASE = "Transfere a conversa para um atendente humano. Use quando o contato pedir uma pessoa, quando houver uma pergunta que você não pode responder com a base disponível ou quando a equipe precisar tomar uma decisão. Não marque prioridade apenas porque o contato demonstrou interesse.";
@@ -101,10 +116,15 @@ const HANDOFF_TOOL_BASE = "Transfere a conversa para um atendente humano. Use qu
  * opção na tela; desligada, o texto fica guardado e sem efeito.
  */
 export function handoffToolDescription(cfg?: HandoffConfig): string {
-  if (!cfg?.notifyGroup || !cfg.groupId) return HANDOFF_TOOL_BASE;
+  // Com a pausa, esta é a última resposta da IA na conversa: ela precisa saber
+  // disso para despedir-se em vez de prometer o que não vai mais responder.
+  const pause = cfg?.whileWaiting === "pause"
+    ? " Depois de transferir, você não responde mais nesta conversa até a equipe devolvê-la: diga ao contato que alguém da equipe vai continuar o atendimento."
+    : "";
+  if (!cfg?.notifyGroup || !cfg.groupId) return `${HANDOFF_TOOL_BASE}${pause}`;
   const reason = cfg.groupReason.replace(/\s+/g, " ").replace(/[\s.;]+$/, "");
   const trigger = reason ? ` Use sempre que: ${reason}.` : "";
-  return `${HANDOFF_TOOL_BASE}${trigger} Ao transferir, envia um aviso com nome, número e resumo da conversa ao grupo interno da equipe no WhatsApp. O contato nunca é adicionado ao grupo. Informe no motivo o que o contato quer e por que precisa de prioridade.`;
+  return `${HANDOFF_TOOL_BASE}${trigger} Ao transferir, envia um aviso com nome, número, origem, resumo e motivo ao grupo interno da equipe no WhatsApp. O contato nunca é adicionado ao grupo. Informe no motivo o que o contato quer e por que precisa de prioridade.${pause}`;
 }
 
 export type GroupListResult =
@@ -136,7 +156,7 @@ export async function listWhatsAppGroups(tenantId: string): Promise<GroupListRes
           ok: false,
           reason: "unsupported",
           error:
-            "Só a API oficial da Meta está conectada, e ela não dá acesso a grupos. Avisar a equipe em um grupo só funciona com o número conectado por QR code — conecte-o em Integrações.",
+            "Só a API oficial da Meta está conectada, e ela não dá acesso a grupos. Avisar a equipe em um grupo só funciona com o número conectado por QR code — conecte-o em Integrações. Enquanto isso, o transbordo continua no Fechai: o card vai para Aguardando humano e a conversa aparece em Precisa de você.",
         };
       }
       return {
@@ -202,10 +222,43 @@ export async function saveHandoffConfig(
 }
 
 /**
- * Avisa a equipe no grupo interno do agente, se a ação "Transferir
- * para humano" estiver LIGADA e configurada para isso. Chamado quando a tool
- * `handoff_human` transfere a conversa ou quando o atendente reage pelo próprio
- * número do WhatsApp para assumi-la.
+ * Pausa a IA ao transferir? Só com a ação ligada e a opção "pausa" escolhida
+ * (CRM-06). **Nunca lança**: na dúvida a IA continua respondendo, que é o
+ * comportamento de sempre.
+ */
+export async function handoffPausesAgent(tenantId: string, agentId: string | null | undefined): Promise<boolean> {
+  if (!agentId) return false;
+  try {
+    return (await getActiveHandoffConfig(tenantId, agentId))?.whileWaiting === "pause";
+  } catch (err) {
+    console.error("[handoff] falha ao ler a pausa da transferência", err);
+    return false;
+  }
+}
+
+/**
+ * Liga os comandos do grupo na linha final do aviso ("assumo", 👍 e "#ia"),
+ * lidos por `crm/handoff-group.ts` (CRM-08) no webhook da Evolution.
+ */
+export const HANDOFF_GROUP_COMMANDS = true;
+
+/** Base do link do card. `null` sem a URL do app configurada (o aviso sai sem link). */
+export function panelBaseUrl(): string | null {
+  const configured = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL;
+  return configured ? configured.trim().replace(/\/+$/, "") : null;
+}
+
+/**
+ * Registra o transbordo (`HandoffNotice`) e avisa a equipe no grupo interno do
+ * agente, se a ação "Transferir para humano" estiver LIGADA e configurada para
+ * isso. Chamado quando a tool `handoff_human` (ou a fila de perguntas, ou a
+ * regra da campanha) transfere a conversa, e quando o atendente reage pelo
+ * próprio número do WhatsApp para assumi-la.
+ *
+ * A espera é registrada mesmo sem grupo (conta só com a Meta, aviso desligado):
+ * o transbordo acontece no Fechai de qualquer jeito. Com uma espera já aberta
+ * para a conversa, nenhum aviso novo vai ao grupo — só a espera é atualizada.
+ * O id da mensagem enviada fica em `HandoffNotice.messageId`.
  *
  * **Nunca lança**, e por isso o `try` cobre as consultas ao banco também, não
  * só a chamada de rede. Mesma regra do resto de `scheduling`/`voice`: nada aqui
@@ -223,11 +276,36 @@ export async function notifyHandoffGroup(
   tenantId: string,
   agentId: string | null,
   conversationId: string,
-  options: { isTest?: boolean; reason?: string } = {},
+  options: { isTest?: boolean; reason?: string; trigger?: HandoffTrigger } = {},
 ): Promise<void> {
-  if (!agentId || options.isTest) return;
+  if (options.isTest) return;
 
   try {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: {
+        isTest: true,
+        summary: true,
+        leadId: true,
+        tenant: { select: { crmEnabled: true, status: true } },
+        lead: { select: { name: true, phone: true, isTest: true, originChannel: true, adOrigin: { select: { tenantId: true } } } },
+        messages: {
+          where: { role: "user" },
+          orderBy: { createdAt: "desc" },
+          take: 3,
+          select: { content: true },
+        },
+      },
+    });
+    if (!conversation || conversation.isTest || conversation.lead.isTest) return;
+
+    const notice = await openHandoffNotice({
+      tenantId, conversationId, trigger: options.trigger ?? "agent", reason: options.reason,
+    });
+    // Espera já aberta: a equipe já foi avisada deste contato.
+    if (notice && !notice.created) return;
+    if (!agentId) return;
+
     const config = await getActiveHandoffConfig(tenantId, agentId);
     if (!config?.notifyGroup || !config.groupId) return;
 
@@ -239,31 +317,26 @@ export async function notifyHandoffGroup(
     const provider = getWhatsAppProviderForInstance(instance);
     if (!provider.sendGroupMessage || !provider.isConfigured()) return;
 
-    const conversation = await prisma.conversation.findFirst({
-      where: { id: conversationId, tenantId },
-      select: {
-        isTest: true,
-        summary: true,
-        lead: { select: { name: true, phone: true, isTest: true } },
-        messages: {
-          where: { role: "user" },
-          orderBy: { createdAt: "desc" },
-          take: 3,
-          select: { content: true },
-        },
-      },
-    });
-    if (!conversation || conversation.isTest || conversation.lead.isTest) return;
-
     // Reusa o resumo salvo; se ainda não existe, usa as últimas falas reais.
     // Não gera uma segunda chamada de IA só para notificar a equipe.
     const summary = conversation.summary?.trim() || conversation.messages
       .map((m) => m.content).reverse().join(" · ");
-    await provider.sendGroupMessage(
+    const base = panelBaseUrl();
+    const crmOn = conversation.tenant.crmEnabled && conversation.tenant.status === "active";
+    const messageId = await provider.sendGroupMessage(
       instance.externalId,
       config.groupId,
-      formatHandoffNotice({ ...conversation.lead, summary, reason: options.reason }),
+      formatHandoffNotice({
+        name: conversation.lead.name,
+        phone: conversation.lead.phone,
+        origin: crmOriginLabel(conversation.lead.originChannel, conversation.lead.adOrigin?.tenantId === tenantId),
+        summary,
+        reason: options.reason,
+        link: crmOn && base ? `${base}/crm?lead=${encodeURIComponent(conversation.leadId)}` : null,
+        commands: HANDOFF_GROUP_COMMANDS,
+      }),
     );
+    if (notice) await recordHandoffNoticeSent(tenantId, notice.id, { groupId: config.groupId, messageId });
   } catch (err) {
     console.error("[handoff] falha ao avisar a equipe no grupo do WhatsApp", err);
   }
@@ -274,19 +347,38 @@ function noticeLine(value: string | null | undefined, maxLength: number): string
   return line.length > maxLength ? `${line.slice(0, maxLength - 1).trimEnd()}…` : line;
 }
 
-/** O aviso tem três linhas; nenhum dado do contato pode criar outro campo. */
+const UNKNOWN_ORIGIN = "Origem não registrada";
+
+/**
+ * O aviso do grupo (CRM-06): nome, número, origem, resumo, motivo e link do
+ * card, uma informação por linha. Nenhum dado do contato cria outra linha
+ * (quebras viram espaço). O motivo só aparece quando o resumo ainda não o diz,
+ * e o link só quando há card para abrir (CRM ligado e URL do app configurada).
+ */
 export function formatHandoffNotice(input: {
   name: string | null;
   phone: string;
   summary: string | null;
   reason?: string;
+  origin?: string | null;
+  link?: string | null;
+  commands?: boolean;
 }): string {
   const digits = input.phone.replace(/\D/g, "");
   const br = /^55(\d{2})(\d{4,5})(\d{4})$/.exec(digits);
   const phone = br ? `+55 ${br[1]} ${br[2]}-${br[3]}` : `+${digits}`;
   const summary = noticeLine(input.summary, 600);
   const reason = noticeLine(input.reason, 300);
-  const detail = reason && !summary.toLocaleLowerCase("pt-BR").includes(reason.toLocaleLowerCase("pt-BR"))
-    ? `Motivo da prioridade: ${reason}` : "";
-  return `Nome: ${noticeLine(input.name, 150) || "Não informado"}\nNúmero: ${phone}\nResumo: ${[summary, detail].filter(Boolean).join(" — ") || "Atendimento humano solicitado."}`;
+  const showReason = reason && !summary.toLocaleLowerCase("pt-BR").includes(reason.toLocaleLowerCase("pt-BR"));
+  const origin = noticeLine(input.origin, 60);
+  const link = input.link && /^https?:\/\/\S+$/.test(input.link) ? input.link : "";
+  return [
+    `Nome: ${noticeLine(input.name, 150) || "Não informado"}`,
+    `Número: ${phone}`,
+    `Origem: ${!origin || origin === UNKNOWN_ORIGIN ? "não registrada" : origin}`,
+    `Resumo: ${summary || "Atendimento humano solicitado."}`,
+    ...(showReason ? [`Motivo: ${reason}`] : []),
+    ...(link ? [`Card: ${link}`] : []),
+    ...(input.commands ? ["Responda *assumo* ou reaja 👍 para ficar com este lead. *#ia* devolve para a IA."] : []),
+  ].join("\n");
 }

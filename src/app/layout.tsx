@@ -57,7 +57,7 @@ export const metadata: Metadata = {
     },
   },
   // Preencha quando registrar o domínio no Google Search Console — é o passo
-  // que efetivamente inicia a indexação (ver docs/SEO.md).
+  // que efetivamente inicia a indexação (ver docs/plataforma/site-publico/SEO.md).
   verification: {
     ...(process.env.GOOGLE_SITE_VERIFICATION && {
       google: process.env.GOOGLE_SITE_VERIFICATION,

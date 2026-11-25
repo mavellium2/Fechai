@@ -26,6 +26,16 @@ antes de criar. Também recupera consultas futuras que ficaram sem envio antes
 da fila existir. Não manda mensagens ao paciente. Lembretes locais aguardam o
 envio concluir. Exige `db push` + client gerado nos processos web e worker.
 
+A fila `handoff-sla` (prazo do transbordo, CRM-10) roda a cada
+`HANDOFF_SLA_SCAN_EVERY_SECONDS` (padrão 60, mínimo 15), com concorrência global 1:
+`scanHandoffSla()` (`src/modules/crm/handoff-sla.ts`) avisa o grupo no 1º prazo e
+escalona aos donos no 2º, uma vez cada, só para contas com o CRM ligado. Na mesma
+volta, `scanAutoReturn()` (`src/modules/crm/handoff-auto-return.ts`) devolve para a
+IA as conversas sem resposta humana no prazo da conta (CRM-12, desligado por padrão;
+a IA pode responder a mensagem pendente nessa hora). Ver
+`docs/painel/crm/domain.md#prazo-do-transbordo` e
+`docs/painel/crm/domain.md#devolução-automática-para-a-ia`.
+
 A fila `icloud-calendar` (Calendário da Apple) roda a cada `ICLOUD_SCAN_EVERY_SECONDS`
 (padrão 60, mínimo 15), com concorrência global 1, e faz duas coisas em ordem:
 `scanIcloudSync()` (`src/modules/scheduling/icloud-sync.ts`) primeiro apaga o evento
@@ -222,7 +232,8 @@ npm run worker       # tsx workers/follow-up-worker/index.ts
 
 Env: `REDIS_URL`, `FOLLOWUP_SCAN_EVERY_MINUTES` (intervalo da varredura, padrão 15),
 `CLINICORP_REMINDER_SCAN_EVERY_MINUTES` (lembretes do Clinicorp, padrão 5),
-`ICLOUD_SCAN_EVERY_SECONDS` (envio e saúde do Calendário da Apple, padrão 60).
+`ICLOUD_SCAN_EVERY_SECONDS` (envio e saúde do Calendário da Apple, padrão 60),
+`HANDOFF_SLA_SCAN_EVERY_SECONDS` (prazo do transbordo do CRM, padrão 60).
 
 ## Follow-up em esteira (`scan.ts`)
 

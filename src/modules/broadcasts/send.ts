@@ -79,6 +79,7 @@ export async function sendBroadcastRecipient(
       campaign.tenantId,
       recipient.phone,
       recipient.name ?? undefined,
+      recipient.isTest ? undefined : { originChannel: "broadcast" },
     );
     // Contato novo, vindo só do Disparo: a conversa é da Meta desde já, senão
     // uma resposta manual antes de ele escrever sairia pelo QR — primeiro

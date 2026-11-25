@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { lockCrmAdmission, newLeadCrmFields } from "@/modules/crm/admission";
 import { canonicalPhone } from "./blocklist";
 import { historyPhoneAliases, type HistoryMessage } from "./evolution-history";
 import type { RecoveryStats } from "./history-recovery-types";
@@ -22,7 +23,8 @@ export async function importHistoryMessages(db: Prisma.TransactionClient, tenant
     group.push(message);
     groups.set(contactKey, group);
   }
-  // Mesma ordem de locks para todas as páginas; webhook segura só um contato.
+  if (groups.size) await lockCrmAdmission(db, tenantId, "shared");
+  // Primeiro a conta, depois os contatos em ordem; o webhook segura só um contato.
   for (const [contactKey, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${contactKey}))`;
     const pending: HistoryMessage[] = [];
@@ -45,6 +47,7 @@ export async function importHistoryMessages(db: Prisma.TransactionClient, tenant
     if (!lead) {
       lead = await db.lead.create({ data: { tenantId, phone: oldest.phone,
         name: pending.find((m) => !m.fromMe && m.name)?.name, createdAt: oldest.at, updatedAt: latest.at,
+        ...await newLeadCrmFields(db, tenantId),
         conversation: { create: { tenantId, agentPaused: true, whatsappProvider: "evolution", updatedAt: latest.at } },
       }, include: { conversation: true } });
       createdLead = true;

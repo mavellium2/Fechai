@@ -3,15 +3,18 @@
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { AudioLines, ChevronDown, Send } from "lucide-react";
 import posthog from "posthog-js";
-import { Alert } from "@/components/ui/alert";
+import { Alert, FormFeedback } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
+import { useActionToast } from "@/components/ui/toast";
+import type { ActionResult } from "@/components/ui/toast/types";
+import { CRM_REPLY_LIMIT } from "@/modules/crm/limits";
 import { sendManualAudioMessage, sendManualMessage, sendTestClientMessage } from "./actions";
 import { RecordButton, VoiceMessageRecorder } from "./VoiceMessageRecorder";
 
-type Result = { ok: boolean; error?: string; status?: string };
+type Result = ActionResult & { ok: boolean; status?: string };
 
 /** De que lado a mensagem entra: "você" (resposta manual) ou o cliente. */
 type Sender = "human" | "client";
@@ -62,6 +65,7 @@ export function SendMessageForm({
   isTest = false,
   agentPaused = false,
   voiceReady = false,
+  textReplyAction,
 }: {
   conversationId: string;
   isTest?: boolean;
@@ -73,8 +77,16 @@ export function SendMessageForm({
    * é pior que não oferecer.
    */
   voiceReady?: boolean;
+  /** A ficha do CRM usa um envio de texto que reconfere o canal na action. */
+  textReplyAction?: (previous: Result | null, data: FormData) => Promise<Result>;
 }) {
-  const [state, formAction, pending] = useActionState<Result | null, FormData>(action, null);
+  const [draft, setDraft] = useState("");
+  const [state, formAction, pending] = useActionState<Result | null, FormData>(async (previous, form) => {
+    const result = await (textReplyAction ?? action)(previous, form);
+    if (textReplyAction && result.ok) setDraft("");
+    return result;
+  }, null);
+  useActionToast(textReplyAction ? state : null, Boolean(textReplyAction && pending), { entity: "resposta", gender: "f" });
   const [sender, setSender] = useState<Sender>(isTest ? "client" : "human");
   const [showSender, setShowSender] = useState(false);
   // Modo gravação: substitui o campo de texto enquanto está ativo, como no
@@ -85,6 +97,7 @@ export function SendMessageForm({
   // estar no FormData no momento do submit, sem esperar re-render.
   const asAudioRef = useRef<HTMLInputElement>(null);
   const senderPanelId = useId();
+  const inputId = useId();
 
   useEffect(() => {
     if (state?.ok) formRef.current?.reset();
@@ -106,15 +119,15 @@ export function SendMessageForm({
    * antes de usá-la com um cliente. Os dois só aparecem respondendo como VOCÊ:
    * escrevendo "como cliente" o que se testa é o agente reagindo.
    */
-  const canRecord = !asClient;
-  const canSpeakText = voiceReady && !asClient;
+  const canRecord = !asClient && !textReplyAction;
+  const canSpeakText = voiceReady && !asClient && !textReplyAction;
   /** Por que o botão de falar-o-texto está apagado. Vai no title/aria-label. */
   const speakTextHint =
     "Enviar como áudio na voz do agente: grave a voz em Agentes › Comportamento para liberar";
 
   return (
     <div className="border-t border-white/10 p-3">
-      {state?.error && (
+      {textReplyAction ? <FormFeedback error={state?.error} info={state?.info} /> : state?.error && (
         <Alert tone="danger" className="mb-2">
           {state.error}
         </Alert>
@@ -206,18 +219,22 @@ export function SendMessageForm({
           {/* Texto ou áudio: preenchido pelo botão clicado, logo antes do submit. */}
           <input type="hidden" name="as" ref={asAudioRef} defaultValue="text" />
 
-          <label htmlFor="manual-message" className="sr-only">
+          <label htmlFor={inputId} className="sr-only">
             {asClient ? "Escrever como o cliente" : "Responder manualmente"}
           </label>
           <Input
-            id="manual-message"
+            id={inputId}
             name="text"
+            className={textReplyAction ? "min-w-0" : undefined}
             placeholder={
               asClient ? "Escreva como um cliente escreveria..." : "Escreva sua resposta..."
             }
             autoComplete="off"
             required
             disabled={pending}
+            maxLength={textReplyAction ? CRM_REPLY_LIMIT : undefined}
+            value={textReplyAction ? draft : undefined}
+            onChange={textReplyAction ? (event) => setDraft(event.target.value) : undefined}
           />
 
           {canRecord && (
@@ -248,7 +265,7 @@ export function SendMessageForm({
           ) : (
             // Desabilitado com o motivo no title, em vez de ausente: some sem
             // explicação e a pessoa procura um botão que nunca esteve lá.
-            !asClient && (
+            !asClient && !textReplyAction && (
               <Button
                 type="button"
                 size="icon"

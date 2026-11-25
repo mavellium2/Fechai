@@ -46,6 +46,9 @@ const GUARDS = [
   // Encapsula requireProductAccess e devolve tenant/usuário/`canEdit` da sessão.
   // Comportamento executado em campanha-entidade-actions.test.ts.
   "requireCampaignActor",
+  // Encapsula requireProductAccess + permissão `crm:ver`.
+  // Comportamento executado em crm-permissao.test.ts.
+  "requireCrmSession",
 ];
 
 /**

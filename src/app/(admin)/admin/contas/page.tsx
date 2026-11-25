@@ -177,6 +177,7 @@ export default async function ContasPage({
                   whatsappStatus={t.whatsappInstances.length ? summarizeWhatsappStatus(t.whatsappInstances) : "—"}
                   metaWhatsappEnabled={t.metaWhatsappEnabled}
                   evolutionWhatsappEnabled={t.evolutionWhatsappEnabled}
+                  crmEnabled={t.crmEnabled}
                   messageLimitOverride={t.messageLimitOverride}
                   priceCentsOverride={t.priceCentsOverride}
                   trialEndsAt={t.trialEndsAt ? t.trialEndsAt.toISOString() : null}

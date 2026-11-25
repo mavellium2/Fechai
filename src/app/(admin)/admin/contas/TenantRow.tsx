@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { SidePanel } from "@/components/ui/side-panel";
 import { Switch } from "@/components/ui/switch";
 import { FormFeedback } from "@/components/ui/alert";
+import { CrmAccess } from "./CrmAccess";
 import { TenantDownloadButton } from "./TenantDownloadButton";
 import { UserPasswords, type TenantUser } from "./UserPasswords";
 import {
@@ -35,6 +36,7 @@ type Props = {
   metaWhatsappEnabled: boolean;
   /** Se o WhatsApp por QR (Evolution) está liberado; o admin desliga para bloquear a conta. */
   evolutionWhatsappEnabled: boolean;
+  crmEnabled: boolean;
   /** Cota de mensagens/mês fixada fora do padrão do plano (null = usa o plano). */
   messageLimitOverride: number | null;
   priceCentsOverride: number | null;
@@ -658,6 +660,8 @@ export function TenantRow(t: Props) {
             )}
 
             <UserPasswords users={t.users ?? []} />
+
+            {panelOpen && <CrmAccess tenantId={t.id} tenantName={t.name} enabled={t.crmEnabled} active={t.status === "active"} />}
 
             <section className="border-t border-white/10 pt-5">
               <p className="text-sm font-medium text-white/85">WhatsApp</p>

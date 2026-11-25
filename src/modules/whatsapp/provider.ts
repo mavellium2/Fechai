@@ -17,11 +17,31 @@ export type IncomingMessage = {
    */
   adOrigin?: AdOrigin;
   instanceExternalId: string;
+  /** Número do aparelho que recebeu o webhook da Evolution, já sem o JID. */
+  receiverPhone?: string;
   fromPhone: string;
   fromName?: string;
   text: string;
   /** true quando a mensagem veio de um grupo do WhatsApp (@g.us). */
   isGroup: boolean;
+  /**
+   * Quem escreveu dentro do grupo (só Evolution). `phone` quando o evento traz
+   * o número; `lid` quando o WhatsApp endereça a pessoa por @lid. Os dois
+   * juntos são o que permite aprender o LID de alguém da equipe (CRM-05).
+   */
+  groupSender?: { phone?: string; lid?: string };
+  /**
+   * LID do contato numa conversa privada endereçada por @lid (o telefone, em
+   * `fromPhone`, veio do JID alternativo). Só a parte antes do @.
+   */
+  contactLid?: string;
+  /**
+   * Só em grupo (Evolution): id da mensagem que esta responde citando. É o que
+   * liga um "assumo" ao aviso de transbordo (CRM-08).
+   */
+  quotedMessageId?: string;
+  /** Só em grupo (Evolution): id da mensagem que recebeu a reação. */
+  reactionTargetId?: string;
   /** A mensagem é de áudio (voz ou arquivo) — transcrita antes do turno. */
   hasAudio: boolean;
   /**
@@ -78,6 +98,8 @@ export interface WhatsAppProvider {
   getConnectionState?(
     externalId: string,
   ): Promise<{ status: WhatsAppStatus; exists: boolean; reachable: boolean }>;
+  /** Identifica o aparelho conectado agora, inclusive após trocar o QR. */
+  getConnectedPhone?(externalId: string): Promise<string | null>;
   /** Envia e devolve o key.id da mensagem no WhatsApp (null se o provedor não o expuser). */
   sendMessage(
     externalId: string,
@@ -116,6 +138,8 @@ export interface WhatsAppProvider {
     externalId: string,
     groupId: string,
     text: string,
+    /** Responde citando uma mensagem do próprio grupo (ex.: o aviso do transbordo). */
+    quotedMessageId?: string | null,
   ): Promise<string | null>;
   /**
    * Envia um arquivo (PDF) como DOCUMENTO, para um número ou grupo, com legenda.

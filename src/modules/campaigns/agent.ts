@@ -47,7 +47,7 @@ export async function campaignSlotsForTool(ctx: ToolContext, cfg: ScheduleConfig
       onNoSlots: isOverrideCampaignId(campaign.campaign.id) && campaign.rules.outside === "handoff" && !ctx.dryRun
         ? async () => {
             const { transferToHuman } = await import("@/modules/agent-engine/tools");
-            await transferToHuman(ctx, "Campanha de implantes: sem vaga em 18 ou 19/11");
+            await transferToHuman(ctx, "Campanha de implantes: sem vaga em 18 ou 19/11", "campaign");
           }
         : undefined,
     });

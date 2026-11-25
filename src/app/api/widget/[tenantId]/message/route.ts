@@ -99,7 +99,7 @@ export async function POST(
   try {
     // Visitante do site vira um Lead como outro qualquer — só o "telefone" é
     // sintético (não é WhatsApp). Mesmo padrão que o sandbox usa (ver /api/sandbox).
-    const { lead, conversation } = await getOrCreateConversation(tenantId, `web:${visitorId}`);
+    const { lead, conversation } = await getOrCreateConversation(tenantId, `web:${visitorId}`, undefined, { originChannel: "widget" });
     const { reply, status } = await runAgentTurn({
       tenantId,
       conversationId: conversation.id,

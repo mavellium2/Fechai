@@ -45,7 +45,7 @@ function revalidateContatos() {
  * pausa o agente nesta conversa, para ele não responder por cima depois.
  */
 export async function sendMessageToContact(leadId: string, text: string): Promise<Result> {
-  const { tenantId } = await requireTenant();
+  const { tenantId, session } = await requireTenant();
   const parsed = messageSchema.safeParse(text);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message };
 
@@ -59,7 +59,7 @@ export async function sendMessageToContact(leadId: string, text: string): Promis
   }
 
   const { conversation } = await getOrCreateConversation(tenantId, lead.phone, lead.name ?? undefined);
-  const res = await sendManualReply(tenantId, conversation.id, parsed.data);
+  const res = await sendManualReply(tenantId, conversation.id, parsed.data, undefined, undefined, session?.user.id);
   if (!res.ok) return res;
 
   revalidateContatos();
@@ -88,7 +88,7 @@ export async function addContact(_prev: Result | null, formData: FormData): Prom
   if (!name.success) return { ok: false, error: name.error.issues[0]?.message };
 
   const existed = await prisma.lead.findFirst({ where: { tenantId, phone } });
-  const { lead } = await getOrCreateConversation(tenantId, phone, name.data || undefined);
+  const { lead } = await getOrCreateConversation(tenantId, phone, name.data || undefined, { originChannel: "manual" });
 
   // Só o cadastro novo vira evento: reabrir a conversa de um contato que já
   // existia não é uma alteração, e registrá-la encheria a trilha de linhas

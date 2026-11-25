@@ -11,6 +11,8 @@ import type { IncomingMessage, WhatsAppProvider } from "@/modules/whatsapp/provi
  */
 
 const mocks = vi.hoisted(() => ({
+  tenantFindUnique: vi.fn(),
+  crmTransaction: vi.fn(),
   instanceFindFirst: vi.fn(),
   messageFindUnique: vi.fn(),
   messageFindFirst: vi.fn(),
@@ -29,6 +31,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    tenant: { findUnique: mocks.tenantFindUnique },
+    $transaction: mocks.crmTransaction,
     whatsappInstance: { findFirst: mocks.instanceFindFirst },
     message: {
       findUnique: mocks.messageFindUnique,
@@ -97,6 +101,7 @@ beforeEach(() => {
     status: "connected",
     tenant: { whatsappIgnoreGroups: false },
   });
+  mocks.tenantFindUnique.mockResolvedValue({ crmEnabled: false, status: "active" });
   mocks.messageFindUnique.mockResolvedValue(null);
   mocks.messageFindFirst.mockResolvedValue(null);
   mocks.messageUpdate.mockResolvedValue({});
@@ -108,6 +113,18 @@ beforeEach(() => {
   mocks.handleBlockButton.mockResolvedValue({ handled: true });
   mocks.dispatchFindFirst.mockResolvedValue(null);
   conversa(null);
+});
+
+it("preserva o webhook do atendente mesmo se a transação do CRM falhar", async () => {
+  mocks.tenantFindUnique.mockResolvedValue({ crmEnabled: true, status: "active" });
+  mocks.crmTransaction.mockRejectedValueOnce(new Error("CRM temporariamente indisponível"));
+
+  const result = await processIncomingWhatsapp({ ...BASE, isFromMe: true, text: "Posso ajudar?" }, fakeProvider("evolution"));
+
+  expect(result.status ?? 200).toBe(200);
+  expect(result.body).toMatchObject({ ok: true, silent: "manual pelo whatsapp" });
+  expect(mocks.crmTransaction).toHaveBeenCalledOnce();
+  expect(mocks.conversationUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { needsHuman: false, agentPaused: true } }));
 });
 
 describe("Meta somente para Disparos", () => {
@@ -140,10 +157,14 @@ describe("Meta somente para Disparos", () => {
   });
 
   it("o QR continua recebendo a mensagem para a equipe quando sua IA está desligada", async () => {
-    await processIncomingWhatsapp(BASE, fakeProvider("evolution"));
+    await processIncomingWhatsapp({ ...BASE, receiverPhone: "5511990000011" }, fakeProvider("evolution"));
 
     expect(mocks.appendMessage).toHaveBeenCalledWith(
-      "conv-1", "user", BASE.text, undefined, "msg-1", undefined, undefined,
+      "conv-1", "user", BASE.text, undefined, "msg-1", undefined, undefined, {
+        tenantId: "tenant-1",
+        at: expect.any(Date),
+        proof: { provider: "evolution", externalId: "numero-1", sender: BASE.fromPhone, receiver: "5511990000011" },
+      },
     );
     expect(canaisGravados()).toEqual(["evolution"]);
     expect(mocks.runAgentTurn).not.toHaveBeenCalled();

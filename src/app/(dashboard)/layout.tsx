@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { requireOwner } from "@/lib/session";
+import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { signOut } from "@/auth";
 import { clearImpersonation } from "@/lib/impersonation";
@@ -28,6 +29,8 @@ const NAV_AFILIADO: NavItem = { href: "/afiliado", label: "Afiliado", icon: "Han
 /** Campanhas: as ações de marketing da conta. É do produto e não depende da Meta (Disparos é que depende). */
 const NAV_CAMPANHAS: NavItem = { href: "/campanhas", label: "Campanhas", icon: "Megaphone" };
 
+const NAV_CRM: NavItem = { href: "/crm", label: "CRM", icon: "Columns3" };
+
 /** Relatórios servem aos dois papéis (a aba de afiliados vive lá dentro). */
 const NAV_RELATORIOS: NavItem = { href: "/relatorios", label: "Relatórios", icon: "BarChart3" };
 
@@ -42,10 +45,14 @@ const NAV_CONFIG: NavItem = { href: "/configuracoes", label: "Configurações", 
  * um menu curto. Configurações fica sempre por último — é de lá que a pessoa
  * liga o outro papel quando quiser.
  */
-function navFor(roles: { usesProduct: boolean; isAffiliate: boolean }, metaEnabled: boolean): NavItem[] {
+function navFor(
+  roles: { usesProduct: boolean; isAffiliate: boolean },
+  features: { metaEnabled: boolean; crmEnabled: boolean },
+): NavItem[] {
   const items: NavItem[] = [];
   if (roles.usesProduct) items.push(...NAV_PRODUTO);
-  if (roles.usesProduct && metaEnabled) items.push({ href: "/disparos", label: "Disparos", icon: "Send" });
+  if (roles.usesProduct && features.crmEnabled) items.push(NAV_CRM);
+  if (roles.usesProduct && features.metaEnabled) items.push({ href: "/disparos", label: "Disparos", icon: "Send" });
   if (roles.isAffiliate) items.push(NAV_AFILIADO);
   if (roles.usesProduct) items.push(NAV_CAMPANHAS);
   items.push(NAV_RELATORIOS);
@@ -72,7 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const tenantId = session.user.tenantId;
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    select: { status: true, name: true, planKey: true, onboardingCompleted: true, metaWhatsappEnabled: true },
+    select: { status: true, name: true, planKey: true, onboardingCompleted: true, metaWhatsappEnabled: true, crmEnabled: true },
   });
 
   // Conta suspensa: bloqueia o app e orienta a contatar o suporte.
@@ -120,7 +127,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // IA, que essa conta não gasta.
   const usage = affiliateOnly ? null : await getUsageSummary(tenantId);
 
-  const navItems = navFor(roles, tenant?.metaWhatsappEnabled ?? false);
+  const navItems = navFor(roles, {
+    metaEnabled: tenant?.metaWhatsappEnabled ?? false,
+    crmEnabled: tenant?.status === "active" && tenant.crmEnabled && hasPermission(session.user.role, "crm:ver"),
+  });
 
   return (
     <PanelShell

@@ -3,11 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { moveLeadToStage } from "@/modules/crm/automatic-stage";
+import { assumeConversation } from "@/modules/crm/assignments";
+import {
+  currentAssigneeName,
+  handoffGroupText,
+  reflectHandoffInGroup,
+  returnToAiAndReply,
+  teamMemberName,
+  transferCrmConversation,
+} from "@/modules/crm/handoff-panel";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { sendManualReply } from "@/modules/agent-engine/conversation";
 import { summarizeConversation } from "@/modules/agent-engine/summary";
 import { runAgentTurn, resolveAgent } from "@/modules/agent-engine/orchestrator";
 import { recoverPendingAgentReply } from "@/modules/agent-engine/recover-pending";
+import { closeHandoffNoticesTimed } from "@/modules/agent-engine/handoff-notice";
+import { leadOfConversation, recordCrmTrail, secondsBetween } from "@/modules/crm/trail";
 import { transcribeAudio } from "@/modules/ai/transcribe";
 import { MAX_TTS_CHARS, isFishAudioConfigured, synthesize } from "@/modules/voice/fish";
 import { toSpeech } from "@/modules/voice/speech-text";
@@ -33,7 +45,7 @@ const MAX_VOICE_MESSAGE_BYTES = 8 * 1024 * 1024;
  * direto, fora da interface.
  */
 export async function resolveConversation(id: string): Promise<Result> {
-  const { tenantId } = await requireTenant();
+  const { tenantId, session } = await requireTenant();
 
   const res = await prisma.conversation.updateMany({
     where: { id, tenantId },
@@ -41,6 +53,19 @@ export async function resolveConversation(id: string): Promise<Result> {
   });
 
   if (res.count === 0) return { ok: false, error: "Conversa não encontrada." };
+  // Quem resolveu pelo painel encerrou a espera da equipe; o grupo fica sabendo
+  // só se havia uma espera aberta (o aviso que ele recebeu).
+  const at = new Date();
+  const wait = await closeHandoffNoticesTimed(tenantId, id, { status: "assumed", via: "panel", userId: session?.user.id ?? null }, at);
+  if (wait.closed > 0) {
+    if (session?.user.id) {
+      await recordCrmTrail({
+        tenantId, event: "handoff.assumed", actor: { kind: "user", userId: session.user.id }, leadId: await leadOfConversation(tenantId, id),
+        meta: { via: "panel", action: "resolve", conversationId: id, waitSeconds: secondsBetween(wait.since, at) },
+      });
+    }
+    await reflectHandoffInGroup(tenantId, id, handoffGroupText.resolved(await teamMemberName(tenantId, session?.user.id)));
+  }
 
   revalidatePath("/conversas");
   revalidatePath("/inicio");
@@ -54,8 +79,9 @@ export async function resolveConversation(id: string): Promise<Result> {
  * seria o mesmo beco sem saída que essa tela já resolveu uma vez.
  */
 export async function reopenConversation(id: string): Promise<Result> {
-  const { tenantId } = await requireTenant();
+  const { tenantId, session } = await requireTenant();
 
+  const at = new Date();
   const res = await prisma.conversation.updateMany({
     where: { id, tenantId },
     data: { needsHuman: true, agentPaused: false },
@@ -63,6 +89,7 @@ export async function reopenConversation(id: string): Promise<Result> {
 
   if (res.count === 0) return { ok: false, error: "Conversa não encontrada." };
 
+  await moveLeadToStage(tenantId, null, "waiting_human", "user", { reason: "handoff", conversationId: id, userId: session?.user.id, at });
   revalidatePath("/conversas");
   revalidatePath("/inicio");
   return { ok: true };
@@ -76,8 +103,8 @@ export async function reopenConversation(id: string): Promise<Result> {
  * usado por `sendMessageToContact` (`contatos/actions.ts`), a partir de um lead.
  */
 export async function sendManualMessage(conversationId: string, text: string): Promise<Result> {
-  const { tenantId } = await requireTenant();
-  const res = await sendManualReply(tenantId, conversationId, text);
+  const { tenantId, session } = await requireTenant();
+  const res = await sendManualReply(tenantId, conversationId, text, undefined, undefined, session?.user.id);
   if (!res.ok) return res;
 
   revalidatePath("/conversas");
@@ -100,7 +127,7 @@ export async function sendManualAudioMessage(
   conversationId: string,
   text: string,
 ): Promise<Result> {
-  const { tenantId } = await requireTenant();
+  const { tenantId, session } = await requireTenant();
 
   const trimmed = text.trim();
   if (!trimmed) return { ok: false, error: "Escreva algo antes de enviar." };
@@ -164,7 +191,7 @@ export async function sendManualAudioMessage(
   const res = await sendManualReply(tenantId, conversationId, trimmed, {
     buffer: audio.audio,
     mime: audio.mime,
-  });
+  }, undefined, session?.user.id);
   if (!res.ok) return res;
 
   revalidatePath("/conversas");
@@ -191,7 +218,7 @@ export async function sendRecordedAudioMessage(
   const tooLarge = payloadTooLarge(formData, MAX_VOICE_MESSAGE_BYTES);
   if (tooLarge) return { ok: false, error: tooLarge };
 
-  const { tenantId } = await requireTenant();
+  const { tenantId, session } = await requireTenant();
   const conversationId = String(formData.get("conversationId") ?? "");
 
   const file = formData.get("audio");
@@ -225,7 +252,7 @@ export async function sendRecordedAudioMessage(
   const res = await sendManualReply(tenantId, conversationId, text ?? "🎙️ Áudio enviado", {
     buffer,
     mime,
-  });
+  }, undefined, session?.user.id);
   if (!res.ok) return res;
 
   revalidatePath("/conversas");
@@ -241,49 +268,44 @@ export async function sendRecordedAudioMessage(
  * limpa a pausa e o sinal de atendimento humano.
  */
 export async function setConversationAgentPaused(id: string, paused: boolean): Promise<Result> {
-  const { tenantId } = await requireTenant();
+  const { tenantId, session } = await requireTenant();
 
   if (!paused) {
-    const conversation = await prisma.conversation.findFirst({
-      where: { id, tenantId },
-      select: { agent: { select: { id: true, enabled: true, archived: true } } },
-    });
-    if (!conversation) return { ok: false, error: "Conversa não encontrada." };
-
-    const assigned = conversation.agent;
-    const agentId = assigned?.enabled && !assigned.archived
-      ? assigned.id
-      : (await prisma.agent.findFirst({
-          where: { tenantId, enabled: true, archived: false },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-          select: { id: true },
-        }))?.id;
-    if (!agentId) {
+    // Devolver para a IA: mesma regra do CRM (responsável, etapa, espera e aviso no grupo).
+    const result = await returnToAiAndReply({ tenantId, conversationId: id, actorUserId: session?.user.id ?? null });
+    if (result.status === "no_agent") {
       return { ok: false, error: "Ative um agente em Agentes antes de devolver esta conversa." };
     }
-
-    const res = await prisma.conversation.updateMany({
-      where: { id, tenantId },
-      data: { agentId, agentPaused: false, needsHuman: false },
-    });
-    if (res.count === 0) return { ok: false, error: "Conversa não encontrada." };
-
-    const recovery = await recoverPendingAgentReply(tenantId, id, agentId);
-    if (recovery.status === "failed") {
-      await prisma.conversation.updateMany({
-        where: { id, tenantId },
-        data: { needsHuman: true },
-      });
-    }
+    if (result.status !== "returned") return { ok: false, error: "Conversa não encontrada." };
+    const { recovery } = result;
 
     revalidatePath("/conversas");
     revalidatePath("/inicio");
+    revalidatePath("/crm");
     if (recovery.status === "failed") return { ok: false, error: recovery.error };
     if (recovery.status === "sent") return { ok: true, info: "Agente reativado e resposta enviada à mensagem pendente." };
     if (recovery.status === "in_progress") return { ok: true, info: "A resposta do agente já está em andamento." };
     return { ok: true, info: "Agente reativado nesta conversa para atender a próxima mensagem." };
   }
 
+  // Assumir faz a pessoa responsável, com ou sem CRM (o mesmo "Assumir" do card).
+  // Conversa de teste não tem responsável: só pausa, como sempre.
+  const userId = session?.user.id;
+  if (userId) {
+    const claim = await assumeConversation({ tenantId, conversationId: id, userId });
+    if (claim === "assigned_elsewhere") {
+      const name = await currentAssigneeName(tenantId, id);
+      return { ok: false, error: name ? `Esta conversa já está com ${name}.` : "Outra pessoa já está atendendo esta conversa." };
+    }
+    if (claim !== "unavailable") {
+      revalidatePath("/conversas");
+      revalidatePath("/inicio");
+      revalidatePath("/crm");
+      return { ok: true };
+    }
+  }
+
+  const at = new Date();
   const res = await prisma.conversation.updateMany({
     where: { id, tenantId },
     data: { agentPaused: true },
@@ -291,9 +313,37 @@ export async function setConversationAgentPaused(id: string, paused: boolean): P
 
   if (res.count === 0) return { ok: false, error: "Conversa não encontrada." };
 
+  await moveLeadToStage(tenantId, null, "human", "user", { reason: "human_assumed", conversationId: id, userId: session?.user.id, at });
   revalidatePath("/conversas");
   revalidatePath("/inicio");
   return { ok: true };
+}
+
+const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Transferir o atendimento para outra pessoa da equipe (CRM-07), o mesmo do
+ * card do CRM. `expectedUserId` é quem a tela mostrava: se mudou no meio, nada
+ * é gravado e a resposta diz com quem está agora.
+ */
+export async function transferConversation(id: string, toUserId: string, expectedUserId: string): Promise<Result> {
+  const { tenantId, session } = await requireTenant();
+  const actorUserId = session?.user.id;
+  if (!actorUserId) return { ok: false, error: "Sua sessão expirou." };
+  if (![id, expectedUserId].every((value) => CONVERSATION_ID.test(value))) return { ok: false, error: "Conversa não encontrada." };
+  if (!CONVERSATION_ID.test(toUserId)) return { ok: false, error: "Escolha para quem transferir." };
+
+  const result = await transferCrmConversation({ tenantId, conversationId: id, actorUserId, toUserId, expectedUserId });
+  revalidatePath("/conversas");
+  revalidatePath("/crm");
+  if (result.status === "transferred") return { ok: true, info: "Atendimento transferido." };
+  if (result.status === "same") return { ok: false, error: "Escolha outra pessoa da equipe." };
+  if (result.status === "not_assigned") return { ok: false, error: "Ninguém assumiu esta conversa ainda." };
+  if (result.status === "changed") {
+    const name = await currentAssigneeName(tenantId, id);
+    return { ok: false, error: name ? `O atendimento mudou: agora está com ${name}.` : "O atendimento mudou. Confira e tente de novo." };
+  }
+  return { ok: false, error: "A conversa ou a pessoa escolhida não está disponível." };
 }
 
 /**

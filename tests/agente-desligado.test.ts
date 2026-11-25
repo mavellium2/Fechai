@@ -21,6 +21,8 @@ import * as agentTools from "@/modules/agent-engine/tools";
  */
 
 const db = vi.hoisted(() => ({
+  tenant: { findUnique: vi.fn() },
+  $transaction: vi.fn(),
   message: { findFirst: vi.fn() },
   conversation: {
     findUnique: vi.fn(),
@@ -94,6 +96,7 @@ function turno(over: Parameters<typeof runAgentTurn>[0] extends infer T ? Partia
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.tenant.findUnique.mockResolvedValue({ crmEnabled: false, status: "active" });
   db.conversation.findUnique.mockResolvedValue({ agentPaused: false });
   db.conversation.update.mockResolvedValue({});
   db.conversation.updateMany.mockResolvedValue({});
@@ -102,6 +105,15 @@ beforeEach(() => {
   conversation.appendMessage.mockResolvedValue({ id: "msg-1" });
   conversation.getRecentMessages.mockResolvedValue([]);
   db.message.findFirst.mockResolvedValue({ content: "oi" });
+});
+
+it("mantém a resposta da IA quando a transação do CRM falha", async () => {
+  agente(true);
+  db.tenant.findUnique.mockResolvedValue({ crmEnabled: true, status: "active" });
+  db.$transaction.mockRejectedValueOnce(new Error("CRM temporariamente indisponível"));
+
+  await expect(turno()).resolves.toMatchObject({ status: "ok", reply: "oi, tudo bem?" });
+  expect(db.$transaction).toHaveBeenCalledOnce();
 });
 
 it("retoma mensagem existente sem registrar uma segunda fala do contato", async () => {

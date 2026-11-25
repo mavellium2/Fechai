@@ -32,7 +32,7 @@ it("reativa uma conversa órfã no agente ativo padrão", async () => {
   }));
   expect(db.conversation.updateMany).toHaveBeenCalledWith({
     where: { id: "conversa-1", tenantId: "tenant-1" },
-    data: { agentId: "agente-ativo", agentPaused: false, needsHuman: false },
+    data: { agentId: "agente-ativo", agentPaused: false, needsHuman: false, assignedUserId: null, assignedAt: null },
   });
   expect(recovery.run).toHaveBeenCalledWith("tenant-1", "conversa-1", "agente-ativo");
 });
@@ -54,7 +54,7 @@ it("mantém o agente atribuído quando ele ainda está ativo", async () => {
 
   expect(db.agent.findFirst).not.toHaveBeenCalled();
   expect(db.conversation.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-    data: { agentId: "agente-atual", agentPaused: false, needsHuman: false },
+    data: { agentId: "agente-atual", agentPaused: false, needsHuman: false, assignedUserId: null, assignedAt: null },
   }));
 });
 

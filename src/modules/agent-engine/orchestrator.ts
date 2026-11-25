@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { moveLeadToStage } from "@/modules/crm/automatic-stage";
 import { getUsageSummary } from "@/modules/billing/usage";
 import { embedQuery, embedTexts } from "@/modules/knowledge-base/embeddings";
 import { chunkText } from "@/modules/knowledge-base/chunk";
@@ -25,6 +26,7 @@ import { getToolSchemas, runToolHandler, type ToolContext } from "./tools";
 import { parseHandoffConfig } from "./handoff";
 import { leadAppointmentsContext } from "./scheduling-tools";
 import { appendMessage, getRecentMessages } from "./conversation";
+import { autoReturnTurnInstruction } from "./handoff-notice";
 import { conversationTimeContext, DEFAULT_AGENT_TIMEZONE } from "./time-context";
 import { sanitizeUnresolvedPlaceholders } from "./reply-sanitizer";
 import { loadConversationVariables, parseVariableDefinitions, variablesSystemContext } from "./variables";
@@ -89,6 +91,8 @@ export async function runAgentTurn(input: {
   incomingWasAudio?: boolean;
   /** Id do áudio no WhatsApp para ignorar reentregas do webhook. */
   incomingMessageKeyId?: string;
+  /** Evidência do número que recebeu a mensagem autenticada no webhook. */
+  whatsappInbound?: import("@/modules/whatsapp/inbound-proof").WhatsappContactInbound;
   /** Retomada explícita: usa a mensagem já registrada, sem duplicá-la no histórico. */
   existingUserMessageId?: string;
   /** Agente que deve atender. Omitido, usa o principal. */
@@ -130,6 +134,7 @@ export async function runAgentTurn(input: {
     if (!test || !input.dryRunScheduling) throw new Error("Sandbox context required");
   }
 
+  let incomingMessageId = input.existingUserMessageId;
   if (input.existingUserMessageId) {
     const existing = await prisma.message.findFirst({
       where: { id: input.existingUserMessageId, conversationId, role: "user" },
@@ -137,9 +142,10 @@ export async function runAgentTurn(input: {
     });
     if (existing?.content !== userMessage) throw new Error("Mensagem pendente mudou durante a retomada.");
   } else if (input.incomingAudioUrl || input.incomingMessageKeyId || input.incomingAudioSeconds != null) {
-    await appendMessage(conversationId, "user", userMessage, undefined, input.incomingMessageKeyId, input.incomingAudioUrl, input.incomingAudioSeconds);
+    incomingMessageId = (await appendMessage(conversationId, "user", userMessage, undefined, input.incomingMessageKeyId, input.incomingAudioUrl,
+      input.incomingAudioSeconds, input.whatsappInbound))?.id;
   } else {
-    await appendMessage(conversationId, "user", userMessage);
+    incomingMessageId = (await appendMessage(conversationId, "user", userMessage))?.id;
   }
 
   // Palavra-chave da campanha na mensagem inicial: o lead entra na campanha
@@ -160,6 +166,16 @@ export async function runAgentTurn(input: {
     return { reply: "", toolsUsed: [], status: "human_handling" };
   }
 
+  async function requestTeamAttention() {
+    const at = new Date();
+    const marked = await prisma.conversation
+      .update({ where: { id: conversationId }, data: { needsHuman: true } })
+      .catch(() => null);
+    if (marked && !paused?.isTest && !input.dryRunScheduling) {
+      await moveLeadToStage(tenantId, leadId, "waiting_human", "system", { reason: "handoff", conversationId, key: incomingMessageId, at });
+    }
+  }
+
   // Cota de mensagens do mês esgotada, ou teste grátis expirado (e não é o
   // sandbox): a mensagem do contato já ficou registrada, a conversa é marcada
   // para o dono responder, e a IA não fala mais nada — o enforcement dos
@@ -168,9 +184,7 @@ export async function runAgentTurn(input: {
   if (!input.skipUsageCheck) {
     const usage = await getUsageSummary(tenantId);
     if (usage.atLimit) {
-      await prisma.conversation
-        .update({ where: { id: conversationId }, data: { needsHuman: true } })
-        .catch(() => {});
+      await requestTeamAttention();
       return { reply: "", toolsUsed: [], status: "limit_reached" };
     }
   }
@@ -188,9 +202,7 @@ export async function runAgentTurn(input: {
   const agent = await resolveAgent(tenantId, campaignAgentId ?? input.agentId);
 
   if (!agent) {
-    await prisma.conversation
-      .update({ where: { id: conversationId }, data: { needsHuman: true } })
-      .catch(() => {});
+    await requestTeamAttention();
     return { reply: "", toolsUsed: [], status: "no_agent" };
   }
 
@@ -204,9 +216,7 @@ export async function runAgentTurn(input: {
   // religar (voltando a atender cliente de verdade) só para conferir a
   // mudança. Mesma lógica do `skipUsageCheck` acima.
   if (agent && !agent.enabled && !input.skipEnabledCheck) {
-    await prisma.conversation
-      .update({ where: { id: conversationId }, data: { needsHuman: true } })
-      .catch(() => {});
+    await requestTeamAttention();
     return { reply: "", toolsUsed: [], status: "agent_off" };
   }
 
@@ -274,6 +284,8 @@ export async function runAgentTurn(input: {
     ? campaignRulesPrompt(leadCampaign.campaign, leadCampaign.rules, { handoffAvailable: handoffEnabled, assets: pendingAssets })
     : "";
 
+  // CRM-12: voltou para a IA porque a equipe não respondeu no prazo.
+  const autoReturnContext = paused?.isTest ? "" : await autoReturnTurnInstruction(tenantId, conversationId);
   const personaPrompt = input.systemPromptOverride?.trim() || agent?.systemPrompt || DEFAULT_SYSTEM;
   const systemPrompt = [
     personaPrompt,
@@ -287,6 +299,7 @@ export async function runAgentTurn(input: {
     // Depois da agenda geral: a regra da campanha vence o expediente normal.
     campaignContext,
     appointmentsContext,
+    autoReturnContext,
     agent ? variablesSystemContext(variableDefinitions, variableValues) : "",
     context,
     agent ? unansweredRule(retrieved) : "",
@@ -313,7 +326,7 @@ export async function runAgentTurn(input: {
     toolSchemas.push(campaignHandoffSchema);
   }
   const ctx: ToolContext = {
-    tenantId, conversationId, leadId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling, campaign: leadCampaign,
+    tenantId, conversationId, leadId, incomingMessageId, agentId: agent?.id ?? null, dryRun: input.dryRunScheduling, campaign: leadCampaign,
   };
   // A cadeia de fallback vem do painel (/admin/ia): o admin monta a ordem e
   // aponta cada degrau para uma credencial. Sem nada cadastrado, cai no padrão
@@ -379,9 +392,7 @@ export async function runAgentTurn(input: {
     // recebe NENHUMA mensagem sobre o limite — só a conversa sobe como
     // "precisa de você" e um humano assume. Nada é registrado no histórico.
     if (err.code === "quota_exceeded") {
-      await prisma.conversation
-        .update({ where: { id: conversationId }, data: { needsHuman: true } })
-        .catch(() => {});
+      await requestTeamAttention();
       return { reply: "", toolsUsed, status: "limit_reached" };
     }
 
@@ -391,9 +402,7 @@ export async function runAgentTurn(input: {
     // ninguém ficava sabendo. Só o limite de requisições fica fora, que passa.
     const escalate = err.code !== "rate_limit";
     if (escalate) {
-      await prisma.conversation
-        .update({ where: { id: conversationId }, data: { needsHuman: true } })
-        .catch(() => {});
+      await requestTeamAttention();
     }
     const replyMsg = await appendMessage(conversationId, "assistant", err.userMessage, "agent");
     return { reply: err.userMessage, toolsUsed, status: "ok", replyMessageId: replyMsg.id };
@@ -410,6 +419,9 @@ export async function runAgentTurn(input: {
   }
   finalReply = sanitizedReply || "Certo!";
   const replyMsg = await appendMessage(conversationId, "assistant", finalReply, "agent");
+  if (agent && !input.dryRunScheduling) {
+    await moveLeadToStage(tenantId, leadId, "ai", "ai", { reason: "agent_reply", conversationId, key: replyMsg.id, at: replyMsg.createdAt });
+  }
   return { reply: finalReply, toolsUsed, status: agent ? "ok" : "no_agent", replyMessageId: replyMsg.id,
     ...(ctx.outgoingMedia?.length ? { media: ctx.outgoingMedia } : {}),
     ...(input.inspect ? { inspection: { sources: retrieved?.sources ?? [], searched: retrieved?.searched ?? false, instructions: personaPrompt, tools: toolsUsed } } : {}) };

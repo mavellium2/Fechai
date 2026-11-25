@@ -223,7 +223,13 @@ describe("Telefone do contato no webhook", () => {
     });
 
     const inbound = mensagem({ remoteJid: "5511987654321@s.whatsapp.net", fromMe: false });
-    expect(provider.parseWebhook({ ...inbound, data: { ...inbound.data, pushName: "Maria" } })).toMatchObject({ fromName: "Maria" });
+    expect(provider.parseWebhook({
+      ...inbound, sender: "5511990000011:2@s.whatsapp.net",
+      data: { ...inbound.data, pushName: "Maria", messageTimestamp: "1795537221" },
+    })).toMatchObject({
+      fromName: "Maria", fromPhone: "5511987654321", receiverPhone: "5511990000011",
+      occurredAt: new Date(1_795_537_221_000),
+    });
   });
 
   it("aceita senderPn de uma mensagem recebida quando falta JID alternativo", async () => {

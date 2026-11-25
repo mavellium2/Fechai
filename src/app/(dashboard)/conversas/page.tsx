@@ -155,6 +155,15 @@ export default async function ConversasPage({
       }
     : null;
 
+  // Quem atende (CRM-07) e para quem dá para transferir: a equipe com login de dono.
+  const team = selected && !selected.isTest
+    ? (await prisma.user.findMany({ where: { tenantId, role: "OWNER", usesProduct: true }, orderBy: { email: "asc" }, select: { id: true, name: true, email: true } }))
+        .map(({ id: userId, name, email }) => ({ id: userId, name: name?.trim() || email }))
+    : [];
+  const assignee = selected?.assignedUserId
+    ? team.find(({ id: userId }) => userId === selected.assignedUserId) ?? { id: selected.assignedUserId, name: "Pessoa da equipe" }
+    : null;
+
   // Campanhas do lead (card do CRM): só conversa real; teste não entra em campanha pela tela.
   const campaigns = selected && !selected.isTest ? await Promise.all([
     prisma.campaignLead.findMany({ where: { tenantId, leadId: selected.leadId }, select: { source: true, campaign: { select: { id: true, name: true } } }, orderBy: { assignedAt: "desc" }, take: 10 }),
@@ -166,5 +175,5 @@ export default async function ConversasPage({
     <div className="conversation-list-controls"><ConversationSearch status={status} q={search} agentId={agentId} /><ConversationFilters status={status} search={search} agentId={agentId} agents={agents} counts={{ all: totalAll, needsHuman: needsHumanCount, test: testCount }} /></div>
     <div className="conversation-list-scroll">{page.length ? <ConversationList items={page.map(c => ({ id: c.id, needsHuman: c.needsHuman, agentPaused: c.agentPaused, isTest: c.isTest, updatedAt: c.updatedAt, lead: c.lead, agentName: c.agent?.name, preview: c.messages[0]?.content ?? null }))} selectedId={id} hrefFor={cid => params({ id: cid })} moreHref={hasMore ? params({ take: String(take + PAGE_SIZE) }) : null} /> : <EmptyState icon={MessagesSquare} title={emptyAccount ? "Nenhuma conversa ainda" : "Nenhuma conversa com este filtro"} description={emptyAccount ? "Quando um contato escrever, a conversa aparecerá aqui." : "Ajuste a busca ou veja todas as conversas."} action={<Link href="/conversas?status=all">Ver todas</Link>} />}</div>
     <footer className="conversation-list-footer">{status === "needs_human" ? `${matching} conversas aguardando a equipe` : `${Math.min(page.length, matching)} de ${matching} conversas`}</footer>
-  </>} thread={detail ? <ConversationThread conversation={detail.data} messages={detail.messages} survey={detail.survey} backHref={params({ id: undefined })} voiceReady={voiceReady} /> : <div className="conversation-empty"><EmptyState icon={Inbox} title={id ? "Conversa não encontrada" : "Escolha uma conversa"} description="Selecione um contato na lista para ler o histórico e continuar o atendimento." /></div>} contact={detail ? <ContactPanel conversation={detail.data} appointment={appointment} campaigns={campaigns} /> : <p className="agent-help">Ao abrir uma conversa, os dados do contato aparecem aqui.</p>} />;
+  </>} thread={detail ? <ConversationThread conversation={detail.data} messages={detail.messages} survey={detail.survey} backHref={params({ id: undefined })} voiceReady={voiceReady} assignee={assignee} team={team} /> : <div className="conversation-empty"><EmptyState icon={Inbox} title={id ? "Conversa não encontrada" : "Escolha uma conversa"} description="Selecione um contato na lista para ler o histórico e continuar o atendimento." /></div>} contact={detail ? <ContactPanel conversation={detail.data} appointment={appointment} campaigns={campaigns} /> : <p className="agent-help">Ao abrir uma conversa, os dados do contato aparecem aqui.</p>} />;
 }

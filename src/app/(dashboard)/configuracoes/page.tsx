@@ -12,6 +12,9 @@ import { RolesForm } from "./RolesForm";
 import { PasswordForm } from "./PasswordForm";
 import { ServiceAreaForm } from "./ServiceAreaForm";
 import { getServiceArea } from "@/modules/lead-insights/service-area-store";
+import { getTeamWhatsapp } from "@/modules/crm/team-whatsapp";
+import { findWhatsappChannel } from "@/modules/whatsapp/instances";
+import { TeamWhatsappForm } from "./TeamWhatsappForm";
 
 /** Traduz o status cru do provedor que vem no `detail` do check de WhatsApp. */
 const DETAIL_PT: Record<string, string> = {
@@ -168,7 +171,7 @@ export default async function ConfiguracoesPage() {
 
   // Cota e checklist de configuração medem o agente: para quem só afilia são
   // perguntas sem objeto, e nem chegam a ser consultadas.
-  const [user, checks, usage, serviceArea, tenant] = await Promise.all([
+  const [user, checks, usage, serviceArea, tenant, teamWhatsapp, qrChannel] = await Promise.all([
     prisma.user.findUniqueOrThrow({
       where: { id: session.user.id },
       select: { name: true, email: true },
@@ -177,7 +180,10 @@ export default async function ConfiguracoesPage() {
     affiliateOnly ? null : getUsageSummary(tenantId),
     affiliateOnly ? null : getServiceArea(tenantId),
     affiliateOnly ? null : prisma.tenant.findUnique({ where: { id: tenantId }, select: { city: true } }),
+    affiliateOnly ? null : getTeamWhatsapp(tenantId, session.user.id),
+    affiliateOnly ? null : findWhatsappChannel(tenantId, "evolution"),
   ]);
+  const renderedAt = new Date();
   const pending = checks ? checks.filter((c) => !c.ok).length : 0;
 
   return (
@@ -207,6 +213,22 @@ export default async function ConfiguracoesPage() {
             <CardTitle hint="Recomendado a cada alguns meses.">Senha</CardTitle>
             <PasswordForm />
           </Card>
+
+          {teamWhatsapp && (
+            <Card>
+              <CardTitle hintInline hint="Liga quem escreve no grupo de transbordo ao seu usuário do Fechai.">
+                Seu WhatsApp na equipe
+              </CardTitle>
+              <TeamWhatsappForm
+                phone={teamWhatsapp.phone}
+                verifiedAt={teamWhatsapp.verifiedAt?.toISOString() ?? null}
+                pendingPhone={teamWhatsapp.pendingPhone}
+                codeExpiresAt={teamWhatsapp.codeExpiresAt?.toISOString() ?? null}
+                codeValid={Boolean(teamWhatsapp.codeExpiresAt && teamWhatsapp.codeExpiresAt > renderedAt)}
+                qrConnected={Boolean(qrChannel)}
+              />
+            </Card>
+          )}
 
           {!affiliateOnly && (
             <Card>

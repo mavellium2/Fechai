@@ -16,7 +16,9 @@ Cérebro do produto: recebe uma mensagem, monta o contexto (persona + RAG + hist
 - `variables.ts` — definições por agente e valores por conversa. Nome, número e endereço existem por padrão; as demais são opcionais e configuradas em Agentes › Variáveis.
 - `summary.ts` — `summarizeConversation(tenantId, conversationId)`: resumo em texto da conversa, sob demanda, com cache no banco. Ver seção abaixo.
 - `disqualify.ts` — motivos da triagem (`DISQUALIFY_REASONS`), rótulos e o custo do atendimento manual que converte triagem em dinheiro. Ver seção abaixo.
-- `handoff.ts` — config da ação "Transferir para humano" e `notifyHandoffGroup`: avisa a equipe no grupo interno ao passar para atendimento, sem adicionar o contato. Ver seção abaixo.
+- `handoff.ts` — config da ação "Transferir para humano" e `notifyHandoffGroup`: registra a espera e avisa a equipe no grupo interno ao passar para atendimento, sem adicionar o contato. Ver seção abaixo.
+- `handoff-notice.ts` — `HandoffNotice` (CRM-06): abre ou reaproveita a espera da conversa, guarda a mensagem do grupo e fecha a espera quando alguém assume ou a conversa volta para a IA.
+- `handoff-form.ts` — schema do formulário da transferência, usado pela action e pelos testes.
 - `unanswered-rule.ts` — `unansweredRule(retrieved)`: a regra "nunca invente" que vai no prompt de todo turno com agente, com aviso extra quando a base não tem trecho próximo. Ver seção abaixo.
 
 ### Perguntas sem resposta (`report_unanswered`, P-87)
@@ -284,13 +286,19 @@ ver `modules/whatsapp/instances.ts`): com a Evolution e a Meta conectadas, o nú
 dele fora do ar vira erro na tela dizendo qual reconectar — nunca envio pelo
 outro número. Numa conversa de teste (sandbox) só grava, sem WhatsApp envolvido.
 
+O CRM usa a opção `{ leadId, userId }` para enviar só com prova autenticada do
+número de entrada. A opção vincula o envio ao lead e ao responsável da
+conversa, verifica a janela da Meta e confirma o aparelho ativo na Evolution.
+O CRM oferece texto livre em uma conversa que atende a essas condições. O
+histórico usa o mesmo registro de resposta humana. [Contrato do CRM](../../../docs/painel/crm/actions.md#assumir-e-responder)
+
 Sempre grava com `sentBy: "human"` e liga `Conversation.agentPaused`.
 `runAgentTurn` checa `agentPaused` logo no início: se ligado, persiste a
 mensagem do contato e retorna `status: "human_handling"` sem gerar resposta —
 só nesta conversa, as outras do mesmo agente continuam normais. Diferente de
 `Agent.enabled` (`agent_off`), que é a chave geral e cala o agente em todas as
 conversas de cliente — mas não no chat de teste (`skipEnabledCheck`).
-"Reativar agente" desliga `agentPaused` e `needsHuman`. Se o agente atribuído foi
+"Reativar agente" desliga `agentPaused` e `needsHuman` e tira o responsável. Se o agente atribuído foi
 removido, arquivado ou desligado, a conversa passa para o agente ativo padrão.
 O webhook do WhatsApp e o widget usam o agente atribuído no próximo turno.
 Se a última mensagem real ainda não tem resposta, a reativação pede ao próprio
@@ -391,7 +399,8 @@ lead pelo número de atendimento.
 
 | caminho | onde | o que marca |
 | --- | --- | --- |
-| tool `handoff_human` | `tools.ts` (o LLM decide) | `needsHuman` |
+| tool `handoff_human` | `tools.ts` (o LLM decide) | `needsHuman` (+ `agentPaused` com a opção "pausa") |
+| fila de perguntas (`report_unanswered` na regra `handoff`) e regra da campanha | `tools.ts`, `campaigns/agent.ts` | o mesmo `transferToHuman` |
 | reação do atendente pelo número da empresa | webhook do WhatsApp | `needsHuman` + `agentPaused` |
 
 A reação depende de `Agent.stopOnEmoji`, ligado por padrão. Reação do cliente
@@ -406,28 +415,76 @@ type HandoffConfig = {
   groupId: string | null;   // JID "...@g.us"
   groupName: string | null; // só exibição
   groupReason: string;     // quando avisar a equipe, nas palavras do dono
+  whileWaiting: "continue" | "pause"; // o que a IA faz enquanto aguarda a equipe
 }
 ```
+
+**Enquanto aguarda humano, a IA** (`whileWaiting`, CRM-06): `continue` é o
+padrão e o comportamento de sempre; só `"pause"` explícito pausa (valor ausente,
+antigo ou estranho continua). Com a pausa, `transferToHuman` liga `agentPaused`
+na mesma escrita de `needsHuman`: a resposta do turno ainda sai (a despedida,
+pedida pela descrição da tool) e a próxima mensagem do contato recebe
+`human_handling`. A IA volta com "Reativar agente" em Conversas. Vale só com a
+ação ligada (`handoffPausesAgent`, nunca lança).
 
 **Compatibilidade:** `parseHandoffConfig` lê `addToGroup` das configs antigas
 como `notifyGroup`, preservando grupo, nome e motivo. Não autoriza convites.
 Se ambas as chaves existem, `notifyGroup` prevalece, inclusive `false`. Ao
 salvar, o formulário grava apenas a chave nova. Não requer mudança de schema.
 
-`notifyHandoffGroup(tenantId, agentId, conversationId, options)` consulta a
-conversa e o lead da conta e envia exatamente três linhas:
+`notifyHandoffGroup(tenantId, agentId, conversationId, { reason, trigger, isTest })`
+consulta a conversa e o lead da conta, **registra a espera** e envia o aviso,
+uma informação por linha:
 
 ```text
 Nome: Luciane Aparecida Dos Santos
 Número: +55 14 99763-1563
-Resumo: [o que o lead quer e por que é prioridade]
+Origem: Anúncio
+Resumo: [o que o lead quer]
+Motivo: [por que foi transferido, quando o resumo ainda não diz]
+Card: https://.../crm?lead=ID
 ```
 
-Reusa `Conversation.summary`, limitado a 600 caracteres em uma linha, e
-acrescenta o motivo atual da tool (até 300 caracteres) se ainda não está no
-resumo. Sem resumo salvo, usa as três últimas mensagens do contato em ordem
-cronológica; sem dados, informa a ausência. Não gera uma segunda chamada de
-IA nem grava o aviso como resposta ao lead.
+Reusa `Conversation.summary`, limitado a 600 caracteres em uma linha. O motivo
+(até 300 caracteres) só aparece quando o resumo ainda não o contém. Sem resumo
+salvo, usa as três últimas mensagens do contato em ordem cronológica; sem
+dados, informa a ausência. A origem vem de `crmOriginLabel` (canal de entrada
+e anúncio) e, sem registro, sai "não registrada". O link do card só existe com
+o CRM ligado e `AUTH_URL`/`NEXTAUTH_URL` configurada. Quebras de linha nos dados
+viram espaço: nenhum dado do contato cria outra linha. Não gera uma segunda
+chamada de IA nem grava o aviso como resposta ao lead.
+
+O aviso termina com "Responda *assumo* ou reaja 👍 para ficar com este lead.
+*#ia* devolve para a IA." (`HANDOFF_GROUP_COMMANDS = true`). Quem lê esses
+comandos é `crm/handoff-group.ts` (CRM-08), no webhook da Evolution: só vale o
+que cita o aviso (ou reage nele), o primeiro a assumir vence e o grupo nunca
+recebe resposta do agente. Ver `docs/painel/crm/domain.md`.
+
+**A espera (`HandoffNotice`, `handoff-notice.ts`):** todo transbordo real abre
+uma espera `waiting` para a conversa, mesmo sem grupo (conta só com a Meta,
+aviso desligado ou falha no envio). Com uma espera já aberta, o transbordo só
+conta a repetição (`repeatCount`) e guarda o motivo mais recente; o grupo não
+recebe outro aviso. A conversa é travada (`FOR UPDATE`) antes de procurar a
+espera aberta. O id que `sendGroupMessage` devolve fica em `messageId`, com
+`groupId` e `sentAt`. Se o registro falhar, o aviso ainda sai. `trigger` diz
+quem pediu: `agent`, `reaction`, `unanswered` ou `campaign`.
+
+**Fechar a espera é obrigatório** em todo caminho que zera `needsHuman`
+(`closeHandoffNotices`, nunca lança): resposta pelo painel e "Assumir" no CRM
+(`assumed`, `panel`, com quem), resposta pelo celular (`assumed`, `phone`),
+"Resolver" em Conversas (`assumed`, `panel`) e "Reativar agente" ou
+"Devolver para a IA" do CRM (`returned`, `crm/handoff-panel.ts`; se a IA falhar
+ao responder, a conversa volta a pedir a equipe com uma espera nova).
+Transferir muda a pessoa da espera assumida. Assumir, responder, transferir,
+resolver e devolver respondem no grupo citando o aviso (`reflectHandoffInGroup`,
+nunca lança), só quando mexem no atendimento em curso: uma espera antiga nunca
+volta ao grupo. A **devolução automática** (CRM-12, `crm/handoff-auto-return.ts`,
+desligada por padrão) usa o mesmo `returnConversationToAi` com `via: "auto"`;
+enquanto a IA não respondeu depois dela, o turno recebe
+`AUTO_RETURN_INSTRUCTION` (`autoReturnTurnInstruction` em `handoff-notice.ts`)
+para pedir desculpas pela demora e retomar. Um aviso esquecido em aberto calaria o
+próximo transbordo do contato; `tests/handoff-aviso.test.ts` falha se um
+arquivo que escreve `needsHuman: false` não chamar `closeHandoffNotices`.
 
 **Envio:** `WhatsAppProvider.sendGroupMessage` →
 `POST /message/sendText/{externalId}` com `{ number: groupId, text }` na
@@ -448,7 +505,9 @@ Regras que precisam permanecer:
 - Banco, provider e rede ficam dentro do `try`: uma falha no aviso nunca
   desfaz o handoff nem causa 500 com reentrega em laço no webhook.
 - A conexão precisa estar ativa e configurada. Na Meta este envio não existe:
-  a transferência principal continua, sem tentar mandar o aviso a uma pessoa.
+  a transferência principal continua (card em Aguardando humano e espera
+  registrada), sem tentar mandar o aviso a uma pessoa. A tela avisa que o
+  grupo exige o QR.
 
 **Escolha do grupo:** `listWhatsAppGroups` nunca lança e busca sob demanda
 `GET /group/fetchAllGroups?getParticipants=false`. A tela usa `SelectMenu`;
@@ -466,6 +525,8 @@ A descrição informa que o contato nunca é adicionado ao grupo.
 Regressões em `tests/handoff-grupo.test.ts`: config legada, formato, isolamento
 por tenant, testes sem efeito externo, falhas e simulação tool → Evolution.
 A simulação verifica uma única mensagem no grupo e participantes inalterados.
+`tests/handoff-aviso.test.ts` cobre a espera, o link, o `messageId`, a pausa, a
+conta só com a Meta e o fechamento em todos os caminhos.
 
 ### Triagem de contatos (`disqualify.ts`, tool `disqualify_lead`)
 

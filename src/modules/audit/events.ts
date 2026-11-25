@@ -34,6 +34,7 @@ export const AUDIT_GROUPS = {
   conhecimento: "Base de conhecimento",
   contatos: "Contatos",
   campanhas: "Campanhas",
+  crm: "CRM e transbordo",
   integracoes: "Integrações",
   admin: "Admin",
 } as const;
@@ -86,6 +87,23 @@ export const AUDIT_EVENTS = {
     kind: "update",
     group: "conta",
   },
+  // WhatsApp pessoal de quem é da equipe (CRM-05). Sem o número no registro.
+  "account.whatsapp_link_started": { label: "Pediu para ligar o próprio WhatsApp", kind: "update", group: "conta" },
+  "account.whatsapp_verified": { label: "Confirmou o próprio WhatsApp", kind: "update", group: "conta" },
+  "account.whatsapp_removed": { label: "Desligou o próprio WhatsApp", kind: "update", group: "conta" },
+
+  // ── CRM e transbordo (CRM-11) ───────────────────────────────────────────
+  // Gravados por `crm/trail.ts`, sempre com o lead como alvo. O meta leva via,
+  // tempos e ids; nunca texto de mensagem nem telefone completo.
+  "crm.stage_changed": { label: "Moveu um lead de etapa", kind: "update", group: "crm" },
+  "crm.lost_reason_set": { label: "Marcou um lead como perdido, com o motivo", kind: "update", group: "crm" },
+  "crm.tag_changed": { label: "Alterou as etiquetas de um lead", kind: "update", group: "crm" },
+  "crm.task_changed": { label: "Criou ou concluiu uma tarefa de um lead", kind: "update", group: "crm" },
+  "handoff.requested": { label: "Conversa transferida para a equipe", kind: "update", group: "crm" },
+  "handoff.assumed": { label: "Assumiu um atendimento", kind: "update", group: "crm" },
+  "handoff.transferred": { label: "Transferiu um atendimento", kind: "update", group: "crm" },
+  "handoff.returned_to_ai": { label: "Devolveu um atendimento para a IA", kind: "update", group: "crm" },
+  "handoff.sla_alerted": { label: "Alerta de prazo do transbordo", kind: "update", group: "crm" },
 
   // ── agente ────────────────────────────────────────────────────────────
   "agent.created": { label: "Criou um agente", kind: "create", group: "agente" },
@@ -315,6 +333,7 @@ export const AUDIT_EVENTS = {
     kind: "update",
     group: "admin",
   },
+  "admin.crm_access_changed": { label: "Alterou o acesso ao CRM", kind: "update", group: "admin" },
   "admin.account_created": { label: "Criou uma conta pelo painel", kind: "create", group: "admin" },
   "admin.user_password_changed": {
     label: "Trocou a senha de um usuário pelo painel",

@@ -101,6 +101,13 @@ model Tenant {
   // e religar (ver modules/whatsapp/instances.ts).
   evolutionWhatsappEnabled Boolean @default(true)
 
+  /// Liberação do CRM nativo por conta. Provisionar um pipeline não libera o acesso.
+  crmEnabled         Boolean  @default(false)
+  /// Identifica a preparação que pode publicar a flag. Outra tentativa ou desligamento invalida a anterior.
+  crmActivationToken String?
+  /// Motivos comerciais da conta. Lista vazia usa os motivos iniciais do CRM.
+  crmLossReasons     String[] @default([])
+
   // Último alerta de conexão de WhatsApp quebrada enviado para esta conta
   // (ver modules/whatsapp/health.ts). Serve só de cooldown: sem ele, uma conta
   // com o número fora do ar receberia um e-mail a cada varredura do worker até
@@ -132,6 +139,10 @@ model Tenant {
   referralSourceOther  String?
 
   users                     User[]
+  /// WhatsApp pessoal de quem é da equipe (CRM-05). Ver `TeamMemberWhatsapp`.
+  teamWhatsapps             TeamMemberWhatsapp[]
+  /// Prazos do transbordo (CRM-10). Ver `HandoffSlaSettings`.
+  handoffSlaSettings        HandoffSlaSettings?
   agents                    Agent[]
   knowledgeDocs             KnowledgeDocument[]
   actions                   TenantAction[]
@@ -141,6 +152,8 @@ model Tenant {
   whatsappBlocked           WhatsappBlockedNumber[]
   messageTemplateLogs       MessageTemplateLog[]
   leads                     Lead[]
+  pipelines                 Pipeline[]
+  crmTags                   Tag[]
   conversations             Conversation[]
   feedbacks                 Feedback[]
   appointments              Appointment[]
@@ -352,70 +365,70 @@ model LeadAdOrigin {
 /// gravar), e a pausa só vale dentro do período. Por isso nenhuma consulta de
 /// resultados filtra por status — campanha terminada continua nos relatórios.
 model Campaign {
-  id          String    @id @default(cuid())
-  tenantId    String
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String    @db.VarChar(80)
-  objective   String?   @db.VarChar(280)
+  id               String              @id @default(cuid())
+  tenantId         String
+  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name             String              @db.VarChar(80)
+  objective        String?             @db.VarChar(280)
   /// Instantes UTC do dia escolhido na tela, convertido do fuso em `timezone`
   /// (início 00:00 e fim 23:59:59 locais). Início nulo = rascunho.
-  startsAt    DateTime?
-  endsAt      DateTime?
+  startsAt         DateTime?
+  endsAt           DateTime?
   /// Fuso em que as datas foram escolhidas. A conta ainda não tem fuso próprio,
   /// então nasce `America/Sao_Paulo`; o campo já fica pronto para virar o fuso
   /// da conta sem migrar linhas.
-  timezone    String    @default("America/Sao_Paulo")
+  timezone         String              @default("America/Sao_Paulo")
   /// Pausada em. Só vale dentro do período: antes do início é rascunho e depois
   /// do fim está terminada, qualquer que seja a pausa.
-  pausedAt    DateTime?
+  pausedAt         DateTime?
   /// Arquivada em. Ganha de todo o resto; desarquivar volta ao status das datas.
-  archivedAt  DateTime?
+  archivedAt       DateTime?
   /// Ativada em ("Ativar" na revisão). Sem isto a campanha é rascunho mesmo com
   /// datas: dá para montar anúncios, mídias e regras sem que nada valha para os
   /// leads. Ver `modules/campaigns/status.ts`.
-  activatedAt DateTime?
+  activatedAt      DateTime?
   /// Tipo do objetivo: agendamento | reativacao | evento | promocao | outro.
   /// O texto livre continua em `objective`.
-  objectiveType String?  @db.VarChar(20)
+  objectiveType    String?             @db.VarChar(20)
   /// Contexto para a equipe e para a IA (entra no prompt enquanto a campanha vale).
-  description String?
+  description      String?
   /// Meta numérica e do quê: leads | agendamentos | comparecimentos.
-  goalValue   Int?
-  goalType    String?   @db.VarChar(20)
+  goalValue        Int?
+  goalType         String?             @db.VarChar(20)
   /// Investimento em mídia, em centavos (custo por lead/agendamento).
-  budgetCents Int?
+  budgetCents      Int?
   /// Quanto custa cada mensagem de disparo enviada (tabela da Meta), em
   /// centavos. Custo dos disparos = enviadas × isto; sem valor, não há custo.
   messageCostCents Int?
   /// Termos que atribuem o lead pela primeira mensagem (sem acento, minúsculas).
-  keywords    String[]  @default([])
+  keywords         String[]            @default([])
   /// Agente que atende os leads da campanha enquanto ela vale. Null = o
   /// agente que já atende a conversa. Ver `modules/campaigns/agent-routing.ts`.
-  agentId     String?
-  agent       Agent?    @relation("CampaignAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  agentId          String?
+  agent            Agent?              @relation("CampaignAgent", fields: [agentId], references: [id], onDelete: SetNull)
   /// Agente de onde `agentId` foi copiado (o "original"): é para ele que o
   /// aprendizado volta no fim. Sem relação: o original pode sumir depois.
-  baseAgentId String?
+  baseAgentId      String?
   /// Quando a cópia foi criada: o que entrou na base dela depois disto é o
   /// aprendizado da campanha.
-  agentCopiedAt DateTime?
+  agentCopiedAt    DateTime?
   /// Documentos da cópia já levados para o original (não repetir).
-  mergedDocIds String[] @default([])
+  mergedDocIds     String[]            @default([])
   /// Regras do agente (datas, horários, chegada, lembretes, oferta, instruções).
   /// Json lido por `parseCampaignRules`, que nunca lança. Ver `modules/campaigns/rules.ts`.
-  rules       Json?
+  rules            Json?
   /// Quem criou. `SetNull`: remover o usuário não apaga a campanha da conta.
-  createdById String?
-  createdBy   User?     @relation("CampaignCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById      String?
+  createdBy        User?               @relation("CampaignCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   /// Quem alterou por último (dados, regras, anúncios, mídias, leads).
-  updatedById String?
-  updatedBy   User?     @relation("CampaignUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  ads         CampaignAd[]
-  assets      CampaignAsset[]
-  leads       CampaignLead[]
-  broadcasts  BroadcastCampaign[]
+  updatedById      String?
+  updatedBy        User?               @relation("CampaignUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  ads              CampaignAd[]
+  assets           CampaignAsset[]
+  leads            CampaignLead[]
+  broadcasts       BroadcastCampaign[]
 
   @@index([tenantId, archivedAt])
   @@index([tenantId, endsAt])
@@ -483,7 +496,7 @@ model CampaignAsset {
   tenantId    String
   campaignId  String
   campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  kind        String   // image | video | pdf | audio
+  kind        String // image | video | pdf | audio
   url         String
   /// Caminho na CDN, para apagar o arquivo junto com a linha.
   path        String?
@@ -500,15 +513,15 @@ model CampaignAsset {
 /// Lead de uma campanha. Um lead pode estar em várias ao longo do tempo; as
 /// regras aplicadas são as da campanha em vigor mais recente.
 model CampaignLead {
-  id          String   @id @default(cuid())
-  tenantId    String
-  campaignId  String
-  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  leadId      String
-  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  tenantId     String
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId       String
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   /// anuncio | disparo | palavra_chave | manual
-  source      String
-  assignedAt  DateTime @default(now())
+  source       String
+  assignedAt   DateTime @default(now())
   /// Quem adicionou à mão (null nas atribuições automáticas).
   assignedById String?
   /// Mídias da campanha que o agente já mandou a este lead (não repetir).
@@ -756,43 +769,43 @@ model ReportEvent {
 
 // Disparos pela Meta: o rascunho revisado vira fila somente por confirmação.
 model BroadcastCampaign {
-  id               String               @id @default(cuid())
-  tenantId         String
-  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name             String
-  status           String               @default("draft") // draft | queued | paused | completed | cancelled
-  phoneNumberId    String
-  template         Json
+  id                String               @id @default(cuid())
+  tenantId          String
+  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name              String
+  status            String               @default("draft") // draft | queued | paused | completed | cancelled
+  phoneNumberId     String
+  template          Json
   /// Versão da mensagem para quem não tem nome (outro modelo aprovado). Só
   /// existe quando o disparo usa; os destinatários com `variant: "nameless"`
   /// recebem esta. Revalidada junto com `template` em cada etapa do envio.
-  namelessTemplate Json?
+  namelessTemplate  Json?
   /// Imagem/vídeo/documento no topo, quando o template tem mídia
   /// (`modules/broadcasts/media.ts`, `CampaignMedia`): um arquivo para todos
   /// (`mode: "file"`, guardado na CDN) ou o link de cada contato (`"column"`).
-  media            Json?
-  createdAt        DateTime             @default(now())
-  confirmedAt      DateTime?
-  confirmedBy      String? // id do usuário que confirmou; snapshot preservado
-  confirmedByLabel String?
-  consentVersion   String?
-  scheduledAt      DateTime?
-  timezone         String               @default("America/Sao_Paulo")
-  windowStart      Int                  @default(0) // minutos locais; legado = dia inteiro
-  windowEnd        Int                  @default(1440)
-  nextAttemptAt    DateTime             @default(now())
-  lastProcessedAt  DateTime?
-  retryCount       Int                  @default(0)
-  pausedAt         DateTime?
-  lastTestAt       DateTime?
-  finishedAt       DateTime?
-  error            String?
-  recipients       BroadcastRecipient[]
+  media             Json?
+  createdAt         DateTime             @default(now())
+  confirmedAt       DateTime?
+  confirmedBy       String? // id do usuário que confirmou; snapshot preservado
+  confirmedByLabel  String?
+  consentVersion    String?
+  scheduledAt       DateTime?
+  timezone          String               @default("America/Sao_Paulo")
+  windowStart       Int                  @default(0) // minutos locais; legado = dia inteiro
+  windowEnd         Int                  @default(1440)
+  nextAttemptAt     DateTime             @default(now())
+  lastProcessedAt   DateTime?
+  retryCount        Int                  @default(0)
+  pausedAt          DateTime?
+  lastTestAt        DateTime?
+  finishedAt        DateTime?
+  error             String?
+  recipients        BroadcastRecipient[]
   /// Disparo original de um reenvio confirmado manualmente.
   retryOfCampaignId String?
   /// Campanha (`Campaign`) a que este disparo pertence; no máximo uma.
-  campaignId       String?
-  campaign         Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignId        String?
+  campaign          Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([campaignId])
@@ -801,27 +814,27 @@ model BroadcastCampaign {
 }
 
 model BroadcastRecipient {
-  id                  String            @id @default(cuid())
+  id                  String              @id @default(cuid())
   campaignId          String
-  campaign            BroadcastCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaign            BroadcastCampaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   row                 Int
   phone               String
   name                String?
   parameters          Json
   /// Qual mensagem este contato recebe: "main" (a do disparo) ou "nameless"
   /// (`BroadcastCampaign.namelessTemplate`, para quem não tem nome).
-  variant             String            @default("main")
+  variant             String              @default("main")
   /// Link público do arquivo do topo que este contato recebe (a Meta baixa).
   /// Null = mensagem sem mídia.
   mediaUrl            String?
   mediaFilename       String?
   content             String
-  status              String            @default("pending") // pending | sending | sent | failed | unknown | skipped | cancelled
+  status              String              @default("pending") // pending | sending | sent | failed | unknown | skipped | cancelled
   error               String?
-  whatsappMessageId   String?           @unique
+  whatsappMessageId   String?             @unique
   attemptedAt         DateTime?
   sentAt              DateTime?
-  isTest              Boolean           @default(false)
+  isTest              Boolean             @default(false)
   deliveryStatus      String? // sent | delivered | read | failed (retorno Meta)
   deliveredAt         DateTime?
   readAt              DateTime?
@@ -832,9 +845,9 @@ model BroadcastRecipient {
   repliedAt           DateTime?
   qualifiedAt         DateTime?
   appointmentId       String?
-  firstReplyMessageId String?           @unique
+  firstReplyMessageId String?             @unique
   /// Uma única nova tentativa por linha de origem; os recibos antigos ficam intactos.
-  retryOfRecipientId  String?           @unique
+  retryOfRecipientId  String?             @unique
   retryOfRecipient    BroadcastRecipient? @relation("BroadcastRetry", fields: [retryOfRecipientId], references: [id], onDelete: SetNull)
   retryRecipient      BroadcastRecipient? @relation("BroadcastRetry")
 
@@ -842,6 +855,7 @@ model BroadcastRecipient {
   @@index([campaignId, status])
   @@index([status, attemptedAt])
   @@index([phone, sentAt])
+  @@index([conversationId, repliedAt, id])
 }
 
 // Retorno pode chegar antes do commit do envio. Inbox durável e idempotente.
@@ -904,7 +918,15 @@ model User {
   googleId       String?   @unique
   googleLinkedAt DateTime?
 
-  passwordResetTokens PasswordResetToken[]
+  passwordResetTokens   PasswordResetToken[]
+  crmTasks              LeadTask[]
+  assignedConversations Conversation[]
+  /// WhatsApp pessoal confirmado para o grupo de transbordo (CRM-05).
+  teamWhatsapps         TeamMemberWhatsapp[]
+  /// Avisos de transbordo que esta pessoa assumiu (CRM-06).
+  handoffNotices        HandoffNotice[]
+  /// Respostas pelo celular da clínica atribuídas a esta pessoa (CRM-09).
+  authoredMessages      Message[]            @relation("MessageAuthor")
 
   /// Campanhas que esta pessoa criou (`Campaign.createdById`).
   campaignsCreated Campaign[] @relation("CampaignCreatedBy")
@@ -930,6 +952,46 @@ model User {
   @@index([tenantId])
 }
 
+/// WhatsApp pessoal de quem é da equipe (CRM-05). Liga quem escreve no grupo
+/// de transbordo ao usuário do Fechai. Uma linha por pessoa na conta; tabela
+/// própria (e não colunas em `User`) porque a pessoa poderá estar em mais de
+/// uma conta quando a SEG-01 trouxer vínculos.
+///
+/// O número só vale depois de confirmado: a pessoa manda `#vincular CÓDIGO`
+/// do próprio celular para o número da clínica (QR), no privado ou no grupo.
+/// É ela quem escreve primeiro, então o Fechai nunca dá o primeiro contato.
+/// Ver `src/modules/crm/team-whatsapp.ts`.
+model TeamMemberWhatsapp {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Número confirmado, só dígitos com 55 (exibição).
+  phone         String?
+  /// `canonicalPhone(phone)`: sem o 55 e sem o nono dígito, para o mesmo
+  /// celular nas duas grafias do WhatsApp colidir. É ele que é único na conta.
+  phoneKey      String?
+  /// Identificador @lid do WhatsApp (só a parte antes do @), aprendido quando
+  /// um evento traz o LID e o número juntos. Único na conta.
+  lid           String?
+  verifiedAt    DateTime?
+  /// Número digitado e ainda não confirmado. Não é único: quem prova a posse é
+  /// a confirmação, e um número digitado por engano não pode travar o dono.
+  pendingPhone  String?
+  pendingKey    String?
+  /// SHA-256 do código de 6 dígitos; o código em si nunca é gravado.
+  codeHash      String?
+  codeExpiresAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([tenantId, userId])
+  @@unique([tenantId, phoneKey])
+  @@unique([tenantId, lid])
+  @@index([tenantId, pendingKey])
+}
+
 /// Feedback de cliente. O sistema foi retirado da interface e do código; a
 /// tabela fica até a decisão de apagar as mensagens já gravadas (apagar é
 /// irreversível). A exportação LGPD da conta ainda inclui essas linhas.
@@ -951,18 +1013,18 @@ model Feedback {
 /// agentes da mesma conta atendem contextos diferentes e não podem se
 /// contaminar (o de vendas respondendo com documento do suporte).
 model Agent {
-  id                  String    @id @default(cuid())
+  id                  String     @id @default(cuid())
   tenantId            String
-  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name                String    @default("Meu agente")
-  systemPrompt        String    @default("")
-  objective           String    @default("")
+  tenant              Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name                String     @default("Meu agente")
+  systemPrompt        String     @default("")
+  objective           String     @default("")
   personaDraft        Json? // respostas cruas do wizard, para reeditar
   /// Definições opcionais das variáveis que o agente extrai durante a conversa.
   variableDefinitions Json?
   /// Agente que atende o número de WhatsApp da conta. Enquanto o WhatsApp for
   /// um por conta (ver CHANGELOG), exatamente um agente é o principal.
-  isPrimary           Boolean   @default(false)
+  isPrimary           Boolean    @default(false)
   /// Campanhas atendidas por este agente (`Campaign.agentId`).
   campaignsServed     Campaign[] @relation("CampaignAgent")
   /// Chave geral do agente. `false` = ele para de responder aos CLIENTES
@@ -973,20 +1035,20 @@ model Agent {
   /// O chat de teste ignora a chave (`skipEnabledCheck` em `runAgentTurn`):
   /// desligar é o que se faz para mexer no agente, e um sandbox mudo obrigava
   /// a religar — voltando a atender cliente de verdade — só para conferir.
-  enabled             Boolean   @default(true)
+  enabled             Boolean    @default(true)
   /// Ouve mensagens de voz do WhatsApp: o áudio é transcrito e o agente
   /// responde como se fosse texto. Desligado, áudios são ignorados.
-  listenAudio         Boolean   @default(true)
+  listenAudio         Boolean    @default(true)
   /// Cliente reage com um emoji ou manda só um emoji: a conversa encerra e o
   /// agente para de responder nela (mesmo mecanismo de quando um humano assume
   /// — `agentPaused`). O dono devolve a conversa em /conversas para retomar.
-  stopOnEmoji         Boolean   @default(true)
+  stopOnEmoji         Boolean    @default(true)
   /// Responde em áudio, na voz gravada pelo dono da conta (`voiceId`), quando o
   /// cliente mandou áudio — o espelho de `listenAudio`. Nasce DESLIGADO: falar
   /// exige uma voz clonada, e a conta só tem uma depois de gravar em /agentes.
   /// Ligado sem `voiceId`, ou com a Fish Audio fora do ar, a resposta sai em
   /// texto: voz é forma de entrega, nunca condição para o contato ser atendido.
-  speakReplies        Boolean   @default(false)
+  speakReplies        Boolean    @default(false)
   /// Id do modelo de voz na Fish Audio (`reference_id` do POST /v1/tts), criado
   /// a partir da amostra que o dono gravou. Não é segredo — é um identificador
   /// opaco, inútil sem a chave da plataforma —, por isso fica em claro, ao
@@ -1010,11 +1072,11 @@ model Agent {
   /// por trás de cada uma. Nasce neutra: uma voz que improvisa (e por isso ri
   /// sozinha) é surpresa no meio de um atendimento, então quem quer isso
   /// escolhe. Chave desconhecida ou null cai na neutra na leitura.
-  voiceStyle          String    @default("neutra")
+  voiceStyle          String     @default("neutra")
   /// Instruções do dono para a redação das respostas automáticas em áudio.
   /// A Fish não recebe prompts; o agente aplica esta instrução ao compor a
   /// resposta para quem mandou áudio, sem alterar mensagens escritas.
-  voicePrompt         String    @default("") @db.Text
+  voicePrompt         String     @default("") @db.Text
   /// O que o agente NÃO pronuncia quando a resposta vira áudio — um termo por
   /// linha, no mesmo formato das regras da persona (`personaDraft.avoid`).
   ///
@@ -1027,10 +1089,10 @@ model Agent {
   /// Coluna no `Agent`, e não `TenantAction.config`: voz não é uma ação do
   /// catálogo, é comportamento do agente — mesmo lugar de `speakReplies` e
   /// `voiceId`.
-  speechBlocklist     String    @default("")
-  archived            Boolean   @default(false)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  speechBlocklist     String     @default("")
+  archived            Boolean    @default(false)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   knowledgeDocs       KnowledgeDocument[]
   knowledgeGaps       KnowledgeGap[]
@@ -1190,19 +1252,21 @@ model WhatsappIncident {
 }
 
 model Lead {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name      String?
-  phone     String
-  status    String   @default("new") // new | warm | hot | scheduled | lost
+  id            String             @id @default(cuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String?
+  phone         String
+  status        String             @default("new") // new | warm | hot | scheduled | lost
+  /// Canal comprovado ao criar o contato. Legado sem registro fica nulo.
+  originChannel LeadOriginChannel?
   /// Contato criado pelo chat de teste (sandbox), não por um cliente real.
   /// Fica no banco com histórico permanente (aparece em Conversas, na aba
   /// "Testes"), mas contagem de negócio (contatos, relatórios, home) filtra
   /// `isTest: false` — antes o sandbox inflava o número de leads da conta.
-  isTest    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  isTest        Boolean            @default(false)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @default(now()) @updatedAt
 
   /// Quando o agente concluiu que este contato não é cliente em potencial
   /// (tool `disqualify_lead`). Distinto de `status: "lost"`, que é "era
@@ -1216,86 +1280,357 @@ model Lead {
   /// Postgres exige migration para cada valor novo.
   disqualifiedReason String?
 
-  conversation Conversation?
-  appointments Appointment[]
-  adOrigin     LeadAdOrigin?
+  /// Etapa do CRM, independente do status operacional. Contas e registros
+  /// ainda não provisionados podem ficar sem etapa.
+  stageId     String?
+  stage       PipelineStage?   @relation(fields: [tenantId, stageId], references: [tenantId, id], onDelete: NoAction, onUpdate: NoAction)
+  transitions LeadTransition[]
+  leadTags    LeadTag[]
+  tasks       LeadTask[]
+
+  conversation  Conversation?
+  appointments  Appointment[]
+  adOrigin      LeadAdOrigin?
   campaignLinks CampaignLead[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, updatedAt, id])
   @@index([tenantId])
   @@index([tenantId, isTest])
+  @@index([tenantId, stageId, id])
   /// Suporta a contagem por período da triagem (relatórios) sem varrer a tabela.
   @@index([tenantId, disqualifiedAt])
 }
 
+enum LeadOriginChannel {
+  whatsapp_qr
+  whatsapp_meta
+  widget
+  manual
+  broadcast
+  ad
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  key       String
+  createdAt DateTime  @default(now())
+  leadTags  LeadTag[]
+
+  @@unique([tenantId, key])
+  @@unique([tenantId, id])
+}
+
+model LeadTag {
+  id        String   @id @default(cuid())
+  tenantId  String
+  leadId    String
+  lead      Lead     @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
+  tagId     String
+  tag       Tag      @relation(fields: [tenantId, tagId], references: [tenantId, id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, leadId, tagId])
+  @@index([tenantId, tagId, leadId])
+}
+
+model LeadTask {
+  id             String    @id @default(cuid())
+  tenantId       String
+  leadId         String
+  lead           Lead      @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
+  text           String
+  dueAt          DateTime
+  assignedUserId String?
+  assignedUser   User?     @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId, leadId, dueAt])
+  @@index([tenantId, completedAt, dueAt, id])
+}
+
+enum CrmStageKind {
+  new
+  ai
+  waiting_human
+  human
+  scheduled
+  attended
+  won
+  lost
+}
+
+model Pipeline {
+  id        String          @id @default(cuid())
+  tenantId  String
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Chave estável dentro da conta, inclusive se o nome mudar.
+  key       String
+  name      String
+  niche     String
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  stages    PipelineStage[]
+
+  @@unique([tenantId, key])
+  @@unique([tenantId, id])
+}
+
+model PipelineStage {
+  id         String        @id @default(cuid())
+  tenantId   String
+  pipelineId String
+  pipeline   Pipeline      @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Cascade)
+  /// Identidade semântica das etapas de sistema. Null identifica uma etapa
+  /// personalizada e permite mais de uma no pipeline.
+  kind       CrmStageKind?
+  name       String
+  position   Int
+  color      String
+  archivedAt DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  leads           Lead[]
+  transitionsFrom LeadTransition[] @relation("LeadTransitionFromStage")
+  transitionsTo   LeadTransition[] @relation("LeadTransitionToStage")
+
+  @@unique([pipelineId, kind])
+  @@unique([tenantId, id])
+  @@index([tenantId, pipelineId, position, id])
+}
+
+enum LeadTransitionDimension {
+  stage
+  status
+}
+
+enum LeadTransitionSource {
+  ai
+  system
+  user
+  group
+}
+
+/// Histórico compartilhado de CRM-01 e REL-06. Cada linha descreve uma
+/// dimensão e preenche somente o par de campos de antes/depois correspondente.
+model LeadTransition {
+  id              String                  @id @default(cuid())
+  tenantId        String
+  leadId          String
+  lead            Lead                    @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
+  dimension       LeadTransitionDimension
+  source          LeadTransitionSource
+  fromStageId     String?
+  fromStage       PipelineStage?          @relation("LeadTransitionFromStage", fields: [tenantId, fromStageId], references: [tenantId, id], onDelete: NoAction, onUpdate: NoAction)
+  toStageId       String?
+  toStage         PipelineStage?          @relation("LeadTransitionToStage", fields: [tenantId, toStageId], references: [tenantId, id], onDelete: NoAction, onUpdate: NoAction)
+  fromStatus      String?
+  toStatus        String?
+  /// ID histórico do autor, validado no escopo do tenant na escrita.
+  userId          String?
+  reason          String?
+  /// Rótulo e justificativa preservados mesmo quando a conta edita o catálogo.
+  lossReasonLabel String?
+  lossReasonNote  String?
+  /// Identidade do evento de origem, quando a transição é automática.
+  eventKey        String?
+  eventAt         DateTime?
+  createdAt       DateTime                @default(now())
+
+  @@unique([tenantId, eventKey])
+  @@index([tenantId, leadId, createdAt, id])
+}
+
 model Conversation {
-  id               String    @id @default(cuid())
-  tenantId         String
-  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // Qual agente atendeu. `SetNull` (e não Cascade): excluir um agente não pode
   // apagar o histórico de conversas nem os leads que ele gerou.
-  agentId          String?
-  agent            Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  leadId           String    @unique
-  lead             Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  messages         Message[]
-  needsHuman       Boolean   @default(false)
+  agentId           String?
+  agent             Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  leadId            String    @unique
+  lead              Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages          Message[]
+  needsHuman        Boolean   @default(false)
   /// Verdadeiro depois que um humano responde manualmente pelo painel
   /// (`sendManualMessage`). Enquanto ligado, `runAgentTurn` não gera resposta
   /// automática NESTA conversa — as outras do mesmo agente continuam normais.
   /// `needsHuman` sozinho não bastava: é só sinalizador de fila, nada no motor
   /// olhava pra ele antes de responder.
-  agentPaused      Boolean   @default(false)
+  agentPaused       Boolean   @default(false)
   /// Espelha `Lead.isTest` para as consultas de conversa não precisarem de join.
-  isTest           Boolean   @default(false)
-  lastInboundAt    DateTime?
+  isTest            Boolean   @default(false)
+  lastInboundAt     DateTime?
+  /// Entrada autenticada do contato. Usada para validar resposta pelo CRM.
+  whatsappInboundAt DateTime?
+  whatsappInbound   Json?
+  assignedUserId    String?
+  assignedUser      User?     @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
+  assignedAt        DateTime?
   /// Por qual conexão o contato falou por último: `evolution` (QR code) ou
   /// `meta` (API oficial). Com as duas conectadas, é o que decide de qual número
   /// saem a resposta manual, o follow-up e o lembrete — o contato só conhece o
   /// número em que escreveu, e um primeiro contato pelo outro leva ao bloqueio
   /// (QR) ou à recusa da Meta (fora da janela). Null = conversa anterior a esta
   /// coluna, do site ou de teste. Ver `modules/whatsapp/instances.ts`.
-  whatsappProvider String?
+  whatsappProvider  String?
   /// Última mensagem de follow-up enviada, de qualquer etapa. Relatório e
   /// painel leem como "recebeu follow-up"; o worker usa como ponto de partida
   /// da etapa seguinte.
-  followUpSentAt   DateTime?
+  followUpSentAt    DateTime?
   /// Quantas etapas da esteira atual já saíram. Só vale enquanto o contato não
   /// escreveu depois do último envio (`followUpSentAt >= lastInboundAt`): a
   /// resposta encerra a esteira sem ninguém precisar zerar a coluna, e o
   /// próximo silêncio começa da etapa 1. Ver workers/follow-up-worker/scan.ts.
-  followUpStep     Int       @default(0)
+  followUpStep      Int       @default(0)
   /// Como o contato deixou a conversa, registrado pelo agente (tool
   /// `follow_up`): null = só parou de responder (esteira "sem resposta"),
   /// "declined" = não quer agendar agora (esteira espaçada), "stop" = sem
   /// interesse / pediu para parar (nenhum follow-up). Persiste entre mensagens
   /// de propósito: o "obrigado" depois de "vou pensar" não pode devolver o
   /// contato à esteira de 30 minutos.
-  followUpReason   String?
+  followUpReason    String?
   /// Resumo em texto do que foi conversado, gerado sob demanda pelo LLM ativo
   /// (`summarizeConversation`). Existe para o dono da conta entender uma
   /// conversa de 60 mensagens sem ler tudo. Null = nunca resumida.
-  summary          String?
+  summary           String?
   /// Quando o resumo foi gerado — mostrado na interface como "resumido há X".
-  summaryAt        DateTime?
+  summaryAt         DateTime?
   /// Quantas mensagens a conversa tinha quando o resumo foi gerado. É o que
   /// permite dizer "desatualizado, N mensagens novas" sem regerar nada: basta
   /// comparar com a contagem atual. Sem isso, o resumo em cache mentiria em
   /// silêncio conforme a conversa continuasse.
-  summaryMsgCount  Int?
+  summaryMsgCount   Int?
   /// Valores por conversa: { chave: valor }. Ausência = não informado.
-  variables        Json?
-  updatedAt        DateTime  @updatedAt
+  variables         Json?
+  updatedAt         DateTime  @updatedAt
 
   appointments            Appointment[]
   reportEvents            ReportEvent[]
   knowledgeGapOccurrences KnowledgeGapOccurrence[]
   insight                 ConversationInsight?
   satisfactionSurveys     SatisfactionSurvey[]
+  assignments             ConversationAssignment[]
+  handoffNotices          HandoffNotice[]
 
+  @@unique([tenantId, id])
   @@index([tenantId])
   @@index([agentId])
   @@index([tenantId, isTest])
+}
+
+enum HandoffNoticeStatus {
+  waiting
+  assumed
+  returned
+  expired
+}
+
+enum HandoffAssumedVia {
+  group
+  panel
+  phone
+}
+
+/// Aviso de transbordo (CRM-06): uma linha por espera da equipe, do momento em
+/// que a conversa passa para humano até alguém assumir ou devolver para a IA.
+/// Liga a conversa à mensagem que foi ao grupo (`messageId`, o id que
+/// `sendGroupMessage` devolve), que é o que permite ler depois a resposta ou a
+/// reação ao aviso no grupo.
+///
+/// Existe também sem grupo (conta só com a Meta, aviso desligado ou falha no
+/// envio): o transbordo acontece no Fechai de qualquer jeito. Só uma espera
+/// fica aberta (`waiting`) por conversa; um novo transbordo com ela aberta só
+/// a atualiza. Ver `src/modules/agent-engine/handoff-notice.ts`.
+model HandoffNotice {
+  id             String              @id @default(cuid())
+  tenantId       String
+  conversationId String
+  conversation   Conversation        @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Cascade)
+  /// Quem pediu a equipe: `agent` (tool), `reaction`, `unanswered` (fila de perguntas) ou `campaign`.
+  trigger        String
+  /// Motivo informado no transbordo mais recente (sem dado do contato além do que o agente escreveu).
+  reason         String?
+  /// Grupo e mensagem do aviso. Nulos quando o aviso não foi ao grupo.
+  groupId        String?
+  messageId      String?
+  sentAt         DateTime?
+  status         HandoffNoticeStatus @default(waiting)
+  assignedUserId String?
+  assignedUser   User?               @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
+  assumedAt      DateTime?
+  assumedVia     HandoffAssumedVia?
+  /// Assumido no grupo por um número que não está ligado a ninguém da equipe
+  /// (CRM-08): o telefone de quem respondeu, para a pessoa se identificar depois.
+  assumedByPhone String?
+  closedAt       DateTime?
+  /// Transbordos repetidos com esta espera ainda aberta (não viram novo aviso).
+  repeatCount    Int                 @default(0)
+  /// Prazo do transbordo (CRM-10): quando a espera passou do 1º limite e o
+  /// grupo foi avisado de novo, e quando passou do 2º e foi escalonada. Marcados
+  /// **antes** do envio: um alerta por limite, nunca repetido.
+  alertedAt      DateTime?
+  escalatedAt    DateTime?
+  /// 1ª resposta humana depois deste transbordo (painel ou celular): a base da
+  /// "mediana até a 1ª resposta" por pessoa (CRM-11). Gravada uma vez.
+  firstReplyAt   DateTime?
+  /// Por onde a espera voltou para a IA: "panel", "group" ou "auto" (CRM-12,
+  /// o prazo sem resposta humana). É o que faz a IA reconhecer a demora.
+  returnedVia    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([tenantId, conversationId, status])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, messageId])
+  /// Varredura do prazo no worker, por todas as contas.
+  @@index([status, createdAt])
+}
+
+/// Prazos do transbordo por conta (CRM-10). Sem linha valem os padrões: alerta
+/// no grupo aos 15 min, escalonamento aos 60 min, contando só o expediente.
+model HandoffSlaSettings {
+  tenantId                    String   @id
+  tenant                      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Minutos de espera até avisar o grupo de novo, citando o aviso.
+  alertMinutes                Int      @default(15)
+  /// Minutos de espera até escalonar para os donos (painel e, ligado, e-mail).
+  escalateMinutes             Int      @default(60)
+  /// Conta só o tempo dentro do horário de atendimento cadastrado (do agente
+  /// principal). Sem horário cadastrado, conta o tempo todo.
+  businessHoursOnly           Boolean  @default(true)
+  /// O escalonamento também vai por e-mail aos donos da conta.
+  escalateByEmail             Boolean  @default(true)
+  /// Devolver para a IA depois de N horas sem resposta humana (CRM-12). Null =
+  /// desligado (o padrão: as contas não mudam de comportamento).
+  autoReturnHours             Int?
+  /// A devolução automática conta só o horário de atendimento cadastrado.
+  autoReturnBusinessHoursOnly Boolean  @default(false)
+  /// Vale também para quem já está em atendimento humano e ficou sem resposta.
+  autoReturnHumanStage        Boolean  @default(false)
+  updatedById                 String?
+  updatedAt                   DateTime @updatedAt
+}
+
+model ConversationAssignment {
+  id             String       @id @default(cuid())
+  tenantId       String
+  conversationId String
+  conversation   Conversation @relation(fields: [tenantId, conversationId], references: [tenantId, id], onDelete: Cascade)
+  /// Identidades históricas, com validação de conta durante a escrita.
+  fromUserId     String?
+  toUserId       String?
+  actorUserId    String
+  via            String
+  createdAt      DateTime     @default(now())
+
+  @@index([tenantId, conversationId, createdAt, id])
 }
 
 model Message {
@@ -1337,9 +1672,19 @@ model Message {
   /// "tempo de áudio economizado" do ROI mensal. Null = não medido: texto,
   /// formato que não sabemos ler, ou áudio anterior a esta coluna — nunca zero.
   audioSeconds      Int?
+  /// Quem da equipe escreveu uma mensagem humana. O CRM-09 preenche nas
+  /// respostas pelo celular da clínica: o responsável da conversa naquele
+  /// momento, ou quem se identificou depois ("Fui eu" no card, "assumo" no
+  /// grupo). Null = humano não identificado, ou mensagem anterior à coluna.
+  sentByUserId      String?
+  sentByUser        User?        @relation("MessageAuthor", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  /// "phone" = a equipe respondeu pelo celular ou pelo WhatsApp Web da clínica
+  /// (o eco `fromMe` que não é automação). Null nas demais mensagens.
+  sentVia           String?
   createdAt         DateTime     @default(now())
 
   @@index([conversationId])
+  @@index([sentByUserId])
 }
 
 /// Um horário marcado com um lead. Nasce de duas formas: o agente usando a

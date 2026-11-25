@@ -1,4 +1,6 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { lockCrmAdmission, newLeadCrmFields } from "@/modules/crm/admission";
 import { recordAudit } from "./log";
 import { eventDef, isRevertibleEvent } from "./events";
 import { containsRedacted, isTruncated } from "./redact";
@@ -327,7 +329,17 @@ async function restoreDeleted(
   data.id = log.targetId;
 
   try {
-    await delegate.create({ data });
+    if (model.delegate === "lead" && typeof data.tenantId === "string") {
+      const tenantId = data.tenantId;
+      await prisma.$transaction(async (db) => {
+        await lockCrmAdmission(db, tenantId, "shared");
+        const crmFields = await newLeadCrmFields(db, tenantId);
+        const restoredLead = data as Prisma.LeadUncheckedCreateInput;
+        await db.lead.create({ data: { ...restoredLead, ...crmFields } });
+      });
+    } else {
+      await delegate.create({ data });
+    }
   } catch (error) {
     console.error("[audit] falha ao restaurar registro excluído", log.targetId, error);
     return {

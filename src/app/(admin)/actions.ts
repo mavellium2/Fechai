@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { PlanKey } from "@prisma/client";
+import { auth } from "@/auth";
+import type { ActionResult } from "@/components/ui/toast/types";
 import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { requireSuperadmin } from "@/lib/session";
@@ -38,6 +40,7 @@ import { revertAuditLog } from "@/modules/audit/revert";
 import { deleteAuditLog } from "@/modules/audit/delete";
 import { requestContext } from "@/modules/auth/attempts";
 import { blockIp, unblockIp, ipActivity } from "@/modules/auth/ip-block";
+import { setCrmEnabled } from "@/modules/crm/activation";
 
 import { recordUsage } from "@/modules/ai/usage";
 import { buildAgentPackage, createAgentFromPackage } from "@/modules/agent-engine/transfer";
@@ -461,6 +464,59 @@ export async function setTenantEvolutionWhatsappEnabled(
       ? "WhatsApp por QR liberado para esta conta."
       : "WhatsApp por QR desligado. A sessão foi mantida e volta ao reativar.",
   };
+}
+
+/** Libera a conta somente depois de preparar o pipeline e a base de leads. */
+export async function setTenantCrmEnabled(
+  tenantId: string,
+  enabled: boolean,
+): Promise<ActionResult> {
+  // A sessão real autoriza a mudança e permite retornar feedback ao controle modal.
+  const session = await auth();
+  if (!session?.user) {
+    return { ok: false, code: "auth", error: "Sua sessão expirou. Faça login novamente." };
+  }
+  if (session.user.role !== "SUPERADMIN") {
+    return { ok: false, code: "forbidden", error: "O acesso ao CRM é gerenciado pelo superadministrador." };
+  }
+  if (typeof tenantId !== "string" || !tenantId.trim() || typeof enabled !== "boolean") {
+    return { ok: false, code: "validation", error: "Informe uma conta e um estado válidos para o CRM." };
+  }
+
+  let result: Awaited<ReturnType<typeof setCrmEnabled>>;
+  try {
+    result = await setCrmEnabled(tenantId, enabled);
+  } catch (error) {
+    console.error("[admin] falha ao alterar acesso ao CRM", error);
+    return { ok: false, code: "server", error: "Não foi possível salvar o acesso ao CRM. Tente novamente." };
+  }
+
+  if (result === "not_found") return { ok: false, code: "validation", error: "Conta não encontrada." };
+  if (result === "inactive") {
+    return { ok: false, code: "validation", error: "Reative a conta antes de liberar o CRM." };
+  }
+
+  revalidatePath("/admin/contas");
+  if (result === "superseded") {
+    return {
+      ok: false,
+      code: "validation",
+      error: "Outra solicitação de acesso ao CRM foi iniciada para esta conta. Confira o estado atual.",
+    };
+  }
+  if (result === "changed") {
+    await recordChange({
+      event: "admin.crm_access_changed",
+      target: { type: "Tenant", id: tenantId },
+      before: { crmEnabled: !enabled },
+      after: { crmEnabled: enabled },
+      tenantId,
+    });
+    revalidatePath("/admin/logs");
+    revalidatePath("/crm");
+    revalidatePath("/inicio");
+  }
+  return { ok: true, info: enabled ? "CRM liberado para esta conta." : "Acesso ao CRM desativado." };
 }
 
 export type CreateAccountResult = {

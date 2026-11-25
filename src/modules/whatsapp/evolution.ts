@@ -13,14 +13,30 @@ function isPhoneJid(value: unknown): value is string {
     /^\d{8,15}@(s\.whatsapp\.net|c\.us)$/.test(value);
 }
 
+/** Identificador @lid: número opaco do WhatsApp, nunca um telefone. */
+function isLidJid(value: unknown): value is string {
+  return typeof value === "string" && /^\d{5,20}@lid$/.test(value);
+}
+
+function pairedPhone(value: unknown) {
+  if (typeof value !== "string") return null;
+  return /^([1-9]\d{7,14})(?::\d+)?@(s\.whatsapp\.net|c\.us)$/.exec(value)?.[1] ?? null;
+}
+
 type EvolutionMessageContent = {
   conversation?: string;
-  extendedTextMessage?: { text?: string };
+  /** `contextInfo.stanzaId` é o id da mensagem citada (resposta a uma mensagem). */
+  extendedTextMessage?: { text?: string; contextInfo?: { stanzaId?: string } | null };
   audioMessage?: { seconds?: unknown } | null;
   pttMessage?: { seconds?: unknown } | null;
-  reactionMessage?: { text?: string; key?: { remoteJid?: string } };
+  reactionMessage?: { text?: string; key?: { remoteJid?: string; id?: string } };
   ephemeralMessage?: { message?: EvolutionMessageContent | null } | null;
 };
+
+/** Id de mensagem do WhatsApp: texto curto, sem espaço. Qualquer outra coisa é ignorada. */
+function messageId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[\w.:-]{1,128}$/.test(value) ? value : undefined;
+}
 
 function unwrapEphemeralMessage(message: EvolutionMessageContent | undefined) {
   // O temporizador do contato pode envolver texto/voz em vez de mudar o tipo
@@ -197,6 +213,26 @@ export class EvolutionProvider implements WhatsAppProvider {
     }
   }
 
+  async getConnectedPhone(externalId: string): Promise<string | null> {
+    if (!externalId || !this.isConfigured()) return null;
+    try {
+      const response = await this.fetchWithTimeout(
+        `${this.baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(externalId)}`,
+        { headers: this.headers(), cache: "no-store" },
+        4_000,
+      );
+      if (!response.ok) return null;
+      const rows: unknown = await response.json();
+      if (!Array.isArray(rows)) return null;
+      const row = rows.find((item) => item?.name === externalId || item?.instance?.instanceName === externalId);
+      if (row?.name === externalId) return row.connectionStatus === "open" ? pairedPhone(row.ownerJid) : null;
+      const instance = row?.instance;
+      return instance?.status === "open" ? pairedPhone(instance.owner) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async sendMessage(externalId: string, toPhone: string, text: string): Promise<string | null> {
     const res = await this.fetchWithTimeout(`${this.baseUrl}/message/sendText/${externalId}`, {
       method: "POST",
@@ -233,7 +269,12 @@ export class EvolutionProvider implements WhatsAppProvider {
     return data.key?.id ?? null;
   }
 
-  async sendGroupMessage(externalId: string, groupId: string, text: string): Promise<string | null> {
+  async sendGroupMessage(
+    externalId: string,
+    groupId: string,
+    text: string,
+    quotedMessageId?: string | null,
+  ): Promise<string | null> {
     // O destino é exclusivamente um JID de grupo; nunca o telefone do lead.
     if (!/^\d[\d-]*@g\.us$/.test(groupId)) throw new Error("ID de grupo inválido.");
     const res = await this.fetchWithTimeout(
@@ -241,7 +282,10 @@ export class EvolutionProvider implements WhatsAppProvider {
       {
         method: "POST",
         headers: this.headers(),
-        body: JSON.stringify({ number: groupId, text }),
+        // A citação aponta para uma mensagem que o próprio número enviou no grupo.
+        body: JSON.stringify(quotedMessageId
+          ? { number: groupId, text, quoted: { key: { id: quotedMessageId, remoteJid: groupId, fromMe: true } } }
+          : { number: groupId, text }),
       },
     );
     if (!res.ok) {
@@ -415,16 +459,26 @@ export class EvolutionProvider implements WhatsAppProvider {
     // Formato do evento messages.upsert da Evolution API.
     const p = payload as {
       instance?: string;
+      sender?: unknown;
       data?: {
         key?: {
           remoteJid?: string;
           remoteJidAlt?: string;
           senderPn?: string;
+          /** Em grupos: quem escreveu (@s.whatsapp.net ou @lid). */
+          participant?: string;
+          /** Em grupos endereçados por LID: o outro identificador da mesma pessoa. */
+          participantAlt?: string;
+          /** Nome antigo do mesmo campo em versões anteriores da Evolution. */
+          participantPn?: string;
           fromMe?: boolean;
           id?: string;
         };
         pushName?: string;
+        messageTimestamp?: number | string;
         message?: EvolutionMessageContent;
+        /** Algumas versões repetem o contexto da mensagem fora de `message`. */
+        contextInfo?: { stanzaId?: string } | null;
       };
     };
     const data = p?.data;
@@ -464,13 +518,35 @@ export class EvolutionProvider implements WhatsAppProvider {
     if (!contactJid || (!isGroup && !isPhoneJid(contactJid))) return null;
     const fromPhone = contactJid.split("@")[0];
     if ((!text && !hasAudio) || !fromPhone) return null;
+    // Em grupo, o remetente é o participante. O WhatsApp pode esconder o número
+    // atrás de um @lid; quando o evento traz os dois, a equipe aprende o LID.
+    const participants = isGroup
+      ? [data.key?.participant, data.key?.participantAlt, data.key?.participantPn]
+      : [];
+    const participantPhone = participants.find(isPhoneJid)?.split("@")[0];
+    const participantLid = participants.find(isLidJid)?.split("@")[0];
+    const groupSender = participantPhone || participantLid
+      ? { ...(participantPhone ? { phone: participantPhone } : {}), ...(participantLid ? { lid: participantLid } : {}) }
+      : undefined;
+    const contactLid = !isGroup && isLidJid(jid) ? jid.split("@")[0] : undefined;
+    // Só em grupo (CRM-08): a que mensagem a resposta ou a reação se refere.
+    // É o que liga "assumo" ou 👍 ao aviso de transbordo.
+    const quotedMessageId = isGroup && !reaction
+      ? messageId(message?.extendedTextMessage?.contextInfo?.stanzaId) ?? messageId(data.contextInfo?.stanzaId)
+      : undefined;
+    const reactionTargetId = isGroup && reaction ? messageId(reaction.key?.id) : undefined;
 
     // O anúncio vem na mensagem do próprio lead; o que a clínica envia não o carrega.
     const adOrigin = data.key?.fromMe || isGroup ? null : extractEvolutionAdOrigin(data);
+    const receiverPhone = pairedPhone(p.sender);
+    const timestamp = Number(data.messageTimestamp);
+    const occurredAt = Number.isSafeInteger(timestamp) && timestamp > 0 && timestamp < 1e11 ? new Date(timestamp * 1_000) : undefined;
 
     return {
       ...(adOrigin ? { adOrigin } : {}),
       instanceExternalId: p.instance ?? "",
+      ...(receiverPhone && { receiverPhone }),
+      ...(occurredAt && { occurredAt }),
       fromPhone,
       // Em mensagens enviadas pela própria conta, pushName é o nome do
       // WhatsApp conectado, não o nome do destinatário.
@@ -478,6 +554,10 @@ export class EvolutionProvider implements WhatsAppProvider {
       text,
       // Grupos têm JID com sufixo @g.us (ex: 5511999999999-1615000000@g.us).
       isGroup,
+      ...(groupSender && !data.key?.fromMe ? { groupSender } : {}),
+      ...(contactLid ? { contactLid } : {}),
+      ...(quotedMessageId ? { quotedMessageId } : {}),
+      ...(reactionTargetId ? { reactionTargetId } : {}),
       hasAudio,
       ...(audioSeconds ? { audioSeconds } : {}),
       messageKeyId: data.key?.id,

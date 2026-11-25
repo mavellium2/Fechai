@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, Building2, CalendarDays, CircleHelp, Cpu, HandCoins, Home, Megaphone, MessageCircle, MessagesSquare, Plug, ScrollText, Send, Settings, Star, Users } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, CircleHelp, Columns3, Cpu, HandCoins, Home, Megaphone, MessageCircle, MessagesSquare, Plug, ScrollText, Send, Settings, Star, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,6 +23,7 @@ const ICONS = {
   Cpu,
   Star,
   Users,
+  Columns3,
   Plug,
   HandCoins,
   ScrollText,

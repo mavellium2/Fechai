@@ -101,7 +101,7 @@ describe("reação no webhook do WhatsApp", () => {
       "tenant-1",
       "agente-1",
       "conversa-1",
-      { isTest: false, reason: "Atendente assumiu a conversa por reação no WhatsApp." },
+      { isTest: false, reason: "Atendente assumiu a conversa por reação no WhatsApp.", trigger: "reaction" },
     );
   });
 

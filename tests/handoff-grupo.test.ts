@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 
 /**
  * Testes da regra "transferiu para humano → aviso no grupo interno".
@@ -15,11 +14,18 @@ import { z } from "zod";
  *   mensagem em laço — a transferência já aconteceu, o grupo é o extra.
  */
 
-const db = vi.hoisted(() => ({
-  tenantAction: { findUnique: vi.fn(), upsert: vi.fn() },
-  whatsappInstance: { findMany: vi.fn() },
-  conversation: { findFirst: vi.fn(), updateMany: vi.fn() },
-}));
+const db = vi.hoisted(() => {
+  const client = {
+    tenantAction: { findUnique: vi.fn(), upsert: vi.fn() },
+    whatsappInstance: { findMany: vi.fn() },
+    conversation: { findFirst: vi.fn(), updateMany: vi.fn() },
+    handoffNotice: { findFirst: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
+  };
+  client.$transaction.mockImplementation((fn: (tx: typeof client) => unknown) => fn(client));
+  return client;
+});
 const provider = vi.hoisted(() => ({
   sendGroupMessage: vi.fn<(instance: string, group: string, text: string) => Promise<string | null>>(async () => "aviso-1"),
   isConfigured: vi.fn(() => true),
@@ -50,6 +56,7 @@ import {
   type HandoffConfig,
 } from "@/modules/agent-engine/handoff";
 import { getToolSchemas, runToolHandler } from "@/modules/agent-engine/tools";
+import { handoffConfigSchema } from "@/modules/agent-engine/handoff-form";
 import { EvolutionProvider } from "@/modules/whatsapp/evolution";
 
 const TENANT = "tenant-1";
@@ -63,9 +70,18 @@ function conversaReal() {
   return {
     isTest: false,
     summary: RESUMO,
-    lead: { name: "Luciane Aparecida Dos Santos", phone: TELEFONE, isTest: false },
+    leadId: "lead-1",
+    tenant: { crmEnabled: false, status: "active" },
+    lead: { name: "Luciane Aparecida Dos Santos", phone: TELEFONE, isTest: false, originChannel: null as string | null, adOrigin: null as { tenantId: string } | null },
     messages: [{ content: "Quero fechar meu orçamento hoje." }],
   };
+}
+
+/** Nenhuma espera aberta: o transbordo cria uma e avisa o grupo. */
+function semEsperaAberta() {
+  db.handoffNotice.findFirst.mockResolvedValue(null);
+  db.handoffNotice.create.mockResolvedValue({ id: "aviso-db-1" });
+  db.handoffNotice.updateMany.mockResolvedValue({ count: 1 });
 }
 
 /** Ação de transferência do agente, ligada e com grupo, salvo indicação contrária. */
@@ -112,7 +128,7 @@ describe("ID do grupo (normalizeGroupId)", () => {
 
 /** Config completa, ligada ao grupo, salvo indicação contrária. */
 function config(over: Partial<HandoffConfig> = {}): HandoffConfig {
-  return { notifyGroup: true, groupId: GRUPO, groupName: "Recepção", groupReason: "", ...over };
+  return { notifyGroup: true, groupId: GRUPO, groupName: "Recepção", groupReason: "", whileWaiting: "continue", ...over };
 }
 
 describe("Leitura da config (parseHandoffConfig)", () => {
@@ -122,6 +138,7 @@ describe("Leitura da config (parseHandoffConfig)", () => {
       groupId: null,
       groupName: null,
       groupReason: "",
+      whileWaiting: "continue",
     });
   });
 
@@ -131,6 +148,7 @@ describe("Leitura da config (parseHandoffConfig)", () => {
       groupId: GRUPO,
       groupName: null,
       groupReason: "",
+      whileWaiting: "continue",
     });
   });
 
@@ -208,36 +226,8 @@ describe("Motivo na descrição da tool (handoffToolDescription)", () => {
   });
 });
 
-/**
- * O schema do formulário, reproduzido aqui (a action importa `requireTenant` e
- * meio mundo de server-only). O que importa proteger é a REGRA, e ela é a
- * mesma: recusar antes de normalizar, para um ID inválido virar erro na tela em
- * vez de "salvo" com a opção silenciosamente desligada.
- */
-const schema = z
-  .object({
-    notifyGroup: z
-      .string()
-      .optional()
-      .transform((v) => v === "on" || v === "true"),
-    groupId: z.string().trim().optional().default(""),
-    groupName: z.string().trim().optional().default(""),
-    groupReason: z.string().trim().max(MAX_GROUP_REASON).optional().default(""),
-  })
-  .superRefine((data, ctx) => {
-    if (data.notifyGroup && !normalizeGroupId(data.groupId)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["groupId"], message: "ID inválido" });
-    }
-  })
-  .transform((data): HandoffConfig => {
-    const groupId = normalizeGroupId(data.groupId);
-    return {
-      notifyGroup: data.notifyGroup && Boolean(groupId),
-      groupId,
-      groupName: groupId && data.groupName ? data.groupName.slice(0, MAX_GROUP_NAME) : null,
-      groupReason: data.groupReason,
-    };
-  });
+/** O schema do formulário é o mesmo da action (`agent-engine/handoff-form.ts`). */
+const schema = handoffConfigSchema;
 
 describe("Envio do formulário de transferência", () => {
   it("aceita ligado com grupo válido, nome e motivo", () => {
@@ -344,6 +334,7 @@ describe("Resposta da Evolution (EvolutionProvider.listGroups)", () => {
 describe("Avisar a equipe no grupo (notifyHandoffGroup)", () => {
   beforeEach(() => {
     whatsappConectado();
+    semEsperaAberta();
     db.conversation.findFirst.mockResolvedValue(conversaReal());
     provider.isConfigured.mockReturnValue(true);
   });
@@ -352,13 +343,14 @@ describe("Avisar a equipe no grupo (notifyHandoffGroup)", () => {
     vi.clearAllMocks();
   });
 
-  it("envia nome, número e resumo ao grupo, nunca ao telefone do lead", async () => {
+  it("envia nome, número, origem e resumo ao grupo, nunca ao telefone do lead", async () => {
     acaoConfigurada();
     await notifyHandoffGroup(TENANT, AGENTE, CONVERSA);
     expect(provider.sendGroupMessage).toHaveBeenCalledWith(
       "tenant_tenant-1",
       GRUPO,
-      `Nome: Luciane Aparecida Dos Santos\nNúmero: +55 14 99763-1563\nResumo: ${RESUMO}`,
+      `Nome: Luciane Aparecida Dos Santos\nNúmero: +55 14 99763-1563\nOrigem: não registrada\nResumo: ${RESUMO}`
+        + "\nResponda *assumo* ou reaja 👍 para ficar com este lead. *#ia* devolve para a IA.",
     );
     expect(provider.sendGroupMessage).toHaveBeenCalledTimes(1);
     expect(db.conversation.findFirst).toHaveBeenCalledWith(expect.objectContaining({
@@ -374,7 +366,7 @@ describe("Avisar a equipe no grupo (notifyHandoffGroup)", () => {
     await notifyHandoffGroup(TENANT, AGENTE, CONVERSA, { reason: "Quer fechar hoje." });
     expect(provider.sendGroupMessage).toHaveBeenCalledWith(
       "tenant_tenant-1", GRUPO,
-      expect.stringContaining(`Resumo: ${RESUMO} — Motivo da prioridade: Quer fechar hoje.`),
+      expect.stringContaining(`Resumo: ${RESUMO}\nMotivo: Quer fechar hoje.`),
     );
   });
 
@@ -385,7 +377,7 @@ describe("Avisar a equipe no grupo (notifyHandoffGroup)", () => {
     });
     await notifyHandoffGroup(TENANT, AGENTE, CONVERSA, { reason: "Pediu a recepção." });
     expect(provider.sendGroupMessage).toHaveBeenCalledWith("tenant_tenant-1", GRUPO,
-      expect.stringContaining("Resumo: Preciso de implante. · Quero fechar hoje. — Motivo da prioridade: Pediu a recepção."));
+      expect.stringContaining("Resumo: Preciso de implante. · Quero fechar hoje.\nMotivo: Pediu a recepção."));
   });
 
   it.each(["conversa", "lead"])("não envia quando o banco marca %s como teste, mesmo sem a opção do chamador", async (kind) => {
@@ -405,12 +397,14 @@ describe("Avisar a equipe no grupo (notifyHandoffGroup)", () => {
     expect(provider.sendGroupMessage).not.toHaveBeenCalled();
   });
 
-  it("Meta não recebe tentativa de envio para grupo", async () => {
+  it("Meta não recebe tentativa de envio para grupo, mas a espera fica registrada no Fechai", async () => {
     acaoConfigurada();
     db.whatsappInstance.findMany.mockResolvedValue([{ externalId: "phone-1", status: "connected", provider: "meta" }]);
     await notifyHandoffGroup(TENANT, AGENTE, CONVERSA);
     expect(provider.sendGroupMessage).not.toHaveBeenCalled();
-    expect(db.conversation.findFirst).not.toHaveBeenCalled();
+    expect(db.handoffNotice.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ tenantId: TENANT, conversationId: CONVERSA }),
+    }));
   });
 
   it("não envia com provider sem credenciais", async () => {
@@ -483,6 +477,7 @@ describe("Transferência com a Evolution e a Meta conectadas", () => {
   };
 
   beforeEach(() => {
+    semEsperaAberta();
     provider.isConfigured.mockReturnValue(true);
     db.conversation.findFirst.mockResolvedValue(conversaReal());
   });
@@ -538,23 +533,39 @@ describe("Transferência com a Evolution e a Meta conectadas", () => {
 });
 
 describe("Formato do aviso", () => {
-  it("mantém as três linhas mesmo com quebras nos dados e limita o resumo", () => {
-    const notice = formatHandoffNotice({ name: "Luciane\nSantos", phone: TELEFONE, summary: "texto\n".repeat(200), reason: "Orçamento\nurgente." });
-    expect(notice.split("\n")).toHaveLength(3);
+  it("uma informação por linha, mesmo com quebras nos dados, e limita o resumo", () => {
+    const notice = formatHandoffNotice({ name: "Luciane\nSantos", phone: TELEFONE, summary: "texto\n".repeat(200), reason: "Orçamento\nurgente.", origin: "Anúncio\nfalso" });
+    expect(notice.split("\n")).toHaveLength(5);
     expect(notice).toContain("Nome: Luciane Santos");
-    expect(notice).toContain("… — Motivo da prioridade: Orçamento urgente.");
-    expect(notice.length).toBeLessThan(1000);
+    expect(notice).toContain("Origem: Anúncio falso");
+    expect(notice).toContain("…\nMotivo: Orçamento urgente.");
+    expect(notice.length).toBeLessThan(1100);
   });
 
-  it("não inventa nome nem resumo quando não existem", () => {
+  it("não inventa nome, origem nem resumo quando não existem", () => {
     expect(formatHandoffNotice({ name: null, phone: TELEFONE, summary: null }))
-      .toBe("Nome: Não informado\nNúmero: +55 14 99763-1563\nResumo: Atendimento humano solicitado.");
+      .toBe("Nome: Não informado\nNúmero: +55 14 99763-1563\nOrigem: não registrada\nResumo: Atendimento humano solicitado.");
+  });
+
+  it("motivo que o resumo já diz não se repete; link só http(s)", () => {
+    const notice = formatHandoffNotice({ name: "Ana", phone: TELEFONE, summary: "Quer fechar hoje.", reason: "quer fechar hoje", link: "javascript:alert(1)" });
+    expect(notice).not.toContain("Motivo:");
+    expect(notice).not.toContain("Card:");
+    expect(formatHandoffNotice({ name: "Ana", phone: TELEFONE, summary: null, link: "https://app.fechai.test/crm?lead=lead-1" }))
+      .toContain("\nCard: https://app.fechai.test/crm?lead=lead-1");
+  });
+
+  it("a linha dos comandos do grupo só entra quando a leitura do grupo existir (CRM-08)", () => {
+    expect(formatHandoffNotice({ name: "Ana", phone: TELEFONE, summary: null })).not.toContain("assumo");
+    expect(formatHandoffNotice({ name: "Ana", phone: TELEFONE, summary: null, commands: true }))
+      .toMatch(/\nResponda \*assumo\* ou reaja 👍 para ficar com este lead\. \*#ia\* devolve para a IA\.$/);
   });
 });
 
 describe("Simulação de lead prioritário: tool → aviso Evolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    semEsperaAberta();
     whatsappConectado();
     db.conversation.findFirst.mockResolvedValue(conversaReal());
   });
@@ -595,7 +606,8 @@ describe("Simulação de lead prioritário: tool → aviso Evolution", () => {
       where: { id: CONVERSA, tenantId: TENANT, needsHuman: false }, data: { needsHuman: true },
     });
     expect(delivered).toEqual([{ number: GRUPO,
-      text: `Nome: Luciane Aparecida Dos Santos\nNúmero: +55 14 99763-1563\nResumo: ${RESUMO} — Motivo da prioridade: Quer fechar o tratamento hoje.`,
+      text: `Nome: Luciane Aparecida Dos Santos\nNúmero: +55 14 99763-1563\nOrigem: não registrada\nResumo: ${RESUMO}\nMotivo: Quer fechar o tratamento hoje.`
+        + "\nResponda *assumo* ou reaja 👍 para ficar com este lead. *#ia* devolve para a IA.",
     }]);
     expect([...participants]).toEqual(before);
     expect(transport).toHaveBeenCalledTimes(1);

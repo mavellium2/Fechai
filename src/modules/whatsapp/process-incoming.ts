@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { moveLeadToStage } from "@/modules/crm/automatic-stage";
 import { recordReportEvent } from "@/modules/reports/events";
 import { rateLimit } from "@/lib/rate-limit";
 import {
@@ -6,6 +7,8 @@ import {
   getOrCreateConversation,
 } from "@/modules/agent-engine/conversation";
 import { notifyHandoffGroup } from "@/modules/agent-engine/handoff";
+import { closeHandoffNoticesTimed, markHandoffFirstReply } from "@/modules/agent-engine/handoff-notice";
+import { recordCrmTrail, secondsBetween } from "@/modules/crm/trail";
 import {
   resolveAgent,
   runAgentTurn,
@@ -15,6 +18,7 @@ import { storeVoiceMessage } from "@/modules/voice/storage";
 import { audioDurationSeconds, UNTRANSCRIBED_AUDIO } from "@/modules/voice/received-audio";
 import { isPhoneBlocked } from "./blocklist";
 import { agentRepliesOn, isWhatsappProviderName, setConversationChannel } from "./instances";
+import { contactWhatsappInbound } from "./inbound-proof";
 import type { IncomingMessage, WhatsAppProvider } from "./provider";
 import { shouldPauseAgentForReaction } from "./reactions";
 import { sendAgentReply } from "./send-agent-reply";
@@ -23,6 +27,11 @@ import { handleBlockButton, isBlockButton } from "./button-reply";
 import { isSurveyOutbound } from "@/modules/satisfaction/echo";
 import { isOwnReminderEcho } from "./automated-echo";
 import { recordLeadAdOrigin } from "@/modules/campaign-reports/record";
+import { handleHandoffGroupEvent } from "@/modules/crm/handoff-group";
+import { reflectHandoffInGroup, teamMemberName } from "@/modules/crm/handoff-panel";
+import { phoneReplyGroupText } from "@/modules/crm/phone-reply";
+import { handleTeamLinkCommand } from "@/modules/crm/team-whatsapp-command";
+import { learnTeamMemberLid } from "@/modules/crm/team-whatsapp";
 
 export type IncomingWebhookResult = {
   body: Record<string, unknown>;
@@ -91,8 +100,6 @@ export async function processIncomingWhatsapp(
     return ok({ ignored: "whatsapp por QR desligado pelo administrador" });
   }
 
-  if (incoming.isGroup && instance.tenant?.whatsappIgnoreGroups)
-    return ok({ ignored: "grupo" });
   const tenantId = instance.tenantId;
   if (
     !incoming.isGroup &&
@@ -100,6 +107,25 @@ export async function processIncomingWhatsapp(
   ) {
     return ok({ ignored: "número bloqueado" });
   }
+  // `#vincular CÓDIGO` da equipe (CRM-05) vem antes de "ignorar grupos": essa
+  // regra é sobre o agente responder em grupo, não sobre ler um comando. O
+  // comando nunca abre conversa nem cadastro.
+  if ((await handleTeamLinkCommand({ tenantId, incoming, provider })).handled) {
+    return ok({ ok: true, silent: "whatsapp da equipe" });
+  }
+  // Evento de grupo com o número e o LID de quem escreveu ensina o LID de quem
+  // é da equipe (nunca lança). Só número já confirmado é atualizado.
+  if (incoming.isGroup && incoming.groupSender?.phone && incoming.groupSender.lid) {
+    await learnTeamMemberLid(tenantId, incoming.groupSender.phone, incoming.groupSender.lid);
+  }
+  // Grupo de transbordo (CRM-08): "assumo"/👍/"#ia" no aviso. Antes de
+  // "ignorar grupos" pelo mesmo motivo do `#vincular`, e sempre calado para o
+  // agente: nada desse grupo vira conversa, cadastro ou turno.
+  if ((await handleHandoffGroupEvent({ tenantId, incoming, provider })).handled) {
+    return ok({ ok: true, silent: "grupo de transbordo" });
+  }
+  if (incoming.isGroup && instance.tenant?.whatsappIgnoreGroups)
+    return ok({ ignored: "grupo" });
 
   // Reentrega de lote não consome a proteção de rajada dos eventos ainda novos.
   if (!incoming.isReaction && incoming.messageKeyId) {
@@ -176,15 +202,22 @@ export async function processIncomingWhatsapp(
           incoming.fromName,
         );
         await trackChannel(conversation);
-        await prisma.conversation
+        const at = new Date();
+        const marked = await prisma.conversation
           .update({
             where: { id: conversation.id },
             data: { agentPaused: true, needsHuman: true },
           })
-          .catch(() => {});
+          .catch(() => null);
+        if (marked && !lead.isTest) {
+          await moveLeadToStage(tenantId, lead.id, "waiting_human", "user", {
+            reason: "handoff", conversationId: conversation.id, key: incoming.messageKeyId ?? undefined, at,
+          });
+        }
         await notifyHandoffGroup(tenantId, reactionAgent.id, conversation.id, {
           isTest: lead.isTest,
           reason: "Atendente assumiu a conversa por reação no WhatsApp.",
+          trigger: "reaction",
         });
         await recordReportEvent({ tenantId, conversationId: conversation.id, kind: "handoff",
           sourceKey: incoming.messageKeyId });
@@ -211,6 +244,7 @@ export async function processIncomingWhatsapp(
       tenantId,
       incoming.fromPhone,
       incoming.fromName,
+      incoming.isGroup ? undefined : { originChannel: "manual" },
     );
     // O que a pesquisa de satisfação envia não é `Message`: sem este
     // reconhecimento o eco viraria "atendente respondeu pelo celular" e
@@ -244,7 +278,11 @@ export async function processIncomingWhatsapp(
         })
       : null;
 
-    await appendMessage(
+    // CRM-09: o número é da clínica e compartilhado, então a mensagem não diz
+    // quem digitou. Com responsável na conversa, a resposta é dele; sem, fica
+    // "humano não identificado" até alguém se identificar (card ou grupo).
+    const responsible = conversation.isTest ? null : conversation.assignedUserId ?? null;
+    const sent = await appendMessage(
       conversation.id,
       "assistant",
       received?.transcript ?? (incoming.hasAudio ? UNTRANSCRIBED_AUDIO : incoming.text),
@@ -252,11 +290,36 @@ export async function processIncomingWhatsapp(
       incoming.messageKeyId,
       received?.audioUrl,
       received?.seconds,
+      undefined,
+      { via: "phone", userId: responsible },
     );
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: { needsHuman: false, agentPaused: true },
     });
+    // Alguém da equipe respondeu pelo celular: a espera acabou.
+    const repliedAt = sent?.createdAt ?? new Date();
+    const wait = await closeHandoffNoticesTimed(tenantId, conversation.id, { status: "assumed", via: "phone", userId: responsible }, repliedAt);
+    const closed = wait.closed;
+    if (!conversation.isTest) {
+      await markHandoffFirstReply(tenantId, conversation.id, repliedAt);
+      // Trilha (CRM-11): a resposta que encerrou a espera é a assunção pelo celular.
+      if (closed > 0) {
+        await recordCrmTrail({
+          tenantId, event: "handoff.assumed", actor: { kind: "phone", userId: responsible }, leadId: conversation.leadId,
+          meta: { via: "phone", action: "reply", conversationId: conversation.id, waitSeconds: secondsBetween(wait.since, repliedAt) },
+        });
+      }
+      await moveLeadToStage(tenantId, null, "human", "user", { reason: "human_reply", conversationId: conversation.id,
+        key: incoming.messageKeyId ?? sent?.id, at: sent?.createdAt });
+      // O grupo foi avisado deste transbordo: fica sabendo da resposta e, sem
+      // responsável, é perguntado quem foi. Só na resposta que encerrou a espera.
+      if (closed > 0) {
+        await reflectHandoffInGroup(tenantId, conversation.id, responsible
+          ? phoneReplyGroupText.known(await teamMemberName(tenantId, responsible))
+          : phoneReplyGroupText.unknown());
+      }
+    }
     return ok({ ok: true, silent: "manual pelo whatsapp" });
   }
 
@@ -266,6 +329,9 @@ export async function processIncomingWhatsapp(
     tenantId,
     incoming.fromPhone,
     incoming.fromName,
+    incoming.isGroup ? undefined : {
+      originChannel: incoming.adOrigin ? "ad" : provider.name === "meta" ? "whatsapp_meta" : "whatsapp_qr",
+    },
   );
   await trackChannel(conversation);
   const agent = await resolveAgent(tenantId, conversation.agentId ?? undefined);
@@ -330,6 +396,7 @@ export async function processIncomingWhatsapp(
 
   // QR com resposta automática desligada ainda registra o atendimento humano.
   // A Meta somente para Disparos foi interrompida antes de abrir a conversa.
+  const whatsappInbound = contactWhatsappInbound(tenantId, provider.name, incoming);
   if (!agentRepliesOn(instance)) {
     await appendMessage(
       conversation.id,
@@ -339,6 +406,7 @@ export async function processIncomingWhatsapp(
       incoming.messageKeyId,
       received?.audioUrl,
       received?.seconds,
+      whatsappInbound,
     );
     return ok({ ok: true, silent: "agente não responde neste número" });
   }
@@ -351,6 +419,7 @@ export async function processIncomingWhatsapp(
       incoming.messageKeyId,
       received?.audioUrl,
       received?.seconds,
+      whatsappInbound,
     );
     return ok({
       ok: true,
@@ -370,6 +439,7 @@ export async function processIncomingWhatsapp(
       incomingAudioUrl: received?.audioUrl,
       incomingAudioSeconds: received?.seconds,
       incomingMessageKeyId: incoming.messageKeyId,
+      whatsappInbound,
     });
     if (status !== "ok" || !reply) return ok({ ok: true, silent: status });
 

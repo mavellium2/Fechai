@@ -109,6 +109,8 @@ deploy_web() {
     echo "==> Aplicando schema antes da troca (use somente mudanças retrocompatíveis)..."
     "${COMPOSE[@]}" run --rm --no-deps "${candidate}" npx prisma db execute \
       --file prisma/manual/002-broadcast-retry-index.sql --schema prisma/schema.prisma
+    "${COMPOSE[@]}" run --rm --no-deps "${candidate}" npx prisma db execute \
+      --file prisma/manual/003-crm-tenant-id-unique.sql --schema prisma/schema.prisma
     "${COMPOSE[@]}" run --rm --no-deps "${candidate}" npx prisma db push
   fi
 

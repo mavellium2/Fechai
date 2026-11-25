@@ -14,6 +14,8 @@ import { scanClinicorpSync } from "../../src/modules/scheduling/clinicorp-sync";
 import { scanIcloudSync } from "../../src/modules/scheduling/icloud-sync";
 import { scanIcloudHealth } from "../../src/modules/scheduling/icloud-health";
 import { scanWhatsappHistoryRecovery } from "../../src/modules/whatsapp/history-recovery-worker";
+import { scanHandoffSla } from "../../src/modules/crm/handoff-sla";
+import { scanAutoReturn } from "../../src/modules/crm/handoff-auto-return";
 
 // Worker de mensagens no tempo. Follow-up/lembretes rodam na cadência comercial
 // configurada; a saúde do WhatsApp tem um job próprio, mais rápido:
@@ -64,6 +66,11 @@ const SATISFACTION_EVERY_MS =
 const ICLOUD_QUEUE = "icloud-calendar";
 const ICLOUD_EVERY_MS = Math.max(15, Number(process.env.ICLOUD_SCAN_EVERY_SECONDS ?? 60)) * 1000;
 
+// Prazo do transbordo (CRM-10): o alerta no grupo e o escalonamento saem no
+// minuto em que a espera passa do limite, então a volta é de um minuto.
+const HANDOFF_SLA_QUEUE = "handoff-sla";
+const HANDOFF_SLA_EVERY_MS = Math.max(15, Number(process.env.HANDOFF_SLA_SCAN_EVERY_SECONDS ?? 60)) * 1000;
+
 async function main() {
   const historyQueue = new Queue("whatsapp-history-recovery", { connection });
   await historyQueue.setGlobalConcurrency(1);
@@ -103,6 +110,23 @@ async function main() {
     { connection, concurrency: 1 },
   );
   icloudWorker.on("failed", (job, err) => console.error(`[icloud] job ${job?.id} falhou`, err));
+  const handoffSlaQueue = new Queue(HANDOFF_SLA_QUEUE, { connection });
+  // Uma volta por vez: a marca do alerta já impede repetir, e assim nada corre em dobro.
+  await handoffSlaQueue.setGlobalConcurrency(1);
+  await handoffSlaQueue.upsertJobScheduler("handoff-sla-scheduler", { every: HANDOFF_SLA_EVERY_MS }, { name: "handoff-sla" });
+  const handoffSlaWorker = new Worker(
+    HANDOFF_SLA_QUEUE,
+    async () => {
+      const r = await scanHandoffSla();
+      if (r.alerts || r.escalations) console.log(`[transbordo] alertas=${r.alerts} escalonados=${r.escalations}`);
+      // Devolução automática para a IA (CRM-12), desligada por padrão.
+      const back = await scanAutoReturn();
+      if (back.returned) console.log(`[transbordo] devolvidos para a IA=${back.returned}`);
+      return { ...r, ...back };
+    },
+    { connection, concurrency: 1 },
+  );
+  handoffSlaWorker.on("failed", (job, err) => console.error(`[transbordo] job ${job?.id} falhou`, err));
   const bitrixQueue = new Queue("bitrix-crm-sync", { connection });
   await bitrixQueue.setGlobalConcurrency(1);
   await bitrixQueue.upsertJobScheduler("bitrix-sync-scheduler", { every: 30_000 }, { name: "bitrix-sync" });
@@ -292,6 +316,7 @@ async function main() {
       `avisos de perguntas sem resposta a cada ${KNOWLEDGE_GAP_EVERY_MS / 60000} min; ` +
       `pesquisa de satisfação a cada ${SATISFACTION_EVERY_MS / 60000} min; ` +
       `Calendário da Apple a cada ${ICLOUD_EVERY_MS / 1000} s; ` +
+      `prazo do transbordo a cada ${HANDOFF_SLA_EVERY_MS / 1000} s; ` +
       `saúde do WhatsApp a cada ${HEALTH_EVERY_MS / 60000} min`,
   );
 }

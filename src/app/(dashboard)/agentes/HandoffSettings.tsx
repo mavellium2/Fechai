@@ -38,6 +38,9 @@ export function HandoffSettings({ agentId, config }: { agentId: string; config: 
   const [notifyGroup, setNotifyGroup] = useState(config.notifyGroup);
   const [groupId, setGroupId] = useState(config.groupId ?? "");
   const [groupName, setGroupName] = useState(config.groupName ?? "");
+  const [whileWaiting, setWhileWaiting] = useState<string>(config.whileWaiting);
+  const waitingFieldId = useId();
+  const waitingLabelId = `${waitingFieldId}-label`;
   const [groups, setGroups] = useState<GroupListResult | null>(null);
   const [loadingGroups, startLoadingGroups] = useTransition();
   const groupFieldId = useId();
@@ -70,11 +73,33 @@ export function HandoffSettings({ agentId, config }: { agentId: string; config: 
       <input type="hidden" name="groupId" value={groupId} />
       <input type="hidden" name="groupName" value={groupName} />
 
+      <Field
+        label="Enquanto aguarda alguém da equipe, a IA"
+        htmlFor={waitingFieldId}
+        labelId={waitingLabelId}
+        hint={whileWaiting === "pause"
+          ? "A IA se despede e para de responder nesta conversa. Ela volta quando alguém usar Reativar agente em Conversas."
+          : "A IA segue respondendo o contato até alguém da equipe assumir, como sempre funcionou."}
+      >
+        <SelectMenu
+          name="whileWaiting"
+          label="Enquanto aguarda alguém da equipe, a IA"
+          labelledBy={waitingLabelId}
+          value={whileWaiting}
+          onChange={setWhileWaiting}
+          options={[
+            { value: "continue", label: "Continua respondendo (padrão)" },
+            { value: "pause", label: "Pausa até alguém da equipe devolver" },
+          ]}
+        />
+      </Field>
+
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-white/85">Avisar a equipe em um grupo do WhatsApp</p>
-          <p id="handoff-group-desc" className="mt-0.5 text-sm text-white/60">
-            Ao transferir, a equipe recebe nome, número e resumo da conversa no grupo abaixo.
+          {/* Cores do tema da tela de agentes (`--tenant-*`): `text-white` some no tema claro. */}
+          <p className="text-sm font-medium text-[var(--tenant-text)]">Avisar a equipe em um grupo do WhatsApp</p>
+          <p id="handoff-group-desc" className="mt-0.5 text-sm text-[var(--tenant-muted)]">
+            Ao transferir, a equipe recebe no grupo abaixo nome, número, origem, resumo, motivo e o link do card.
             O contato nunca entra no grupo. A equipe pode falar com ele pelo número de atendimento.
           </p>
         </div>
@@ -126,7 +151,7 @@ export function HandoffSettings({ agentId, config }: { agentId: string; config: 
       </div>
 
 
-      <section className="agent-form-section"><h3>O que a equipe recebe</h3><div className="agent-example"><p>Nome: nome informado pelo contato</p><p>Número: WhatsApp do contato</p><p>Resumo: pedido do contato e motivo da transferência</p></div><p className="agent-help">A conversa aparece em Conversas › Precisa de você.</p></section>
+      <section className="agent-form-section"><h3>O que a equipe recebe</h3><div className="agent-example"><p>Nome: nome informado pelo contato</p><p>Número: WhatsApp do contato</p><p>Origem: de onde o contato veio (anúncio, WhatsApp direto, site…)</p><p>Resumo: pedido do contato</p><p>Motivo: por que a conversa foi transferida</p><p>Card: link para o lead no CRM, quando o CRM está ligado</p><p>Responda *assumo* ou reaja 👍 para ficar com este lead. *#ia* devolve para a IA.</p></div><p className="agent-help">Um aviso por espera: se o contato for transferido de novo antes de alguém assumir, o grupo não recebe outro. A conversa aparece em Conversas › Precisa de você e o card vai para Aguardando humano.</p><p className="agent-help">No grupo, quem responde *assumo* ao aviso (ou reage 👍 nele) fica responsável pelo lead, e *#ia* devolve para a IA. Para aparecer com o próprio nome, cada pessoa vincula o WhatsApp em Configurações › Seu WhatsApp na equipe. O agente nunca responde no grupo.</p></section>
       <FormSaveBar result={state} pending={pending} />
     </UnsavedForm>
   );

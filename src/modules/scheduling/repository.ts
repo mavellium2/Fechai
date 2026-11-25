@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { moveLeadToStage } from "@/modules/crm/automatic-stage";
 import { assertCampaignSlot, checkCampaignSlot, type SlotCheck } from "@/modules/campaigns/slots";
 import { isOverrideCampaignId } from "@/modules/campaign-override/agent";
 import { getCampaignOverrideForLead } from "@/modules/campaign-override/lead";
@@ -322,6 +323,10 @@ export async function createAppointment(input: CreateAppointmentInput) {
     },
   });
 
+  if (input.leadId) {
+    await moveLeadToStage(input.tenantId, input.leadId, "scheduled", input.source === "agent" ? "ai" : "user",
+      { reason: "appointment_booked", key: appointment.id, appointmentId: appointment.id, at: appointment.createdAt });
+  }
   return { ...appointment, reminderOverride: campaignLead ? [] : null, googleEventId, clinicorpAppointmentId, icloudEventUrl, clinicorpSync };
 }
 
@@ -345,6 +350,10 @@ export async function cancelAppointment(tenantId: string, id: string, leadId?: s
     data: { status: "canceled", notes },
   });
   if (!changed.count) return null;
+  if (appointment.leadId) {
+    await moveLeadToStage(tenantId, appointment.leadId, "booking_canceled", options.source === "agent" ? "ai" : options.source === "human" ? "user" : "system",
+      { reason: "appointment_canceled", key: id, appointmentId: id, at: now });
+  }
   const [, clinicorpCancellationAccepted] = await Promise.all([
     appointment.googleEventId
       ? deleteEventFromGoogle(tenantId, appointment.googleEventId)
@@ -546,6 +555,9 @@ export async function setAppointmentAttendance(
       attendanceAt: attendance === "unknown" ? null : now,
     },
   });
+  if (count && attendance === "attended") {
+    await moveLeadToStage(tenantId, null, "attended", "user", { reason: "appointment_attended", key: `${id}:${now.toISOString()}`, appointmentId: id, at: now });
+  }
   return count ? "ok" : "not_allowed";
 }
 

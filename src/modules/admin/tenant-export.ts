@@ -22,7 +22,7 @@ const page = (cursor?: string) => ({
 
 /** Só chamar após autenticar SUPERADMIN. Todas as coleções são limitadas ao tenant. */
 export async function prepareTenantExport(tenantId: string) {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, omit: { crmActivationToken: true } });
   if (!tenant) return null;
 
   const sources: Source[] = [
@@ -32,7 +32,17 @@ export async function prepareTenantExport(tenantId: string) {
     { name: "knowledgeDocuments", read: (cursor) => prisma.knowledgeDocument.findMany({ where: { tenantId }, ...page(cursor) }) },
     { name: "knowledgeChunks", read: (cursor) => prisma.knowledgeChunk.findMany({ where: { tenantId }, ...page(cursor) }) },
     { name: "leads", read: (cursor) => prisma.lead.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "pipelines", read: (cursor) => prisma.pipeline.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "pipelineStages", read: (cursor) => prisma.pipelineStage.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "leadTransitions", read: (cursor) => prisma.leadTransition.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "tags", read: (cursor) => prisma.tag.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "leadTags", read: (cursor) => prisma.leadTag.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "leadTasks", read: (cursor) => prisma.leadTask.findMany({ where: { tenantId }, ...page(cursor) }) },
     { name: "conversations", read: (cursor) => prisma.conversation.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "conversationAssignments", read: (cursor) => prisma.conversationAssignment.findMany({ where: { tenantId }, ...page(cursor) }) },
+    { name: "handoffNotices", read: (cursor) => prisma.handoffNotice.findMany({ where: { tenantId }, ...page(cursor) }) },
+    // O hash do código de confirmação não sai: é credencial de uso único.
+    { name: "teamMemberWhatsapps", read: (cursor) => prisma.teamMemberWhatsapp.findMany({ where: { tenantId }, omit: { codeHash: true }, ...page(cursor) }) },
     { name: "messages", read: (cursor) => prisma.message.findMany({ where: { conversation: { tenantId } }, ...page(cursor) }) },
     { name: "appointments", read: (cursor) => prisma.appointment.findMany({ where: { tenantId }, ...page(cursor) }) },
     { name: "blockedNumbers", read: (cursor) => prisma.whatsappBlockedNumber.findMany({ where: { tenantId }, ...page(cursor) }) },

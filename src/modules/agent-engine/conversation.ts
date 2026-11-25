@@ -1,5 +1,13 @@
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import type { LeadOriginChannel, Prisma } from "@prisma/client";
+import { newLeadCrmFields } from "@/modules/crm/admission";
+import { moveLeadToStage } from "@/modules/crm/automatic-stage";
+import { assumeConversation, claimCrmConversation } from "@/modules/crm/assignments";
+import { handoffGroupText, reflectHandoffInGroup, teamMemberName } from "@/modules/crm/handoff-panel";
+import { closeHandoffNoticesTimed, markHandoffFirstReply } from "./handoff-notice";
+import { leadOfConversation, recordCrmTrail, secondsBetween } from "@/modules/crm/trail";
+import { crmReplyPaused, crmWhatsappReplyTarget } from "@/modules/crm/whatsapp-reply";
+import { outsideMetaWindow } from "@/modules/scheduling/meta-reminder";
 import { getWhatsAppProviderForInstance } from "@/modules/whatsapp/meta-config";
 import {
   channelProvider,
@@ -14,6 +22,7 @@ import {
 import { storeVoiceMessage } from "@/modules/voice/storage";
 import { withConversationContactLock } from "./conversation-lock";
 import { contactPhoneAliases } from "@/modules/whatsapp/contact-phone";
+import { recordWhatsappInbound, type WhatsappContactInbound } from "@/modules/whatsapp/inbound-proof";
 
 /**
  * Encontra (ou cria) o lead + conversa de um telefone, dentro do tenant.
@@ -23,16 +32,18 @@ import { contactPhoneAliases } from "@/modules/whatsapp/contact-phone";
  * é espelhada na conversa para as telas filtrarem sem join — sem ela o sandbox
  * era contado como cliente real em Contatos, Conversas e Relatórios.
  */
+type ConversationCreation = { isTest?: boolean; originChannel?: LeadOriginChannel };
+
 export async function getOrCreateConversation(
   tenantId: string,
   phone: string,
   name?: string,
-  options: { isTest?: boolean } = {},
+  options: ConversationCreation = {},
 ) {
   return withConversationContactLock(tenantId, phone, (db) => getOrCreateLockedConversation(db, tenantId, phone, name, options));
 }
 
-async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenantId: string, phone: string, name: string | undefined, options: { isTest?: boolean }) {
+async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenantId: string, phone: string, name: string | undefined, options: ConversationCreation) {
   const isTest = options.isTest ?? false;
   let lead = await db.lead.findFirst({
     where: { tenantId, phone },
@@ -55,6 +66,8 @@ async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenan
         phone,
         name,
         isTest,
+        originChannel: isTest ? null : options.originChannel,
+        ...(!isTest && await newLeadCrmFields(db, tenantId)),
         conversation: { create: { tenantId, isTest } },
       },
       include: { conversation: true },
@@ -115,6 +128,9 @@ export async function appendMessage(
   audioUrl?: string | null,
   /** Duração do áudio recebido pelo webhook, em segundos. Ver schema. */
   audioSeconds?: number | null,
+  whatsappInbound?: WhatsappContactInbound,
+  /** Resposta da equipe pelo celular da clínica (CRM-09): por onde e quem, quando se sabe. */
+  human?: { via: "phone"; userId: string | null },
 ) {
   const message = await prisma.message.create({
     data: {
@@ -125,6 +141,7 @@ export async function appendMessage(
       whatsappMessageId: externalId,
       audioUrl: audioUrl ?? null,
       audioSeconds: audioSeconds ?? null,
+      ...(human ? { sentVia: human.via, sentByUserId: human.userId } : {}),
     },
   });
   if (role === "user") {
@@ -132,6 +149,7 @@ export async function appendMessage(
       where: { id: conversationId },
       data: { lastInboundAt: new Date() },
     });
+    if (whatsappInbound) await recordWhatsappInbound(conversationId, whatsappInbound);
   }
   return message;
 }
@@ -179,11 +197,25 @@ export async function sendManualReply(
   text: string,
   /** Manda como mensagem de voz. Sem isto, envio de texto normal. */
   audio?: { buffer: Buffer; mime: string },
+  crm?: { leadId: string; userId: string },
+  /** Quem respondeu pelo painel, para o aviso de transbordo saber quem assumiu. */
+  actorUserId?: string,
 ): Promise<SendManualReplyResult> {
   const trimmed = text.trim();
   if (!trimmed) return { ok: false, error: "Escreva algo antes de enviar." };
 
-  const conversation = await prisma.conversation.findFirst({
+  let target = crm ? await crmWhatsappReplyTarget(tenantId, crm.leadId, conversationId) : null;
+  if (target && target.status !== "ready") return { ok: false, error: crmReplyPaused[target.status] };
+  if (crm) {
+    const claim = await claimCrmConversation({ tenantId, conversationId, ...crm });
+    if (claim === "unavailable") return { ok: false, error: "Esta conversa está indisponível no CRM." };
+    if (claim === "assigned_elsewhere") return { ok: false, error: "Outra pessoa já está atendendo esta conversa." };
+    // Repete a leitura depois de assumir: a conexão e a janela podem mudar entre as duas etapas.
+    target = await crmWhatsappReplyTarget(tenantId, crm.leadId, conversationId);
+    if (target.status !== "ready") return { ok: false, error: crmReplyPaused[target.status] };
+  }
+
+  const conversation = target?.conversation ?? await prisma.conversation.findFirst({
     where: { id: conversationId, tenantId },
     select: { id: true, isTest: true, whatsappProvider: true, lead: { select: { phone: true } } },
   });
@@ -192,8 +224,8 @@ export async function sendManualReply(
   let externalId: string | null = null;
   if (!conversation.isTest) {
     // Sai pelo número em que o contato escreveu (ver `pickWhatsappChannel`).
-    const channels = await listWhatsappChannels(tenantId);
-    const instance = pickWhatsappChannel(channels, conversation.whatsappProvider);
+    const channels = target ? [] : await listWhatsappChannels(tenantId);
+    const instance = target?.channel ?? pickWhatsappChannel(channels, conversation.whatsappProvider);
     if (!instance?.externalId) {
       // "Reconecte em Integrações" seria enganoso: o QR foi desligado pelo admin
       // e a conta não consegue religá-lo sozinha.
@@ -205,18 +237,30 @@ export async function sendManualReply(
       }
       return { ok: false, error: noChannelMessage(channels, conversation.whatsappProvider) };
     }
+    const toPhone = target?.proof.sender ?? ("lead" in conversation ? conversation.lead.phone : null);
+    if (!toPhone) return { ok: false, error: "Telefone do contato indisponível." };
     try {
       // Grava o key.id da mensagem que acabamos de enviar: o webhook reentrega
       // tudo que a instância manda como fromMe, e sem esse id a resposta
       // manual apareceria duas vezes no histórico.
       const provider = getWhatsAppProviderForInstance(instance);
+      if (target?.proof.provider === "evolution" && await provider.getConnectedPhone?.(instance.externalId) !== target.proof.receiver) {
+        return { ok: false, error: "Aguarde o contato escrever para o número de WhatsApp conectado." };
+      }
+      if (target?.proof.provider === "meta" && outsideMetaWindow(target.at, new Date())) {
+        return { ok: false, error: crmReplyPaused.window_closed };
+      }
       externalId = audio
-        ? await provider.sendAudio(instance.externalId, conversation.lead!.phone, {
+        ? await provider.sendAudio(instance.externalId, toPhone, {
             base64: audio.buffer.toString("base64"),
             mime: audio.mime,
           })
-        : await provider.sendMessage(instance.externalId, conversation.lead!.phone, trimmed);
+        : await provider.sendMessage(instance.externalId, toPhone, trimmed);
     } catch (err) {
+      if (crm) {
+        console.error("[crm] não foi possível confirmar a resposta pelo WhatsApp");
+        return { ok: false, error: "Não foi possível confirmar o envio. Confira a conversa antes de tentar novamente." };
+      }
       console.error("[agent-engine] falha ao enviar mensagem manual", err);
       return {
         ok: false,
@@ -243,7 +287,7 @@ export async function sendManualReply(
     });
   }
 
-  await appendMessage(
+  const sent = await appendMessage(
     conversationId,
     "assistant",
     trimmed,
@@ -255,6 +299,33 @@ export async function sendManualReply(
     where: { id: conversationId },
     data: { needsHuman: false, agentPaused: true },
   });
+  // Respondeu por Conversas ou Contatos: quem respondeu assume, se ninguém
+  // estava com a conversa (o CRM já assumiu antes do envio, acima). Assumir
+  // fecha a espera e conta no grupo.
+  if (!crm && actorUserId && !conversation.isTest) {
+    await assumeConversation({ tenantId, conversationId, userId: actorUserId })
+      .catch((error) => console.error("[conversas] resposta enviada sem registrar quem assumiu", error));
+  }
+  // Respondeu pelo painel: a espera da equipe acabou e tem nome. Se ainda havia
+  // uma aberta (outra pessoa já era a responsável), o grupo também fica sabendo.
+  const replier = crm?.userId ?? actorUserId ?? null;
+  const repliedAt = sent?.createdAt ?? new Date();
+  const wait = await closeHandoffNoticesTimed(tenantId, conversationId, { status: "assumed", via: "panel", userId: replier }, repliedAt);
+  if (wait.closed > 0 && !conversation.isTest) {
+    // A resposta encerrou a espera sem passar pelo Assumir (a conversa já era de
+    // outra pessoa, ou de quem respondeu): um evento de assunção na trilha (CRM-11).
+    if (replier) {
+      await recordCrmTrail({
+        tenantId, event: "handoff.assumed", actor: { kind: "user", userId: replier }, leadId: await leadOfConversation(tenantId, conversationId),
+        meta: { via: "panel", action: "reply", conversationId, waitSeconds: secondsBetween(wait.since, repliedAt) },
+      });
+    }
+    await reflectHandoffInGroup(tenantId, conversationId, handoffGroupText.assumed(await teamMemberName(tenantId, replier)));
+  }
+  if (!conversation.isTest) {
+    await markHandoffFirstReply(tenantId, conversationId, repliedAt);
+    await moveLeadToStage(tenantId, null, "human", "user", { reason: "human_reply", conversationId, userId: crm?.userId, key: sent?.id, at: sent?.createdAt });
+  }
 
   return { ok: true };
 }
