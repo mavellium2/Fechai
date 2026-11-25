@@ -15,6 +15,8 @@ import { Alert } from "@/components/ui/alert";
 import { ContatoSearch } from "./ContatoSearch";
 import { AddContactDialog } from "./AddContactDialog";
 import { SendMessageDialog, type ContactRef } from "./SendMessageDialog";
+import { EditContactDialog } from "./EditContactDialog";
+import { contactProfileData } from "@/modules/crm/contact-profile";
 
 export const metadata: Metadata = { title: "Contatos" };
 
@@ -65,7 +67,10 @@ export default async function ContatosPage({
       orderBy: { conversation: { updatedAt: "desc" } },
       include: {
         conversation: {
-          include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
+          include: {
+            messages: { orderBy: { createdAt: "desc" }, take: 1 },
+            agent: { select: { tenantId: true, variableDefinitions: true } },
+          },
         },
       },
     }),
@@ -209,6 +214,7 @@ export default async function ContatosPage({
                       </div>
                       <p className="mt-0.5 font-mono text-micro text-neutral panel:text-white/50">
                         {lead.phone}
+                        {lead.whatsappName && lead.whatsappName !== lead.name && ` · no WhatsApp: ${lead.whatsappName}`}
                       </p>
                       {summary ? (
                         <p className="mt-1 line-clamp-2 whitespace-pre-line text-sm leading-snug text-neutral panel:text-white/60">
@@ -227,6 +233,8 @@ export default async function ContatosPage({
                       <span className="font-mono text-micro text-neutral panel:text-white/40">
                         {lead.conversation ? relativeTime(lead.conversation.updatedAt) : "—"}
                       </span>
+                      <EditContactDialog leadId={lead.id} data={contactProfileData(lead,
+                        lead.conversation?.agent?.tenantId === tenantId ? lead.conversation.agent.variableDefinitions : null)} />
                       <SendMessageDialog contact={contact} canSend={connected} />
                     </div>
                   </li>

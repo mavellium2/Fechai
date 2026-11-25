@@ -17,6 +17,7 @@ lista e histórico alternam; Sobre o contato abre como painel sobreposto.
 - `AssumeConversationButton`: chama `setConversationAgentPaused(id,true)` existente.
   Reativar, resolver, WhatsApp e demais ações continuam em Opções/Histórico.
 - `ContactPanel`: resumo real, próximo agendamento, dados e histórico recolhível.
+- **Editar** em "Dados do contato" abre o mesmo `EditContactDialog` de Contatos (`saveContactProfile`): nome e variáveis editáveis, original do WhatsApp preservado. Conversa de teste não edita. Regra em `src/modules/crm/contact-profile.ts`.
   Campos ausentes permanecem Não informado; não deduz motivo do handoff.
 - `SendMessageForm`: mesmas actions de texto, voz e teste. A tela não oferece
   anexos genéricos porque ainda não existe envio desses arquivos neste composer.

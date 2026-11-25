@@ -68,6 +68,10 @@ Cada passo responde no grupo do transbordo **citando o aviso original** (`messag
 
 Mover o card (`setLeadStage`, origem `user`), aplicar ou remover etiqueta e criar ou concluir tarefa (`editCrmLead`, com a pessoa da sessão) gravam um evento na trilha (CRM-11) **só quando algo mudou** (etiqueta repetida ou tarefa já concluída não gravam). Assumir, transferir, devolver e as ações de Conversas gravam pelos módulos de transbordo. Ver [Trilha do CRM e do transbordo](domain.md#trilha-do-crm-e-do-transbordo).
 
+## Editar dados do contato
+
+`saveCrmLead` com `operation: "profile"` lê o formulário por `readContactProfileForm` (nome até 80 caracteres, `var:<chave>` até 500, sem `{{ }}`, sem `{{nome}}`/`{{numero}}` como variável) e chama `editContactProfile` com `via: "crm"`, na trava de admissão compartilhada e com `realBoardLeads`. A conversa é gravada por SQL cru para não mexer em `Conversation.updatedAt` (ordem da caixa de entrada). Quando algo mudou, grava `crm.contact_edited` na trilha só com as chaves (`fields`), nunca o valor. Revalida `/crm`, `/contatos` e `/conversas`.
+
 ## Etiquetas e tarefas
 
 [`saveCrmLead`](../../../src/app/\(dashboard\)/crm/actions.ts) valida sessão, acesso ao produto, permissão `crm:ver`, operação e campos. [`editCrmLead`](../../../src/modules/crm/lead-detail-actions.ts) repete a elegibilidade dentro da transação com a trava de admissão compartilhada. Referências de etiqueta, tarefa e responsável são verificadas na conta. Criar e aplicar etiqueta usa a mesma transação. A conclusão condicional mantém o primeiro horário mesmo quando o formulário é repetido. Cada operação bem-sucedida revalida `/crm`. A ficha combina `useActionToast` com `FormFeedback` por usar um diálogo modal.

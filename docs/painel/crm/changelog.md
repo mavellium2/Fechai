@@ -1,5 +1,9 @@
 # CRM nativo — Histórico
 
+## 2026-11-25 — Editar dados do contato sem perder o original do WhatsApp
+
+A equipe pode corrigir o nome e as variáveis do agente pelo card (**Editar contato**) e pela tela de Contatos. O nome do perfil do WhatsApp passou a ficar guardado à parte (`Lead.whatsappName`, só o webhook grava) e o telefone continua fixo. O valor editado vale e fica travado (`Lead.nameEditedAt`, `Conversation.editedVariables`): agente, resumo e webhook não sobrescrevem mais, e o prompt avisa que foi confirmado pela equipe. Em branco destrava. Cada edição grava `crm.contact_edited` na trilha só com as chaves alteradas. Schema novo: `db push` + `generate` nos dois processos (web e worker).
+
 ## 2026-11-25 — Busca ao vivo e cabeçalho responsivo
 
 As duas buscas do quadro passaram a filtrar enquanto se digita: `CrmLiveSearch` mantém o texto no cliente e, após 350 ms sem tecla, troca apenas `q` ou `q_<etapa>` com `router.replace`, preservando etapa, responsável, etiqueta, origem, período, datas e a outra busca. Usar `replace` evita uma entrada de histórico por letra; um texto digitado depois que uma busca saiu não é apagado pela resposta dela. A busca geral saiu de baixo dos filtros e foi para a linha do título **CRM**, dentro do mesmo grupo de controles. Esse grupo não quebra linha: a busca encolhe, os links viram ícone com rótulo acessível abaixo de `xl` e o botão **Filtros** vira ícone abaixo de `sm`, então não estoura a tela em 320 px. O painel de filtros aberto passou a uma coluna em telas estreitas, duas a partir de 400 px, quatro no `sm` e a faixa completa no `xl`, com `min-w-0` em todos os campos. Esses campos usam `type="text"` com `inputMode="search"` de propósito: com `type="search"`, Chromium e Edge desenhavam um x nativo ao lado do botão de limpar do produto, e apareciam dois. O wrapper `role="search"`, o rótulo e a tecla de busca do teclado continuam; só sobra o x acessível do componente.

@@ -27,12 +27,10 @@ import { CalendarFeatureToggles } from "./CalendarFeatureToggles";
 import { GoogleCalendarCard, type GoogleState } from "./GoogleCalendarCard";
 import { ClinicorpCard, type ClinicorpState } from "./ClinicorpCard";
 import { IcloudCalendarCard, type IcloudState } from "./IcloudCalendarCard";
-import { listBlockedNumbers } from "@/modules/whatsapp/blocklist";
 import { WhatsappConnect } from "./WhatsappConnect";
 import { MetaWhatsappConnect } from "./MetaWhatsappConnect";
 import { embeddedSignupPublicConfig } from "@/modules/whatsapp/embedded-signup-config";
 import { AttendanceControls } from "./WhatsappControls";
-import { WhatsappBlocklist } from "./WhatsappBlocklist";
 import { SnippetBox } from "./SnippetBox";
 import { WhatsappHistoryRecovery } from "./WhatsappHistoryRecovery";
 import { readHistoryRecovery } from "@/modules/whatsapp/history-recovery";
@@ -64,7 +62,7 @@ export default async function IntegracoesPage({
   const tab = TABS.some((t) => t.key === aba) ? (aba as (typeof TABS)[number]["key"]) : "canais";
 
   const since = new Date(new Date().getTime() - 7 * 86_400_000);
-  const [instances, inboundLast7, tenant, agent, blocked] = await Promise.all([
+  const [instances, inboundLast7, tenant, agent] = await Promise.all([
     prisma.whatsappInstance.findMany({ where: { tenantId } }),
     prisma.message.count({
       where: { role: "user", createdAt: { gte: since }, conversation: { tenantId } },
@@ -90,7 +88,6 @@ export default async function IntegracoesPage({
       orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       select: { name: true, enabled: true },
     }),
-    listBlockedNumbers(tenantId),
   ]);
 
   // Publica o widget.js do tenant na CDN na primeira visita — sem comando
@@ -436,7 +433,6 @@ export default async function IntegracoesPage({
               allNumbers
               as="h3"
             />
-            <WhatsappBlocklist blocked={blocked} as="h3" />
           </Card>
         </section>
       ) : !evolutionEnabled ? (
@@ -481,7 +477,6 @@ export default async function IntegracoesPage({
             agentName={agentName}
             agentEnabled={agentEnabled}
             ignoreGroups={ignoreGroups}
-            blocked={blocked}
           />
         </Card>
       )}

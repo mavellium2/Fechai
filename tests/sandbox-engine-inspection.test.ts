@@ -6,7 +6,7 @@ vi.mock("@/modules/billing/usage", () => ({ getUsageSummary: async () => ({ atLi
 vi.mock("@/modules/agent-engine/conversation", () => ({ appendMessage: m.append, getRecentMessages: m.history }));
 vi.mock("@/modules/knowledge-base/embeddings", () => ({ embedQuery: m.query, embedTexts: m.embed }));
 vi.mock("@/modules/knowledge-base/repository", () => ({ searchSimilarChunks: m.search }));
-vi.mock("@/modules/agent-engine/variables", async original => ({ ...await original<typeof import("@/modules/agent-engine/variables")>(), loadConversationVariables: async () => ({}) }));
+vi.mock("@/modules/agent-engine/variables", async original => ({ ...await original<typeof import("@/modules/agent-engine/variables")>(), loadConversationVariables: async () => ({}), loadEditedVariableKeys: async () => [] }));
 vi.mock("@/modules/ai/usage", () => ({ recordUsage: async () => {} }));
 vi.mock("@/modules/ai", () => ({ isAiError: () => false, createProvider: () => ({ provider: "fake", model: "fake", complete: m.complete }), getUsableChain: async () => [{ model: { provider: "fake", id: "fake" }, credentialId: null }], resolveSecret: async () => "test", markCredentialOk: vi.fn(), markCredentialCooldown: vi.fn(), getCooldownMinutes: () => 5 }));
 import { runAgentTurn } from "@/modules/agent-engine/orchestrator";

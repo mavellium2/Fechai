@@ -16,6 +16,8 @@ import { getServiceArea } from "@/modules/lead-insights/service-area-store";
 import { getTeamWhatsapp } from "@/modules/crm/team-whatsapp";
 import { findWhatsappChannel } from "@/modules/whatsapp/instances";
 import { TeamWhatsappForm } from "./TeamWhatsappForm";
+import { WhatsappBlocklist } from "./WhatsappBlocklist";
+import { listBlockedNumbers } from "@/modules/whatsapp/blocklist";
 
 export const metadata: Metadata = { title: "Configurações" };
 
@@ -174,7 +176,7 @@ export default async function ConfiguracoesPage() {
 
   // Cota e checklist de configuração medem o agente: para quem só afilia são
   // perguntas sem objeto, e nem chegam a ser consultadas.
-  const [user, checks, usage, serviceArea, tenant, teamWhatsapp, qrChannel] = await Promise.all([
+  const [user, checks, usage, serviceArea, tenant, teamWhatsapp, qrChannel, blocked] = await Promise.all([
     prisma.user.findUniqueOrThrow({
       where: { id: session.user.id },
       select: { name: true, email: true },
@@ -185,6 +187,7 @@ export default async function ConfiguracoesPage() {
     affiliateOnly ? null : prisma.tenant.findUnique({ where: { id: tenantId }, select: { city: true } }),
     affiliateOnly ? null : getTeamWhatsapp(tenantId, session.user.id),
     affiliateOnly ? null : findWhatsappChannel(tenantId, "evolution"),
+    affiliateOnly ? null : listBlockedNumbers(tenantId),
   ]);
   const renderedAt = new Date();
   const pending = checks ? checks.filter((c) => !c.ok).length : 0;
@@ -239,6 +242,12 @@ export default async function ConfiguracoesPage() {
                 Área de atendimento
               </CardTitle>
               <ServiceAreaForm baseCity={serviceArea?.baseCity ?? null} cities={serviceArea?.cities ?? []} suggestedCity={tenant?.city ?? null} />
+            </Card>
+          )}
+
+          {blocked && (
+            <Card>
+              <WhatsappBlocklist blocked={blocked} />
             </Card>
           )}
 

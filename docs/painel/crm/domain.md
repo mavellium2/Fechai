@@ -15,6 +15,8 @@ Um `Pipeline` padrão de chave `default` pertence à conta. `PipelineStage.kind`
 
 `Lead.stageId` indica a etapa comercial. `Lead.status` e `Lead.updatedAt` são usados pelos fluxos operacionais da conta, inclusive o Bitrix24. A atribuição inicial altera a etapa e registra um `LeadTransition` com `dimension: stage`, `source: system` e a etapa anterior vazia. O evento guarda a data da atribuição. A dimensão `status` será escrita pela REL-06 quando os fluxos operacionais forem integrados ao histórico.
 
+**Original do WhatsApp x o que vale.** `Lead.whatsappName` guarda o nome do perfil como o webhook mandou (só de contato, nunca de grupo nem do eco da clínica) e `Lead.phone` é a identidade no WhatsApp; nenhum dos dois é editado pela equipe. O que vale nas telas, nos avisos e para o agente é `Lead.name` e `Conversation.variables`. Editar pelo CRM ou por Contatos ([`editContactProfile`](../../../src/modules/crm/contact-profile.ts)) **trava** o valor: `Lead.nameEditedAt` para o nome e `Conversation.editedVariables` para cada variável. Travado, `register_lead`, `remember_variables`, o resumo e o webhook não sobrescrevem, e o prompt diz ao agente que o valor foi confirmado pela equipe. Só trava o que mudou. Em branco destrava: o nome volta ao do WhatsApp e a variável volta a ser preenchida pelo agente. O nome e o `{{nome}}` andam juntos; `{{numero}}` vem do telefone e não é editável. Contas antigas têm `whatsappName` nulo até o contato escrever de novo.
+
 ## Estados de acesso
 
 - Desligado. `crmEnabled` nasce `false`. Um lead pode existir com `stageId` vazio.
@@ -26,7 +28,7 @@ Desativar preserva o pipeline e as transições. Ao liberar novamente, o process
 ## Ficha do lead
 
 - Cidade, procedimento e motivo informado pelo contato vêm do `ConversationInsight` da conversa vinculada na mesma conta. A leitura usa o que já foi registrado. Motivo comercial da equipe vem da transição para Perdido e desqualificação vem do lead.
-- As variáveis vêm de `Conversation.variables` e das definições do agente da própria conta. A resposta a disparo usa a atribuição já registrada em `BroadcastRecipient`. Ela tem a própria data e pode coexistir com a origem de anúncio do lead.
+- As variáveis vêm de `Conversation.variables` e das definições do agente da própria conta, e podem ser editadas no card (ver "Original do WhatsApp" abaixo). A resposta a disparo usa a atribuição já registrada em `BroadcastRecipient`. Ela tem a própria data e pode coexistir com a origem de anúncio do lead.
 - `Lead.originChannel` é registrado na criação pelo canal que iniciou o cadastro. Valores possíveis são `whatsapp_qr`, `whatsapp_meta`, `widget`, `manual`, `broadcast` e `ad`. Relacionar um anúncio ou uma resposta de disparo depois da criação acrescenta evidência sem alterar o canal. O legado fica nulo, com exibição de anúncio quando já existe `LeadAdOrigin`.
 - `Tenant.crmLossReasons` guarda o catálogo comercial. Uma lista vazia usa os motivos iniciais. A transição manual mantém a chave do motivo, o rótulo escolhido e `lossReasonNote` como fotografia da decisão. Motivos antigos continuam legíveis pela chave que foi gravada.
 - `Conversation.assignedUserId` e `assignedAt` guardam o responsável e o horário. A ficha usa `ConversationAssignment` para mostrar a atribuição histórica e aproveita `ReportEvent` de transbordo. A exclusão do usuário libera a referência de responsável e preserva os eventos.

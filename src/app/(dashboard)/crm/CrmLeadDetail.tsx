@@ -4,7 +4,6 @@ import { ButtonLink } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { dateTimeLabel, phoneLabel } from "@/lib/format";
 import { reasonLabel } from "@/modules/agent-engine/disqualify";
-import { parseConversationVariables, parseVariableDefinitions } from "@/modules/agent-engine/variables";
 import { LOSS_CATEGORIES, lossLabel } from "@/modules/lead-insights/categories";
 import { crmBoardHref, type CrmSearchParams } from "@/modules/crm/board-filters";
 import { crmOriginLabel } from "@/modules/crm/lead-origin";
@@ -13,10 +12,10 @@ import { crmReplyPaused } from "@/modules/crm/whatsapp-reply";
 import { unidentifiedPhoneReply } from "@/modules/crm/phone-reply";
 import { crmDurationLabel } from "@/modules/crm/sla";
 import { ConversationSummary } from "../conversas/ConversationSummary";
-import { ConversationVariables } from "../conversas/ConversationVariables";
 import { SendMessageForm } from "../conversas/SendMessageForm";
 import { CrmLeadDrawer } from "./CrmLeadDrawer";
-import { CrmAssumeLead, CrmCompleteTask, CrmHandoffControls, CrmItWasMe, CrmLeadTags, CrmTaskForm } from "./CrmLeadForms";
+import { contactProfileData } from "@/modules/crm/contact-profile";
+import { CrmAssumeLead, CrmCompleteTask, CrmContactProfile, CrmHandoffControls, CrmItWasMe, CrmLeadTags, CrmTaskForm } from "./CrmLeadForms";
 import { sendCrmReply } from "./reply-actions";
 
 type Lead = Awaited<ReturnType<typeof getCrmLeadDetail>>;
@@ -54,6 +53,10 @@ function trailEntry(event: Lead["trail"][number], names: Map<string, string>): {
       return { source: null, title: `${text("action") === "remove" ? "Etiqueta removida" : "Etiqueta aplicada"}: ${text("tag") ?? ""}`, details: `por ${actor}` };
     case "crm.task_changed":
       return { source: null, title: text("action") === "complete" ? "Tarefa concluída" : "Tarefa criada", details: `por ${actor}` };
+    case "crm.contact_edited": {
+      const fields = (text("fields") ?? "").split(",").filter(Boolean).map((key) => `{{${key}}}`).join(", ");
+      return { source: null, title: "Dados do contato editados", details: line(fields || null, `por ${actor}`, text("via") === "contatos" ? "em Contatos" : null) };
+    }
     default:
       return { source: null, title: "Atualização no atendimento", details: null };
   }
@@ -128,6 +131,7 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
       [lossLabel(insight.lossReasonKey), insight.lossReasonText].filter(Boolean).join(" · ")]] : []),
     ...(lead.disqualifiedReason ? [["Motivo da desqualificação", reasonLabel(lead.disqualifiedReason)]] : []),
   ];
+  const profile = contactProfileData(lead, lead.variableDefinitions);
   const openTasks = lead.tasks.filter((task) => !task.completedAt).length;
   // Etapa, responsável, telefone e origem vão no cabeçalho: é o que se procura primeiro.
   const meta = (
@@ -199,7 +203,10 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
             </div>
           ))}
         </dl>
-        {conversation && <ConversationVariables definitions={parseVariableDefinitions(lead.variableDefinitions)} values={parseConversationVariables(conversation.variables)} />}
+      </DetailSection>
+      <DetailSection title="Editar contato">
+        {/* A chave remonta o formulário quando o valor salvo muda (o `defaultValue` não acompanha a revalidação). */}
+        <CrmContactProfile key={JSON.stringify(profile)} leadId={lead.id} data={profile} />
       </DetailSection>
       <DetailSection title="Etiquetas">
         <CrmLeadTags leadId={lead.id} tags={lead.tags} attached={lead.leadTags.map(({ tagId }) => tagId)} />

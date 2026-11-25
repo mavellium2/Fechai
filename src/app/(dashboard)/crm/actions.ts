@@ -8,6 +8,7 @@ import { requireCrmSession } from "@/modules/crm/access";
 import { CRM_TAG_MAX, CRM_TASK_MAX, validCrmId, type CrmSearchParams } from "@/modules/crm/board-filters";
 import { listCrmBoardCards, type CrmBoardCard } from "@/modules/crm/board";
 import { editCrmLead, parseCrmTaskDue } from "@/modules/crm/lead-detail-actions";
+import { editContactProfile, readContactProfileForm } from "@/modules/crm/contact-profile";
 import { setLeadStage } from "@/modules/crm/lead-stage";
 import { claimCrmConversation } from "@/modules/crm/assignments";
 import { currentAssigneeName, returnToAiAndReply, transferCrmConversation } from "@/modules/crm/handoff-panel";
@@ -225,6 +226,16 @@ export async function saveCrmLead(_previous: ActionResult | null, form: FormData
       revalidatePath("/conversas");
       if (recovery.status === "failed") return { ok: false, code: "server", error: recovery.error };
       return { ok: true, info: recovery.status === "sent" ? "Devolvido para a IA, que já respondeu a mensagem pendente." : "Devolvido para a IA." };
+    }
+    if (form.get("operation") === "profile") {
+      const profile = readContactProfileForm(form);
+      if ("error" in profile) return { ok: false, code: "validation", error: profile.error };
+      const result = await editContactProfile({ tenantId: session.user.tenantId, leadId, profile, via: "crm", actorUserId: session.user.id });
+      if (result.status === "unavailable") return { ok: false, code: "forbidden", error: "Este lead não está disponível no CRM." };
+      revalidatePath("/crm");
+      revalidatePath("/contatos");
+      revalidatePath("/conversas");
+      return { ok: true, info: result.fields.length ? "Dados do contato salvos." : "Nada mudou nos dados do contato." };
     }
     const edit = readEdit(form);
     if ("error" in edit) return { ok: false, code: "validation", error: edit.error };

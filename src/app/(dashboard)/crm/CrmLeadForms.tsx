@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { SelectMenu } from "@/components/ui/select-menu";
 import { useActionToast } from "@/components/ui/toast";
 import { CRM_TAG_MAX, CRM_TASK_MAX } from "@/modules/crm/board-filters";
+import type { ContactProfileData } from "@/modules/crm/contact-profile-shape";
+import { ContactProfileFields } from "@/components/contacts/ContactProfileFields";
 import { saveCrmLead } from "./actions";
 
 type Choice = { id: string; name: string };
@@ -197,5 +199,23 @@ export function CrmCompleteTask({ leadId, taskId, label }: { leadId: string; tas
         </>
       )}
     </LeadForm>
+  );
+}
+
+/**
+ * Dados do contato editáveis no card: o que a equipe salva aqui vale no painel
+ * e para o agente, e o original do WhatsApp continua guardado à parte.
+ */
+export function CrmContactProfile({ leadId, data }: { leadId: string; data: ContactProfileData }) {
+  const [state, submit, pending] = useActionState(saveCrmLead, null);
+  useActionToast(state, pending, { entity: "contato", action: "update" });
+  return (
+    <form action={submit} className="min-w-0 space-y-3">
+      <input type="hidden" name="leadId" value={leadId} />
+      <input type="hidden" name="operation" value="profile" />
+      <ContactProfileFields idPrefix={`crm-contato-${leadId}`} data={data} />
+      <Button type="submit" variant="outline" size="sm" loading={pending} loadingLabel="Salvando dados do contato">Salvar dados</Button>
+      {!pending && <FormFeedback error={state?.error} info={state?.info} />}
+    </form>
   );
 }

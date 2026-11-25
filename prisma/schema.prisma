@@ -1255,7 +1255,19 @@ model Lead {
   id            String             @id @default(cuid())
   tenantId      String
   tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Nome que vale para o contato (telas, {{nome}}, avisos). Pode vir do
+  /// perfil do WhatsApp, do agente ou da equipe; ver `nameEditedAt`.
   name          String?
+  /// Original do WhatsApp: o nome do perfil exatamente como o webhook mandou
+  /// (pushName/profile). Só o webhook grava e ninguém edita — é o registro do
+  /// que chegou. Null = conta antiga ou contato que ainda não escreveu.
+  whatsappName  String?
+  /// A equipe corrigiu o nome pelo CRM ou por Contatos. Enquanto preenchido,
+  /// agente, resumo e webhook nunca sobrescrevem `name` (o editado vale).
+  /// Limpar o nome na tela volta a null e devolve o nome do WhatsApp.
+  nameEditedAt  DateTime?
+  /// O telefone é a identidade do contato no WhatsApp (por onde as mensagens
+  /// saem) e nunca é editado pela equipe.
   phone         String
   status        String             @default("new") // new | warm | hot | scheduled | lost
   /// Canal comprovado ao criar o contato. Legado sem registro fica nulo.
@@ -1509,6 +1521,10 @@ model Conversation {
   summaryMsgCount   Int?
   /// Valores por conversa: { chave: valor }. Ausência = não informado.
   variables         Json?
+  /// Chaves de `variables` que a equipe editou (CRM ou Contatos). O valor
+  /// editado vale: `remember_variables` e o resumo não as sobrescrevem.
+  /// Apagar o valor na tela tira a chave daqui e o agente volta a preencher.
+  editedVariables   String[]  @default([])
   updatedAt         DateTime  @updatedAt
 
   appointments            Appointment[]

@@ -583,6 +583,7 @@ export async function blockWhatsappNumber(
   });
 
   revalidatePath("/integracoes");
+  revalidatePath("/configuracoes");
   return { ok: true, info: `${formatBlockedPhone(canonical)} bloqueado. O agente vai ignorá-lo.` };
 }
 
@@ -602,6 +603,7 @@ export async function unblockWhatsappNumber(id: string): Promise<WhatsappControl
 
   const reopened = await reopenUnblockedRecipients(tenantId, row.phone);
   revalidatePath("/integracoes");
+  revalidatePath("/configuracoes");
   revalidatePath("/disparos");
   return {
     ok: true,

@@ -29,7 +29,7 @@ import { appendMessage, getRecentMessages } from "./conversation";
 import { autoReturnTurnInstruction } from "./handoff-notice";
 import { conversationTimeContext, DEFAULT_AGENT_TIMEZONE } from "./time-context";
 import { sanitizeUnresolvedPlaceholders } from "./reply-sanitizer";
-import { loadConversationVariables, parseVariableDefinitions, variablesSystemContext } from "./variables";
+import { loadConversationVariables, loadEditedVariableKeys, parseVariableDefinitions, variablesSystemContext } from "./variables";
 import { INJECTION_GUARD } from "./injection-guard";
 import { unansweredRule, type Retrieved } from "./unanswered-rule";
 import { leadInsightRule } from "@/modules/lead-insights/tool";
@@ -275,6 +275,7 @@ export async function runAgentTurn(input: {
         return {};
       })
     : {};
+  const editedVariables = agent ? await loadEditedVariableKeys(tenantId, conversationId) : [];
 
   const handoffEnabled = actions.some((a) => a.key === "handoff_human");
   const pendingAssets = leadCampaign
@@ -300,7 +301,7 @@ export async function runAgentTurn(input: {
     campaignContext,
     appointmentsContext,
     autoReturnContext,
-    agent ? variablesSystemContext(variableDefinitions, variableValues) : "",
+    agent ? variablesSystemContext(variableDefinitions, variableValues, editedVariables) : "",
     context,
     agent ? unansweredRule(retrieved) : "",
     agent ? leadInsightRule() : "",

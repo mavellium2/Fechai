@@ -145,7 +145,7 @@ export async function processIncomingWhatsapp(
     if (!incoming.isFromMe && !incoming.isReaction && !incoming.isGroup &&
         incoming.viaButton && isBlockButton(incoming.text)) {
       const { conversation } = await getOrCreateConversation(
-        tenantId, incoming.fromPhone, incoming.fromName,
+        tenantId, incoming.fromPhone, incoming.fromName, { whatsappName: incoming.fromName },
       );
       const blocked = await handleBlockButton({
         tenantId, conversationId: conversation.id, phone: incoming.fromPhone,
@@ -331,6 +331,7 @@ export async function processIncomingWhatsapp(
     incoming.fromName,
     incoming.isGroup ? undefined : {
       originChannel: incoming.adOrigin ? "ad" : provider.name === "meta" ? "whatsapp_meta" : "whatsapp_qr",
+      whatsappName: incoming.fromName,
     },
   );
   await trackChannel(conversation);

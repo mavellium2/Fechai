@@ -19,7 +19,7 @@ export async function getCrmLeadDetail(id: string, before?: string) {
   const lead = await prisma.lead.findFirst({
     where: { ...realBoardLeads(tenantId), id },
     select: {
-      id: true, name: true, phone: true, createdAt: true, disqualifiedReason: true, originChannel: true,
+      id: true, name: true, whatsappName: true, nameEditedAt: true, phone: true, createdAt: true, disqualifiedReason: true, originChannel: true,
       stage: { select: { name: true, kind: true } },
       adOrigin: { select: { tenantId: true, code: true, name: true } },
       leadTags: { where: { tenantId }, select: { tagId: true } },
@@ -29,7 +29,7 @@ export async function getCrmLeadDetail(id: string, before?: string) {
         select: { id: true, text: true, dueAt: true, assignedUserId: true, completedAt: true },
       },
       conversation: { select: {
-        id: true, summary: true, summaryAt: true, summaryMsgCount: true, variables: true, assignedUserId: true, assignedAt: true, agentPaused: true, needsHuman: true,
+        id: true, summary: true, summaryAt: true, summaryMsgCount: true, variables: true, editedVariables: true, assignedUserId: true, assignedAt: true, agentPaused: true, needsHuman: true,
         // Quem assumiu pelo grupo sem estar ligado a ninguém da equipe (CRM-08).
         handoffNotices: { where: { status: "assumed", assignedUserId: null, assumedByPhone: { not: null } },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { assumedByPhone: true } },
@@ -88,7 +88,7 @@ export async function getCrmLeadDetail(id: string, before?: string) {
  */
 const TRAIL_TIMELINE_EVENTS = [
   "handoff.requested", "handoff.assumed", "handoff.transferred", "handoff.returned_to_ai", "handoff.sla_alerted",
-  "crm.tag_changed", "crm.task_changed",
+  "crm.tag_changed", "crm.task_changed", "crm.contact_edited",
 ];
 
 function readLeadTrail(tenantId: string, leadId: string) {

@@ -5,6 +5,7 @@ import { dateTimeLabel, phoneLabel, relativeTime, waLink } from "@/lib/format";
 import { leadStatusLabel } from "./leadStatus";
 import { ConversationSummary } from "./ConversationSummary";
 import { ResolveButton } from "./ResolveButton";
+import type { ContactProfileData } from "@/modules/crm/contact-profile-shape";
 import type { ConversationVariables as Values, VariableDefinition } from "@/modules/agent-engine/variables";
 
 export type LeadPanelData = {
@@ -15,13 +16,15 @@ export type LeadPanelData = {
   followUpSentAt: Date | null;
   updatedAt: Date;
   agent: { name: string; enabled: boolean; archived: boolean } | null;
-  lead: { name: string | null; phone: string; status: string; createdAt: Date };
+  lead: { id: string; name: string | null; phone: string; status: string; createdAt: Date };
   messageCount: number;
   summary: string | null;
   summaryAt: Date | null;
   summaryMsgCount: number | null;
   variableDefinitions: VariableDefinition[];
   variables: Values;
+  /** Dados editáveis do contato (nome e variáveis); null na conversa de teste. */
+  profile?: ContactProfileData | null;
 };
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

@@ -20,6 +20,10 @@ Before adding a save/submit screen, read `src/components/ui/toast/TOASTS.md`. To
 
 Before touching lead-quality logic, read `src/modules/lead-insights/README.md`. O agente registra **só o que o contato disse** pela tool interna `record_lead_insight` (cidade, procedimento, primeira dúvida real, motivo de perda; sem vaga de habilidade), nunca inferido; registrar **nunca lança**, conversa de teste fica fora. **"Dentro/fora do raio" e o resultado (agendou, transbordou, perdeu, em andamento) são calculados na leitura, nunca gravados**: a área de atendimento (`TenantServiceArea`) é uma lista de cidades por nome, e sem ela o veredito é `unknown`, jamais "dentro" presumido. "Perdeu" só com sinal explícito ou 72h sem resposta. As sugestões de tráfego do relatório são **regra, não IA**, só com 10+ leads que informaram a cidade, e sempre "sugestão, não promessa". `MonthlyReport.leadQuality` é congelado no snapshot; o PDF ganha o bloco de leads na análise detalhada (páginas seguintes) **só quando o mês tem leads**; a página 1 não muda. Nenhuma consulta devolve nome, telefone ou texto de conversa. Schema novo: `db push` + `generate` nos dois processos (web e worker).
 
+## Working in dados do contato (nome e variáveis editáveis, CRM e /contatos)
+
+Before touching contact name/variables writes, read `src/modules/crm/README.md` ("Dados do contato editáveis"). **O original do WhatsApp nunca é editado**: `Lead.whatsappName` (perfil, só o webhook grava) e `Lead.phone` (identidade, por onde tudo sai). O que vale é `Lead.name` + `Conversation.variables`, e o que a equipe edita por `editContactProfile` (`modules/crm/contact-profile.ts`) **trava** (`Lead.nameEditedAt`, `Conversation.editedVariables`): agente (`register_lead`, `remember_variables`), resumo e webhook não sobrescrevem. Todo caminho novo que grava `Lead.name` filtra `nameEditedAt: null`. Em branco destrava. Trilha `crm.contact_edited` só com as chaves, nunca o valor. Schema novo: `db push` + `generate` nos dois processos (web e worker).
+
 ## Working in Disparos (/disparos, Excel/JSON, Meta templates)
 
 Before touching broadcasts, read `src/modules/broadcasts/README.md`. A página e

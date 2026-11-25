@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { payloadTooLarge } from "@/lib/rate-limit";
 import { getOrCreateConversation, sendManualReply } from "@/modules/agent-engine/conversation";
 import { recordAudit } from "@/modules/audit/log";
+import { editContactProfile, readContactProfileForm } from "@/modules/crm/contact-profile";
 
 type Result = { ok: boolean; error?: string; info?: string };
 
@@ -103,4 +104,24 @@ export async function addContact(_prev: Result | null, formData: FormData): Prom
 
   revalidateContatos();
   return { ok: true, info: existed ? "Este número já está na sua lista." : `Contato ${lead.name ?? ""} adicionado.` };
+}
+
+/**
+ * Edita os dados que valem para o contato (nome e variáveis do agente). O
+ * original do WhatsApp (nome do perfil e telefone) não muda; ver
+ * `modules/crm/contact-profile.ts`.
+ */
+export async function saveContactProfile(_prev: Result | null, formData: FormData): Promise<Result> {
+  const tooLarge = payloadTooLarge(formData);
+  if (tooLarge) return { ok: false, error: tooLarge };
+  const { tenantId, session } = await requireTenant();
+  const leadId = formData.get("leadId");
+  if (typeof leadId !== "string" || !leadId) return { ok: false, error: "Contato não encontrado." };
+  const profile = readContactProfileForm(formData);
+  if ("error" in profile) return { ok: false, error: profile.error };
+  const result = await editContactProfile({ tenantId, leadId, profile, via: "contatos", actorUserId: session?.user.id });
+  if (result.status === "unavailable") return { ok: false, error: "Contato não encontrado." };
+  revalidateContatos();
+  revalidatePath("/crm");
+  return { ok: true, info: result.fields.length ? "Dados do contato salvos." : "Nada mudou nos dados do contato." };
 }

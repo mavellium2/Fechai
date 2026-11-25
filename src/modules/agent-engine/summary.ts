@@ -170,7 +170,7 @@ export async function summarizeConversation(
       // deixaria a lista de contatos com o nome antigo do perfil.
       if (values.nome && !known.nome) {
         await prisma.lead.updateMany({
-          where: { tenantId, conversation: { id: conversationId } },
+          where: { tenantId, conversation: { id: conversationId }, nameEditedAt: null },
           data: { name: values.nome },
         });
       }

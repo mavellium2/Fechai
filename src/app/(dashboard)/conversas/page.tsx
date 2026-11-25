@@ -6,6 +6,7 @@ import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { ConversationsWorkspace } from "./ConversationsWorkspace";
 import { ContactPanel } from "./ContactPanel";
+import { contactProfileData } from "@/modules/crm/contact-profile";
 import { EmptyState } from "@/components/ui/empty-state";
 
 import { ConversationList } from "./ConversationList";
@@ -152,6 +153,8 @@ export default async function ConversasPage({
           summaryMsgCount: selected.summaryMsgCount,
           variableDefinitions: parseVariableDefinitions(selected.agent?.variableDefinitions ?? fallbackAgent?.variableDefinitions),
           variables: withContactDefaults(parseConversationVariables(selected.variables), selected.lead),
+          profile: selected.isTest ? null : contactProfileData({ ...selected.lead, conversation: selected },
+            selected.agent?.variableDefinitions ?? fallbackAgent?.variableDefinitions),
         },
         messages: selected.messages,
         survey: selected.satisfactionSurveys[0] ?? null,

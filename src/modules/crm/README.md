@@ -47,6 +47,10 @@ Toda action e rota do CRM chama `requireCrmSession()`, que exige `crm:ver` ([`sr
 
 Criação e movimentação de leads usam a trava compartilhada da conta. O arquivamento usa a trava exclusiva para impedir atribuições concorrentes à etapa. O Kanban em `/crm` carrega cada coluna por lotes sob demanda (cursor pelo último card) e tem filtros e buscas compartilháveis na URL (`q`, `q_<etapa>`). As buscas filtram ao vivo (350 ms de debounce, `router.replace`) e ficam uma na linha do título e outra no cabeçalho de cada coluna; o grupo de controles do título não quebra em telas estreitas. Consulte o [guia funcional](../../../docs/painel/crm/telas.md) para os recursos que ainda dependem de outros cards.
 
+## Dados do contato editáveis
+
+`contact-profile.ts` é a única porta de edição de nome e variáveis pela equipe (CRM e Contatos). O original fica em `Lead.whatsappName` (gravado só pelo webhook, via `getOrCreateConversation(..., { whatsappName })`) e `Lead.phone`. O editado trava (`Lead.nameEditedAt`, `Conversation.editedVariables`) e todo caminho automático que grava nome ou variável respeita a trava: `register_lead`, `rememberConversationVariables`, a extração do resumo e o preenchimento de nome no webhook. Caminho novo que escreve `Lead.name` precisa filtrar `nameEditedAt: null`. Constantes e tipos usados pela tela ficam em `contact-profile-shape.ts`, sem banco.
+
 ## Cadastro e exclusão pelo quadro
 
 `createManualCrmLead` cria o lead já na etapa escolhida, com `originChannel: "manual"` e a transição de entrada na mesma transação. Usa o mesmo par de travas do webhook (`withConversationContactLock`: admissão compartilhada + telefone), então um número que já existe na conta não nasce de novo nem muda de etapa — o retorno `exists` só informa o lead atual. Etapa perdida é recusada (`stage_unavailable`): Perdido exige motivo e justificativa, que só a movimentação pede. Não há conversa, mensagem, disparo nem consumo de cota.

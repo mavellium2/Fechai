@@ -99,6 +99,7 @@ export const AUDIT_EVENTS = {
   "crm.lost_reason_set": { label: "Marcou um lead como perdido, com o motivo", kind: "update", group: "crm" },
   "crm.tag_changed": { label: "Alterou as etiquetas de um lead", kind: "update", group: "crm" },
   "crm.task_changed": { label: "Criou ou concluiu uma tarefa de um lead", kind: "update", group: "crm" },
+  "crm.contact_edited": { label: "Editou os dados de um contato", kind: "update", group: "crm" },
   "handoff.requested": { label: "Conversa transferida para a equipe", kind: "update", group: "crm" },
   "handoff.assumed": { label: "Assumiu um atendimento", kind: "update", group: "crm" },
   "handoff.transferred": { label: "Transferiu um atendimento", kind: "update", group: "crm" },

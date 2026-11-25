@@ -297,10 +297,12 @@ const TOOLS: Record<ActionKey, ToolDef> = {
     },
     handler: async (ctx, args) => {
       const name = str(args.name);
-      await prisma.lead.update({
-        where: { id: ctx.leadId },
-        data: { ...(name ? { name } : {}), status: "warm" },
-      });
+      await prisma.lead.update({ where: { id: ctx.leadId }, data: { status: "warm" } });
+      // Nome definido pela equipe (`nameEditedAt`) vale mais que o do agente.
+      const named = name
+        ? (await prisma.lead.updateMany({ where: { id: ctx.leadId, tenantId: ctx.tenantId, nameEditedAt: null }, data: { name } })).count
+        : 0;
+      if (name && !named) return "Lead registrado. O nome foi definido pela equipe e continua o mesmo.";
       return `Lead registrado${name ? ` (${name})` : ""}.`;
     },
   },

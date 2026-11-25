@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { LoadingDots } from "@/components/ui/loading-dots";
 import { connectWhatsapp, refreshWhatsappStatus } from "./actions";
 import { DisconnectControl, WhatsappControls } from "./WhatsappControls";
-import { WhatsappBlocklist, type BlockedRow } from "./WhatsappBlocklist";
 
 /**
  * De quanto em quanto tempo perguntamos ao provedor se o QR já foi lido — e,
@@ -71,7 +70,6 @@ type Props = CommonProps &
         /** Se o agente ignora mensagens de grupos do WhatsApp. */
         ignoreGroups: boolean;
         /** Números que o agente ignora por completo (ver modules/whatsapp/blocklist). */
-        blocked: BlockedRow[];
       }
     | { layout: "channel" }
   );
@@ -287,10 +285,6 @@ export function WhatsappConnect(props: Props) {
             agentEnabled={props.agentEnabled}
             ignoreGroups={props.ignoreGroups}
           />
-
-          {/* Fora do `connected`: bloquear um número é preparar o atendimento, e
-              quem está reconectando o WhatsApp não deveria perder a lista de vista. */}
-          <WhatsappBlocklist blocked={props.blocked} />
         </>
       )}
     </>

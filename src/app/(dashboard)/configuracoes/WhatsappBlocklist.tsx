@@ -9,12 +9,13 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { formatBlockedPhone } from "@/modules/whatsapp/blocklist";
 import { formatBlockedPhoneInput } from "@/modules/whatsapp/blocklist-input";
-import { blockWhatsappNumber, unblockWhatsappNumber } from "./actions";
+import { blockWhatsappNumber, unblockWhatsappNumber } from "../integracoes/actions";
 
 export type BlockedRow = { id: string; phone: string; label: string | null };
 
 /**
- * Lista de números que o agente ignora.
+ * Lista de números que a conta ignora (todos os agentes, QR e Meta). Mora em
+ * Configurações porque não é de um canal nem de um agente.
  *
  * Mora aqui e não em /conversas de propósito: o caso comum é bloquear um
  * número que ainda NÃO escreveu (o ex-fornecedor, o número de spam que já
@@ -70,8 +71,9 @@ export function WhatsappBlocklist({
         <div className="min-w-0">
           <Heading className="font-display text-base font-semibold text-white">Números bloqueados</Heading>
           <p className="mt-0.5 max-w-prose text-sm text-white/65">
-            O agente ignora estes números por completo: nada é respondido e a mensagem não entra em
-            Conversas. Quem está na lista não é avisado do bloqueio.
+            Vale para a conta inteira: todos os agentes e os dois números (QR e Meta) ignoram estes
+            contatos por completo. Nada é respondido, a mensagem não entra em Conversas e quem está
+            na lista não é avisado do bloqueio.
           </p>
         </div>
       </div>

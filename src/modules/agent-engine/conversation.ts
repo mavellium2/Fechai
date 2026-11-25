@@ -32,7 +32,16 @@ import { recordWhatsappInbound, type WhatsappContactInbound } from "@/modules/wh
  * é espelhada na conversa para as telas filtrarem sem join — sem ela o sandbox
  * era contado como cliente real em Contatos, Conversas e Relatórios.
  */
-type ConversationCreation = { isTest?: boolean; originChannel?: LeadOriginChannel };
+type ConversationCreation = {
+  isTest?: boolean;
+  originChannel?: LeadOriginChannel;
+  /**
+   * Nome do perfil como o WhatsApp mandou. Só o webhook passa, e só de
+   * contato (nunca de grupo nem do eco da clínica): é o original guardado em
+   * `Lead.whatsappName`, que a equipe não edita.
+   */
+  whatsappName?: string;
+};
 
 export async function getOrCreateConversation(
   tenantId: string,
@@ -45,6 +54,7 @@ export async function getOrCreateConversation(
 
 async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenantId: string, phone: string, name: string | undefined, options: ConversationCreation) {
   const isTest = options.isTest ?? false;
+  const profileName = options.whatsappName?.trim().slice(0, 120) || null;
   let lead = await db.lead.findFirst({
     where: { tenantId, phone },
     include: { conversation: true },
@@ -65,6 +75,7 @@ async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenan
         tenantId,
         phone,
         name,
+        whatsappName: isTest ? null : profileName,
         isTest,
         originChannel: isTest ? null : options.originChannel,
         ...(!isTest && await newLeadCrmFields(db, tenantId)),
@@ -72,14 +83,20 @@ async function getOrCreateLockedConversation(db: Prisma.TransactionClient, tenan
       },
       include: { conversation: true },
     });
-  } else if (!lead.name && name?.trim() && !lead.isTest) {
+  } else if (!lead.isTest) {
     // Uma conversa iniciada pelo atendente nasce sem nome. O primeiro perfil
-    // recebido do próprio contato pode completar esse dado.
-    lead = await db.lead.update({
-      where: { id: lead.id },
-      data: { name: name.trim() },
-      include: { conversation: true },
-    });
+    // recebido do próprio contato pode completar esse dado, mas nunca o nome
+    // que a equipe definiu (`nameEditedAt`). O original do WhatsApp é sempre
+    // registrado à parte, mesmo quando o nome que vale é outro.
+    const fillName = !lead.name && !lead.nameEditedAt && name?.trim();
+    const newProfile = profileName && profileName !== lead.whatsappName;
+    if (fillName || newProfile) {
+      lead = await db.lead.update({
+        where: { id: lead.id },
+        data: { ...(fillName && { name: fillName }), ...(newProfile && { whatsappName: profileName }) },
+        include: { conversation: true },
+      });
+    }
   }
 
   if (!lead.conversation) {

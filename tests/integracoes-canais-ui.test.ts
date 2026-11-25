@@ -44,7 +44,6 @@ const single = (over: Record<string, unknown> = {}) =>
       agentName: "Paula",
       agentEnabled: true,
       ignoreGroups: true,
-      blocked: [],
       ...over,
     }),
   );
@@ -78,19 +77,19 @@ const meta = (over: Record<string, unknown> = {}) =>
   );
 
 describe("Cartão único (conta sem a Meta liberada)", () => {
-  it("continua juntando conexão, atendimento, desconectar e bloqueados", () => {
+  it("junta conexão, atendimento e desconectar; bloqueados moraram em Configurações", () => {
     const html = single();
     expect(html).toContain("Seu número está atendendo");
     expect(html).toContain("Paula está respondendo");
     expect(html).toContain("Desconectar número");
-    expect(html).toContain("Números bloqueados");
+    expect(html).not.toContain("Números bloqueados");
   });
 
-  it("desconectado não oferece desconectar, mas mantém o atendimento e os bloqueados", () => {
+  it("desconectado não oferece desconectar, mas mantém o atendimento", () => {
     const html = single({ initialStatus: "disconnected" });
     expect(html).not.toContain("Desconectar número");
     expect(html).toContain("Atendimento");
-    expect(html).toContain("Números bloqueados");
+    expect(html).not.toContain("Números bloqueados");
   });
 
   it("pausar o agente fala 'neste número', porque só há um", () => {

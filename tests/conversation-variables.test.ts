@@ -25,6 +25,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.conversation.findFirst.mockResolvedValue({
     variables: null,
+    editedVariables: [],
     lead: { name: "Alcides", phone: "5514999999999" },
   });
   db.conversation.updateMany.mockResolvedValue({ count: 1 });
@@ -107,7 +108,7 @@ describe("valores por conversa", () => {
 
   it("guarda apenas chaves configuradas e preserva dados anteriores", async () => {
     db.conversation.findFirst.mockResolvedValue({
-      variables: { endereco: "Rua A" }, lead: { name: "Alcides", phone: "5514999999999" },
+      variables: { endereco: "Rua A" }, editedVariables: [], lead: { name: "Alcides", phone: "5514999999999" },
     });
     const result = await rememberConversationVariables({
       tenantId: "tenant-1", conversationId: "conv-1", definitions: custom,
@@ -131,8 +132,42 @@ describe("valores por conversa", () => {
   it("corrige o nome da conversa e do contato", async () => {
     await rememberConversationVariables({ tenantId: "tenant-1", conversationId: "conv-1", definitions: [], values: { nome: "Maria" } });
     expect(db.lead.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: "tenant-1", conversation: { id: "conv-1" } }, data: { name: "Maria" },
+      where: { tenantId: "tenant-1", conversation: { id: "conv-1" }, nameEditedAt: null }, data: { name: "Maria" },
     });
+  });
+
+  it("não sobrescreve o que a equipe editou, mas guarda o resto", async () => {
+    db.conversation.findFirst.mockResolvedValue({
+      variables: { nome: "Ana Paula", endereco: "Rua A" }, editedVariables: ["nome", "endereco"],
+      lead: { name: "Ana Paula", phone: "5514999999999" },
+    });
+    const result = await rememberConversationVariables({
+      tenantId: "tenant-1", conversationId: "conv-1", definitions: custom,
+      values: { nome: "Ana", endereco: "Rua B", convenio: "Plano Azul" },
+    });
+    expect(result).toContain("{{convenio}}");
+    expect(result).toContain("definidas pela equipe");
+    expect(db.lead.updateMany).not.toHaveBeenCalled();
+    expect(db.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: "conv-1", tenantId: "tenant-1" },
+      data: { variables: { nome: "Ana Paula", numero: "5514999999999", endereco: "Rua A", convenio: "Plano Azul" } },
+    });
+  });
+
+  it("só com chaves travadas não grava nada", async () => {
+    db.conversation.findFirst.mockResolvedValue({
+      variables: { nome: "Ana Paula" }, editedVariables: ["nome"], lead: { name: "Ana Paula", phone: "5514999999999" },
+    });
+    const result = await rememberConversationVariables({ tenantId: "tenant-1", conversationId: "conv-1", definitions: [], values: { nome: "Ana" } });
+    expect(result).toContain("Nada guardado");
+    expect(db.conversation.updateMany).not.toHaveBeenCalled();
+    expect(db.lead.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("o prompt diz ao agente que o valor editado pela equipe vale", () => {
+    const context = variablesSystemContext([], { nome: "Ana Paula" }, ["nome"]);
+    expect(context).toContain("Confirmado pela equipe");
+    expect(variablesSystemContext([], {}, ["nome"])).not.toContain("Confirmado pela equipe");
   });
 });
 
