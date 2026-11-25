@@ -1,9 +1,9 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, Menu, Settings } from "lucide-react";
+import { LogOut, Menu, Pin, PinOff, Settings } from "lucide-react";
 import { ShellNav, type NavItem } from "./ShellNav";
 import { MobileNav } from "./MobileNav";
 import type { UsageNavData } from "./UsageNav";
@@ -11,9 +11,15 @@ import { TenantThemeToggle } from "./TenantTheme";
 import { Button } from "@/components/ui/button";
 import "./tenant-shell.css";
 
-const PREFERENCES = { tenant: "fechai:tenant-menu-expanded", admin: "fechai:admin-menu-expanded" };
-const PREFERENCE_EVENT = "fechai:menu-expanded-change";
-const memoryExpanded = { tenant: false, admin: true };
+/**
+ * O menu abre recolhido em toda página. O ☰ expande só na página atual (volta a
+ * recolher ao navegar); o alfinete fixa aberto e é a única escolha guardada.
+ * Chave nova de propósito: a antiga ("expandido") deixaria aberto quem só
+ * expandiu uma vez. O admin nasce fixado, como era antes.
+ */
+const PREFERENCES = { tenant: "fechai:tenant-menu-pinned", admin: "fechai:admin-menu-pinned" };
+const PREFERENCE_EVENT = "fechai:menu-pinned-change";
+const memoryPinned = { tenant: false, admin: true };
 function subscribe(callback: () => void) {
   window.addEventListener("storage", callback);
   window.addEventListener(PREFERENCE_EVENT, callback);
@@ -22,11 +28,11 @@ function subscribe(callback: () => void) {
     window.removeEventListener(PREFERENCE_EVENT, callback);
   };
 }
-function expandedPreference(context: "tenant" | "admin") {
+function pinnedPreference(context: "tenant" | "admin") {
   try {
     const saved = localStorage.getItem(PREFERENCES[context]);
     return saved === null ? context === "admin" : saved === "1";
-  } catch { return memoryExpanded[context]; }
+  } catch { return memoryPinned[context]; }
 }
 
 /** Common workspace frame. Providers and analytics remain in PanelShell. */
@@ -44,16 +50,33 @@ export function TenantShell({ navItems, brandHref, brandSubtitle, footerLabel, u
   children: React.ReactNode;
   context?: "tenant" | "admin";
 }) {
-  const expanded = useSyncExternalStore(subscribe, () => expandedPreference(context), () => context === "admin");
+  const pinned = useSyncExternalStore(subscribe, () => pinnedPreference(context), () => context === "admin");
   const pathname = usePathname();
+  // Aberto "de passagem" vale só até a próxima navegação. Comparar só a rota não
+  // basta: sair e voltar para a mesma página reabriria o menu.
+  const [open, setOpen] = useState(false);
+  const [openPath, setOpenPath] = useState(pathname);
+  if (openPath !== pathname) { setOpenPath(pathname); setOpen(false); }
+  const expanded = pinned || open;
   const agents = pathname === "/agentes" || pathname.startsWith("/agentes/") || pathname === "/conversas";
   const accountHref = context === "admin" ? brandHref : "/configuracoes";
   const initials = brandSubtitle.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "F";
 
-  function toggleMenu() {
-    memoryExpanded[context] = !expanded;
-    try { localStorage.setItem(PREFERENCES[context], expanded ? "0" : "1"); } catch { /* Keep the in-memory preference. */ }
+  function savePinned(next: boolean) {
+    memoryPinned[context] = next;
+    try { localStorage.setItem(PREFERENCES[context], next ? "1" : "0"); } catch { /* Keep the in-memory preference. */ }
     window.dispatchEvent(new Event(PREFERENCE_EVENT));
+  }
+
+  function toggleMenu() {
+    if (pinned) { savePinned(false); setOpen(false); return; }
+    setOpen(!expanded);
+  }
+
+  function togglePin() {
+    // Desafixar deixa aberto até a próxima página, em vez de fechar debaixo do mouse.
+    if (pinned) setOpen(true);
+    savePinned(!pinned);
   }
 
   return (
@@ -65,6 +88,11 @@ export function TenantShell({ navItems, brandHref, brandSubtitle, footerLabel, u
             <Menu size={20} aria-hidden />
           </button>
           <Link href={brandHref} className="tenant-rail-label tenant-wordmark font-display text-xl font-bold" aria-hidden={!expanded || undefined} tabIndex={expanded ? undefined : -1}>fechai<span className="text-signal">.</span></Link>
+          <button type="button" onClick={togglePin} aria-pressed={pinned} aria-label="Fixar menu aberto"
+            title={pinned ? "Desafixar menu" : "Fixar menu aberto"} aria-hidden={!expanded || undefined} tabIndex={expanded ? undefined : -1}
+            className={`tenant-icon-button tenant-rail-label tenant-pin ${pinned ? "tenant-pin-on" : ""}`}>
+            {pinned ? <PinOff size={16} aria-hidden /> : <Pin size={16} aria-hidden />}
+          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2">
           <ShellNav items={navItems} collapsed={!expanded} variant="tenant" />

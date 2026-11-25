@@ -1,5 +1,5 @@
 import { parseLocalDateTime } from "@/modules/scheduling/time";
-import { crmOriginFilter } from "./lead-origin";
+import { crmOriginFilter, type CRM_ORIGIN_OPTIONS } from "./lead-origin";
 
 export const CRM_TIME_ZONE = "America/Sao_Paulo";
 export const CRM_COLUMN_SIZE = 20;
@@ -21,6 +21,25 @@ function dayStart(value: string | string[] | undefined) {
   return Number.isNaN(+day) || day.toISOString().slice(0, 10) !== value ? null : parseLocalDateTime(value, "00:00", CRM_TIME_ZONE);
 }
 
+/** Teto de valores por filtro: a URL é de quem clica, não de quem monta à mão. */
+export const CRM_FILTER_MAX_VALUES = 50;
+
+/**
+ * Um filtro pode ter vários valores, separados por vírgula na URL
+ * (`etapa=a,b`). Um valor só é o formato antigo e continua valendo. Valor fora
+ * do formato é descartado; repetido conta uma vez.
+ */
+function idList(value: string | string[] | undefined): string[] {
+  if (typeof value !== "string") return [];
+  return [...new Set(value.split(","))].filter(validCrmId).slice(0, CRM_FILTER_MAX_VALUES);
+}
+
+function originList(value: string | string[] | undefined) {
+  if (typeof value !== "string") return [];
+  return [...new Set(value.split(",").map(crmOriginFilter))]
+    .filter((origin): origin is keyof typeof CRM_ORIGIN_OPTIONS => origin !== "");
+}
+
 export function readCrmFilters(params: CrmSearchParams) {
   const from = dayStart(params.de);
   const to = dayStart(params.ate);
@@ -28,10 +47,11 @@ export function readCrmFilters(params: CrmSearchParams) {
   nextDay?.setUTCDate(nextDay.getUTCDate() + 1);
   const end = nextDay ? parseLocalDateTime(nextDay.toISOString().slice(0, 10), "00:00", CRM_TIME_ZONE) : null;
   return {
-    stage: validCrmId(params.etapa) ? params.etapa : "",
-    tag: validCrmId(params.etiqueta) ? params.etiqueta : "",
-    assignee: validCrmId(params.responsavel) ? params.responsavel : "",
-    origin: crmOriginFilter(params.origem),
+    // Dentro de um filtro vale qualquer um dos valores (ou); entre filtros, todos (e).
+    stages: idList(params.etapa),
+    tags: idList(params.etiqueta),
+    assignees: idList(params.responsavel),
+    origins: originList(params.origem),
     basis: params.periodo === "atividade" ? "atividade" as const : "entrada" as const,
     from: from ? String(params.de) : "",
     to: to ? String(params.ate) : "",

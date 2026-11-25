@@ -3,7 +3,7 @@
 import { useActionState, useId, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SelectMenu } from "@/components/ui/select-menu";
@@ -45,18 +45,22 @@ export function StageNameForm({ stage }: { stage?: Stage }) {
     return result;
   }, null);
   useActionToast(state, pending, { entity: "etapa", action: stage ? "update" : "create", gender: "f" });
-  const label = stage ? "Nome da etapa" : "Nova etapa personalizada";
+  const label = stage ? `Nome da etapa ${stage.name}` : "Nome da nova etapa";
+  const input = <Input id={id} name="name" value={draft ?? stage?.name ?? ""} onChange={(event) => setDraft(event.target.value)} disabled={pending} required maxLength={80}
+    placeholder={stage ? undefined : "Ex.: Orçamento enviado"} />;
+  // "Renomear" só aparece com o nome mudado: na lista, dez botões iguais parados viram ruído.
+  const changed = draft !== null && draft.trim() !== (stage?.name ?? "") && draft.trim() !== "";
 
   return (
     <UnsavedForm action={action} result={state} label={label} className="flex min-w-0 flex-wrap items-end gap-2">
       <input type="hidden" name="intent" value={stage ? "rename" : "create"} />
       {stage && <><input type="hidden" name="stageId" value={stage.id} /><input type="hidden" name="previousName" value={stage.name} /></>}
       <div className="min-w-44 flex-1">
-        <Field label={label} htmlFor={id}>
-          <Input id={id} name="name" value={draft ?? stage?.name ?? ""} onChange={(event) => setDraft(event.target.value)} disabled={pending} required maxLength={80} />
-        </Field>
+        {stage ? <><label htmlFor={id} className="sr-only">{label}</label>{input}</> : <Field label={label} htmlFor={id}>{input}</Field>}
       </div>
-      <Button type="submit" variant={stage ? "outline" : "default"} loading={pending}>{stage ? "Renomear" : "Criar etapa"}</Button>
+      {(!stage || changed || pending) && (
+        <Button type="submit" variant={stage ? "outline" : "default"} loading={pending}>{stage ? "Renomear" : "Criar etapa"}</Button>
+      )}
     </UnsavedForm>
   );
 }
@@ -71,10 +75,10 @@ export function CrmStageList({ stages }: { stages: Stage[] }) {
   useActionToast(state, pending, { entity: "etapa", action: "update", gender: "f" });
 
   return (
-    <ol className="space-y-3" aria-label="Ordem das etapas do pipeline">
+    <ol className="divide-y divide-ink/10 panel:divide-white/10" aria-label="Ordem das etapas do pipeline">
       {stages.map((stage, index) => (
-        <li key={stage.id}>
-          <CrmStageForms stage={stage} previousId={stages[index - 1]?.id} nextId={stages[index + 1]?.id}
+        <li key={stage.id} className="py-3 first:pt-0 last:pb-0">
+          <CrmStageForms position={index + 1} stage={stage} previousId={stages[index - 1]?.id} nextId={stages[index + 1]?.id}
             destinations={stages.filter(({ id, acceptsArchive }) => id !== stage.id && acceptsArchive)} archive={archive}
             archivePending={pending} archiving={pending && archivingId === stage.id} />
         </li>
@@ -83,7 +87,8 @@ export function CrmStageList({ stages }: { stages: Stage[] }) {
   );
 }
 
-function CrmStageForms({ stage, previousId, nextId, destinations, archive, archivePending, archiving }: {
+function CrmStageForms({ position, stage, previousId, nextId, destinations, archive, archivePending, archiving }: {
+  position: number;
   stage: Stage;
   previousId?: string;
   nextId?: string;
@@ -93,16 +98,20 @@ function CrmStageForms({ stage, previousId, nextId, destinations, archive, archi
   archiving: boolean;
 }) {
   return (
-    <Card className="space-y-3 p-4 sm:p-5">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-0 flex-1"><StageNameForm stage={stage} /></div>
-        <StageOrderForm stage={stage} previousId={previousId} nextId={nextId} />
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-ink/5 font-mono text-xs text-neutral panel:bg-white/10 panel:text-white/70">{position}</span>
+        <div className="min-w-0 flex-1 basis-56"><StageNameForm stage={stage} /></div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge tone={stage.system ? "neutral" : "iris"}>{stage.system ? "Sistema" : "Personalizada"}</Badge>
+          <span className="w-16 text-right text-sm tabular-nums text-neutral panel:text-white/60">
+            {stage.leadCount.toLocaleString("pt-BR")} {stage.leadCount === 1 ? "lead" : "leads"}
+          </span>
+          <StageOrderForm stage={stage} previousId={previousId} nextId={nextId} />
+        </div>
       </div>
-      <p className="text-sm text-neutral panel:text-white/60">
-        {stage.system ? "Etapa de sistema" : "Etapa personalizada"} · {stage.leadCount.toLocaleString("pt-BR")} {stage.leadCount === 1 ? "lead" : "leads"}
-      </p>
-      {!stage.system && <ArchiveStageForm stage={stage} destinations={destinations} action={archive} pending={archivePending} loading={archiving} />}
-    </Card>
+      {!stage.system && <div className="pl-10"><ArchiveStageForm stage={stage} destinations={destinations} action={archive} pending={archivePending} loading={archiving} /></div>}
+    </div>
   );
 }
 
@@ -130,8 +139,8 @@ function ArchiveStageForm({ stage, destinations, action, pending, loading }: {
   const selected = destinations.some(({ id }) => id === destination) ? destination : "";
 
   return (
-    <details className="border-t border-ink/10 pt-3 panel:border-white/10">
-      <summary className="w-fit cursor-pointer text-sm font-medium">Arquivar etapa</summary>
+    <details>
+      <summary className="w-fit cursor-pointer text-sm text-neutral hover:text-ink panel:text-white/60 panel:hover:text-white">Arquivar etapa</summary>
       <form action={action} className="mt-3 flex flex-wrap items-end gap-3">
         <input type="hidden" name="intent" value="archive" />
         <input type="hidden" name="stageId" value={stage.id} />

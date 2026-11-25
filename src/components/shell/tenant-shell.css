@@ -53,6 +53,8 @@
 .tenant-rail-expanded :is(.tenant-rail-label, .tenant-nav-label) { opacity: 1; visibility: visible; transform: none; transition: opacity 160ms ease 60ms, transform 240ms ease, visibility 0s; }
 .tenant-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 36px; border-radius: 10px; color: var(--tenant-muted); cursor: pointer; }
 .tenant-icon-button:hover { background: var(--tenant-soft); }
+.tenant-pin { margin-left: auto; width: 32px; height: 32px; }
+.tenant-pin-on { color: var(--color-iris); }
 .tenant-theme .tenant-nav-link { justify-content: flex-start; gap: 12px; height: 40px; overflow: hidden; padding: 8px 10px; border-radius: 12px; font-family: var(--font-sans); font-size: 14px; font-weight: 500; text-transform: none; letter-spacing: normal; color: var(--tenant-text); }
 .tenant-nav-link svg { color: var(--tenant-icon); }
 .tenant-theme .tenant-nav-link:hover { background: var(--tenant-soft); }

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 // `AtSign` e não um ícone de marca: o lucide removeu os logos de terceiros, e
 // inventar um SVG do Instagram aqui criaria um ícone fora do conjunto.
 import Link from "next/link";
@@ -35,6 +36,8 @@ import { WhatsappBlocklist } from "./WhatsappBlocklist";
 import { SnippetBox } from "./SnippetBox";
 import { WhatsappHistoryRecovery } from "./WhatsappHistoryRecovery";
 import { readHistoryRecovery } from "@/modules/whatsapp/history-recovery";
+
+export const metadata: Metadata = { title: "Integrações" };
 
 const STATUS_LABEL: Record<string, { label: string; tone: "success" | "warn" | "neutral" }> = {
   disconnected: { label: "Não conectado", tone: "neutral" },
@@ -227,7 +230,7 @@ export default async function IntegracoesPage({
       <PageHeader
         eyebrow="integracoes"
         title="Integrações"
-        description={
+        hint={
           connected
             ? "Seu agente já responde no WhatsApp. Aqui você acompanha a conexão e liga os outros canais."
             : "Ligue os canais onde seu agente atende — o WhatsApp e o botão no seu site."

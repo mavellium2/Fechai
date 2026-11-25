@@ -205,6 +205,50 @@ html {
   }
 }
 
+/* Linha do tempo de /crm/transbordo: passos entram em sequência, a linha se
+   desenha de cima para baixo e as bolinhas ativas pulsam em onda (o tempo
+   correndo). `--i` é a posição do passo. Sem movimento para quem pediu menos. */
+.sla-timeline::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--color-iris), transparent);
+  transform-origin: top;
+  animation: sla-line 0.9s ease-out both;
+}
+.sla-step {
+  animation: sla-step-in 0.45s ease-out both;
+  animation-delay: calc(var(--i) * 140ms);
+}
+.sla-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--color-iris);
+  animation: sla-pulse 2.8s ease-out infinite;
+  animation-delay: calc(0.6s + var(--i) * 0.7s);
+  opacity: 0;
+}
+@keyframes sla-line {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+@keyframes sla-step-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sla-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  45%, 100% { transform: scale(2.8); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sla-timeline::before, .sla-step, .sla-dot::after { animation: none; }
+}
+
 /* Reveals de scroll da landing (LandingMotion.tsx). Só escondem quando o JS ativa. */
 [data-animate="on"] .reveal {
   opacity: 0;

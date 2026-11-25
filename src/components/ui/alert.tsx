@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,11 +24,14 @@ export function Alert({
   title,
   className,
   children,
+  onDismiss,
 }: {
   tone?: AlertTone;
   title?: string;
   className?: string;
   children?: React.ReactNode;
+  /** Mostra um X para fechar o aviso (só em componente cliente). */
+  onDismiss?: () => void;
 }) {
   const { icon: Icon, box, role } = TONES[tone];
 
@@ -44,6 +47,12 @@ export function Alert({
         {title && <p className="font-medium">{title}</p>}
         {children && <div className={cn(title && "mt-1")}>{children}</div>}
       </div>
+      {onDismiss && (
+        <button type="button" onClick={onDismiss} aria-label="Fechar aviso"
+          className="-my-1 -mr-2 shrink-0 rounded-control p-1 opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris">
+          <X size={16} aria-hidden />
+        </button>
+      )}
     </div>
   );
 }

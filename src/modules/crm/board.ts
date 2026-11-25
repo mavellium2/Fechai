@@ -30,18 +30,14 @@ function assigneeWhere(tenantId: string, assignee: string): Prisma.LeadWhereInpu
 export function crmBoardWhere(tenantId: string, filters: ReturnType<typeof readCrmFilters>): Prisma.LeadWhereInput {
   const where = realBoardLeads(tenantId);
   const and: Prisma.LeadWhereInput[] = [];
-  if (filters.stage) where.stageId = filters.stage;
-  if (filters.tag) where.leadTags = { some: { tenantId, tagId: filters.tag } };
-  const assignee = assigneeWhere(tenantId, filters.assignee);
-  if (assignee) and.push(assignee);
-  if (filters.origin === "anuncio") and.push({ OR: [
-    { originChannel: "ad" }, { originChannel: null, adOrigin: { is: { tenantId } } },
-  ] });
-  else if (filters.origin === "desconhecida") {
-    where.originChannel = null;
-    where.adOrigin = { isNot: { tenantId } };
-  }
-  else if (filters.origin) where.originChannel = filters.origin;
+  if (filters.stages.length) where.stageId = { in: filters.stages };
+  if (filters.tags.length) where.leadTags = { some: { tenantId, tagId: { in: filters.tags } } };
+  const anyOf = (clauses: Prisma.LeadWhereInput[]) => { if (clauses.length) and.push(clauses.length === 1 ? clauses[0] : { OR: clauses }); };
+  anyOf(filters.assignees.flatMap((assignee) => assigneeWhere(tenantId, assignee) ?? []));
+  anyOf(filters.origins.map((origin): Prisma.LeadWhereInput =>
+    origin === "anuncio" ? { OR: [{ originChannel: "ad" }, { originChannel: null, adOrigin: { is: { tenantId } } }] }
+      : origin === "desconhecida" ? { originChannel: null, adOrigin: { isNot: { tenantId } } }
+        : { originChannel: origin }));
   if (and.length) where.AND = and;
   if (filters.invalidRange) return { ...where, id: { in: [] } };
 
@@ -116,7 +112,7 @@ export async function getCrmBoard(params: CrmSearchParams) {
   const where = crmBoardWhere(tenantId, filters);
   const users = await listCrmUsers(tenantId);
   const userNames = new Map(users.map(({ id, name }) => [id, name]));
-  const stages = pipeline.stages.filter((stage) => !filters.stage || stage.id === filters.stage);
+  const stages = pipeline.stages.filter((stage) => !filters.stages.length || filters.stages.includes(stage.id));
   const counts = await prisma.lead.groupBy({ by: ["stageId"], where, _count: { _all: true } });
   const totals = new Map(counts.map((item) => [item.stageId, item._count._all]));
   const columns = await Promise.all(stages.map(async (stage) => {

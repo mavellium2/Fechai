@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Check, X } from "lucide-react";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -15,6 +16,8 @@ import { getServiceArea } from "@/modules/lead-insights/service-area-store";
 import { getTeamWhatsapp } from "@/modules/crm/team-whatsapp";
 import { findWhatsappChannel } from "@/modules/whatsapp/instances";
 import { TeamWhatsappForm } from "./TeamWhatsappForm";
+
+export const metadata: Metadata = { title: "Configurações" };
 
 /** Traduz o status cru do provedor que vem no `detail` do check de WhatsApp. */
 const DETAIL_PT: Record<string, string> = {
@@ -191,7 +194,7 @@ export default async function ConfiguracoesPage() {
       <PageHeader
         eyebrow="configurações"
         title="Configurações"
-        description="Sua conta e status da configuração."
+        hint="Sua conta e status da configuração."
         className="mb-2"
       />
 

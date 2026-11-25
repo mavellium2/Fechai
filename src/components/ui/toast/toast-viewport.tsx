@@ -95,9 +95,9 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
         role={role}
         aria-live={live}
         aria-atomic="true"
-        className="flex items-start gap-3 p-3 pr-2"
+        className="flex items-center gap-3 px-3 py-2.5 pr-2"
       >
-        <span className={cn("mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full", chip)} aria-hidden>
+        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full", chip)} aria-hidden>
           {toast.kind === "loading" ? (
             <LoadingDots size={3} label={null} />
           ) : (
@@ -105,7 +105,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           )}
         </span>
 
-        <div className="min-w-0 flex-1 py-0.5">
+        <div className="min-w-0 flex-1">
           <p className="break-words text-sm font-medium leading-snug">{toast.title}</p>
           {toast.description && (
             <p className="mt-1 break-words text-sm leading-snug text-ink/70 panel:text-white/70">{toast.description}</p>
@@ -119,7 +119,8 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
             onClick={() => onDismiss(toast.id)}
             aria-label="Fechar notificação"
             className={cn(
-              "flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-ink/60 transition-colors",
+              // -my: a área de clique continua 36px sem esticar a altura do cartão.
+              "-my-1.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-ink/60 transition-colors",
               "hover:bg-ink/5 hover:text-ink panel:text-white/60 panel:hover:bg-white/10 panel:hover:text-white",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris",
             )}

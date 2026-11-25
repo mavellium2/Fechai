@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ButtonLink } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { dateTimeLabel, phoneLabel } from "@/lib/format";
 import { reasonLabel } from "@/modules/agent-engine/disqualify";
 import { parseConversationVariables, parseVariableDefinitions } from "@/modules/agent-engine/variables";
@@ -61,12 +61,14 @@ function trailEntry(event: Lead["trail"][number], names: Map<string, string>): {
 
 function DetailSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card className="min-w-0 space-y-3 p-4">
-      <h3 className="font-display text-base font-semibold">{title}</h3>
+    <section className="min-w-0 space-y-3">
+      <h3 className="font-mono text-micro uppercase tracking-[0.2em] text-neutral panel:text-white/50">{title}</h3>
       {children}
-    </Card>
+    </section>
   );
 }
+
+const muted = "text-sm text-neutral panel:text-white/55";
 
 const minutesBetween = (from: Date, to: Date) => Math.max(0, Math.floor((+to - +from) / 60_000));
 
@@ -107,124 +109,150 @@ export function CrmLeadDetail({ lead, params, now }: { lead: Lead; params: CrmSe
     })),
     ...lead.trail.map((event) => ({ id: event.id, at: event.createdAt, ...trailEntry(event, userNames) })),
   ].sort((a, b) => +b.at - +a.at || b.id.localeCompare(a.id)).slice(0, 20);
-  return (
-    <CrmLeadDrawer title={lead.name?.trim() || "Contato sem nome"} back={crmBoardHref(params, { lead: null, antes: null })}>
+  const facts = [
+    ["Cidade informada", insight?.city ?? "Não informada"],
+    ["Procedimento informado", insight?.procedure ?? "Não informado"],
+    ...(origin !== "Anúncio" && adName ? [["Anúncio associado", adName]] : []),
+    ...(lead.broadcast ? [["Resposta ao disparo", `${lead.broadcast.name} · ${dateTimeLabel(lead.broadcast.repliedAt)}`]] : []),
+    ["Entrada do lead", dateTimeLabel(lead.createdAt)],
+    ["Última atividade", dateTimeLabel(conversation?.messages[0]?.createdAt ?? lead.createdAt)],
+    ...(conversation?.assignedUserId && conversation.assignedAt ? [["Assumiu em", dateTimeLabel(conversation.assignedAt)]] : []),
+    // Prazo do transbordo (CRM-10): a espera em curso, ou quanto levou para assumir e responder.
+    ...(handoff?.status === "waiting"
+      ? [["Aguardando a equipe", `Há ${crmDurationLabel(minutesBetween(handoff.createdAt, now))}${handoff.escalatedAt ? " · escalonado" : ""}`]]
+      : handoff?.assumedAt ? [["Tempo até assumir", crmDurationLabel(minutesBetween(handoff.createdAt, handoff.assumedAt))]] : []),
+    ...(handoff?.firstReplyAt ? [["1ª resposta humana", `${crmDurationLabel(minutesBetween(handoff.createdAt, handoff.firstReplyAt))} depois do transbordo`]] : []),
+    ...(loss ? [["Motivo registrado pela equipe", loss]] : []),
+    ...(manualLoss?.lossReasonNote ? [["Justificativa da perda", manualLoss.lossReasonNote]] : []),
+    ...(insight?.lossReasonKey ? [["Motivo informado pelo contato",
+      [lossLabel(insight.lossReasonKey), insight.lossReasonText].filter(Boolean).join(" · ")]] : []),
+    ...(lead.disqualifiedReason ? [["Motivo da desqualificação", reasonLabel(lead.disqualifiedReason)]] : []),
+  ];
+  const openTasks = lead.tasks.filter((task) => !task.completedAt).length;
+  // Etapa, responsável, telefone e origem vão no cabeçalho: é o que se procura primeiro.
+  const meta = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-neutral panel:text-white/60">
+      <Badge tone={lead.stage?.kind === "lost" ? "danger" : lead.stage?.kind === "won" ? "success" : "iris"}>{lead.stage?.name ?? "Etapa indisponível"}</Badge>
+      {handoff?.status === "waiting" && <Badge tone="warn">Aguardando a equipe</Badge>}
+      <span>{phoneLabel(lead.phone)}</span>
+      <span aria-hidden>·</span>
+      <span>{origin === "Anúncio" && adName ? `${origin} · ${adName}` : origin}</span>
+      <span aria-hidden>·</span>
+      <span>Responsável: <span className="text-ink panel:text-white">{assignee}</span></span>
+    </div>
+  );
+
+  const conversationPanel = conversation && history ? (
+    <>
+      <ConversationSummary conversationId={conversation.id} state={{ summary: conversation.summary, summaryAt: conversation.summaryAt,
+        summaryMsgCount: conversation.summaryMsgCount, messageCount: conversation._count.messages }} />
+      {(history.before || params.antes) && <nav className="flex flex-wrap gap-2" aria-label="Páginas da conversa">
+        {history.before && <ButtonLink size="sm" variant="outline" prefetch={false} href={crmBoardHref(params, { antes: history.before })}>Mensagens anteriores</ButtonLink>}
+        {params.antes && <ButtonLink size="sm" variant="ghost" prefetch={false} href={crmBoardHref(params, { antes: null })}>Mensagens recentes</ButtonLink>}
+      </nav>}
+      {history.messages.length === 0 ? <p className={muted}>Nenhuma mensagem registrada.</p> :
+        <ul className="space-y-3" aria-label="Histórico da conversa">
+          {history.messages.map((message) => (
+            <li key={message.id} className="min-w-0 [overflow-wrap:anywhere]">
+              <ChatBubble role={message.role === "user" ? "user" : "assistant"} footer={
+                <>{message.role === "user" ? "Contato" : message.sentBy === "human" ? author(message) : message.sentBy === "agent" ? "Agente" : "Resposta"} · <time dateTime={message.createdAt.toISOString()}>{dateTimeLabel(message.createdAt)}</time></>
+              }>
+                {message.audioUrl && <audio className="mb-2 h-8 max-w-full" aria-label="Áudio da mensagem" controls preload="none" src={message.audioUrl} />}
+                {message.content}
+              </ChatBubble>
+            </li>
+          ))}
+        </ul>}
+      {!params.antes && reply?.status === "ready" && (
+        <SendMessageForm conversationId={conversation.id} textReplyAction={sendCrmReply.bind(null, lead.id)} />
+      )}
+      {!params.antes && reply && reply.status !== "ready" && (
+        <div className="space-y-2 border-t border-ink/10 pt-3 text-sm text-neutral panel:border-white/10 panel:text-white/65">
+          <p>{crmReplyPaused[reply.status]}</p>
+          {reply.templates && (reply.status === "no_inbound" || reply.status === "window_closed") && (
+            <ButtonLink href="/disparos" variant="outline" size="sm">Usar modelo aprovado em Disparos</ButtonLink>
+          )}
+        </div>
+      )}
+    </>
+  ) : <p className={muted}>Nenhuma conversa vinculada.</p>;
+
+  const dataTab = (
+    <>
+      {conversation && (
+        <DetailSection title="Atendimento">
+          {!conversation.assignedUserId && (phoneUnknown
+            ? <CrmItWasMe leadId={lead.id} conversationId={conversation.id} />
+            : <CrmAssumeLead leadId={lead.id} conversationId={conversation.id} />)}
+          {(conversation.assignedUserId || conversation.agentPaused || conversation.needsHuman) && (
+            <CrmHandoffControls leadId={lead.id} conversationId={conversation.id} assignedUserId={conversation.assignedUserId}
+              canReturn users={users} />
+          )}
+        </DetailSection>
+      )}
       <DetailSection title="Dados do contato">
-        <dl className="grid grid-cols-2 gap-3 text-sm">
-          {[
-            ["Telefone", phoneLabel(lead.phone)],
-            ["Etapa", lead.stage?.name ?? "Etapa indisponível"],
-            ["Cidade informada", insight?.city ?? "Não informada"],
-            ["Procedimento informado", insight?.procedure ?? "Não informado"],
-            ["Origem", origin === "Anúncio" && adName ? `${origin} · ${adName}` : origin],
-            ...(origin !== "Anúncio" && adName ? [["Anúncio associado", adName]] : []),
-            ...(lead.broadcast ? [["Resposta ao disparo", `${lead.broadcast.name} · ${dateTimeLabel(lead.broadcast.repliedAt)}`]] : []),
-            ["Entrada do lead", dateTimeLabel(lead.createdAt)],
-            ["Última atividade", dateTimeLabel(conversation?.messages[0]?.createdAt ?? lead.createdAt)],
-            ["Responsável", assignee],
-            ...(conversation?.assignedUserId && conversation.assignedAt ? [["Assumiu em", dateTimeLabel(conversation.assignedAt)]] : []),
-            // Prazo do transbordo (CRM-10): a espera em curso, ou quanto levou para assumir e responder.
-            ...(handoff?.status === "waiting"
-              ? [["Aguardando a equipe", `Há ${crmDurationLabel(minutesBetween(handoff.createdAt, now))}${handoff.escalatedAt ? " · escalonado" : ""}`]]
-              : handoff?.assumedAt ? [["Tempo até assumir", crmDurationLabel(minutesBetween(handoff.createdAt, handoff.assumedAt))]] : []),
-            ...(handoff?.firstReplyAt ? [["1ª resposta humana", `${crmDurationLabel(minutesBetween(handoff.createdAt, handoff.firstReplyAt))} depois do transbordo`]] : []),
-            ...(loss ? [["Motivo registrado pela equipe", loss]] : []),
-            ...(manualLoss?.lossReasonNote ? [["Justificativa da perda", manualLoss.lossReasonNote]] : []),
-            ...(insight?.lossReasonKey ? [["Motivo informado pelo contato",
-              [lossLabel(insight.lossReasonKey), insight.lossReasonText].filter(Boolean).join(" · ")]] : []),
-            ...(lead.disqualifiedReason ? [["Motivo da desqualificação", reasonLabel(lead.disqualifiedReason)]] : []),
-          ].map(([label, value]) => (
-            <div key={label} className="min-w-0">
+        <dl className="divide-y divide-ink/10 text-sm panel:divide-white/10">
+          {facts.map(([label, value]) => (
+            <div key={label} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-3 py-2">
               <dt className="text-neutral panel:text-white/55">{label}</dt>
-              <dd className="mt-0.5 whitespace-pre-line [overflow-wrap:anywhere]">{value}</dd>
+              <dd className="whitespace-pre-line [overflow-wrap:anywhere]">{value}</dd>
             </div>
           ))}
         </dl>
-        {conversation && !conversation.assignedUserId && (phoneUnknown
-          ? <CrmItWasMe leadId={lead.id} conversationId={conversation.id} />
-          : <CrmAssumeLead leadId={lead.id} conversationId={conversation.id} />)}
-        {conversation && (conversation.assignedUserId || conversation.agentPaused || conversation.needsHuman) && (
-          <CrmHandoffControls leadId={lead.id} conversationId={conversation.id} assignedUserId={conversation.assignedUserId}
-            canReturn users={users} />
-        )}
         {conversation && <ConversationVariables definitions={parseVariableDefinitions(lead.variableDefinitions)} values={parseConversationVariables(conversation.variables)} />}
       </DetailSection>
-
       <DetailSection title="Etiquetas">
         <CrmLeadTags leadId={lead.id} tags={lead.tags} attached={lead.leadTags.map(({ tagId }) => tagId)} />
       </DetailSection>
+    </>
+  );
 
-      <DetailSection title="Tarefas">
-        {lead.tasks.length === 0 ? <p className="text-sm text-neutral panel:text-white/55">Nenhuma tarefa para este lead.</p> : (
-          <ul className="divide-y divide-ink/10 panel:divide-white/10">
-            {lead.tasks.map((task) => (
-              <li key={task.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
-                <div className="min-w-0 [overflow-wrap:anywhere]">
-                  <p className="font-medium">{task.text}</p>
-                  <p className="text-neutral panel:text-white/55">
-                    <time dateTime={task.dueAt.toISOString()}>{dateTimeLabel(task.dueAt)}</time>
-                    {task.assignedUserId && userNames.has(task.assignedUserId) && ` · ${userNames.get(task.assignedUserId)}`}
-                  </p>
-                  {task.completedAt ? <p>Concluída em {dateTimeLabel(task.completedAt)}</p> :
-                    task.dueAt < now && <p className="text-danger">Prazo vencido</p>}
-                </div>
-                {!task.completedAt && <CrmCompleteTask leadId={lead.id} taskId={task.id} label={task.text} />}
-              </li>
-            ))}
-          </ul>
-        )}
+  const tasksTab = (
+    <>
+      {lead.tasks.length === 0 ? <p className={muted}>Nenhuma tarefa para este lead.</p> : (
+        <ul className="divide-y divide-ink/10 panel:divide-white/10">
+          {lead.tasks.map((task) => (
+            <li key={task.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
+              <div className="min-w-0 [overflow-wrap:anywhere]">
+                <p className="font-medium">{task.text}</p>
+                <p className="text-neutral panel:text-white/55">
+                  <time dateTime={task.dueAt.toISOString()}>{dateTimeLabel(task.dueAt)}</time>
+                  {task.assignedUserId && userNames.has(task.assignedUserId) && ` · ${userNames.get(task.assignedUserId)}`}
+                </p>
+                {task.completedAt ? <p>Concluída em {dateTimeLabel(task.completedAt)}</p> :
+                  task.dueAt < now && <p className="text-danger">Prazo vencido</p>}
+              </div>
+              {!task.completedAt && <CrmCompleteTask leadId={lead.id} taskId={task.id} label={task.text} />}
+            </li>
+          ))}
+        </ul>
+      )}
+      <DetailSection title="Nova tarefa">
         <CrmTaskForm leadId={lead.id} users={users} />
       </DetailSection>
+    </>
+  );
 
-      <DetailSection title="Conversa">
-        {conversation && history ? (
-          <>
-            <ConversationSummary conversationId={conversation.id} state={{ summary: conversation.summary, summaryAt: conversation.summaryAt,
-              summaryMsgCount: conversation.summaryMsgCount, messageCount: conversation._count.messages }} />
-            {(history.before || params.antes) && <nav className="flex flex-wrap gap-2" aria-label="Páginas da conversa">
-              {history.before && <ButtonLink size="sm" variant="outline" prefetch={false} href={crmBoardHref(params, { antes: history.before })}>Mensagens anteriores</ButtonLink>}
-              {params.antes && <ButtonLink size="sm" variant="ghost" prefetch={false} href={crmBoardHref(params, { antes: null })}>Mensagens recentes</ButtonLink>}
-            </nav>}
-            {history.messages.length === 0 ? <p className="text-sm text-neutral panel:text-white/55">Nenhuma mensagem registrada.</p> :
-              <ul className="space-y-3" aria-label="Histórico da conversa">
-                {history.messages.map((message) => (
-                  <li key={message.id} className="min-w-0 [overflow-wrap:anywhere]">
-                    <ChatBubble role={message.role === "user" ? "user" : "assistant"} footer={
-                      <>{message.role === "user" ? "Contato" : message.sentBy === "human" ? author(message) : message.sentBy === "agent" ? "Agente" : "Resposta"} · <time dateTime={message.createdAt.toISOString()}>{dateTimeLabel(message.createdAt)}</time></>
-                    }>
-                      {message.audioUrl && <audio className="mb-2 h-8 max-w-full" aria-label="Áudio da mensagem" controls preload="none" src={message.audioUrl} />}
-                      {message.content}
-                    </ChatBubble>
-                  </li>
-                ))}
-              </ul>}
-            {!params.antes && reply?.status === "ready" && (
-              <SendMessageForm conversationId={conversation.id} textReplyAction={sendCrmReply.bind(null, lead.id)} />
-            )}
-            {!params.antes && reply && reply.status !== "ready" && (
-              <div className="space-y-2 border-t border-ink/10 pt-3 text-sm text-neutral panel:border-white/10 panel:text-white/65">
-                <p>{crmReplyPaused[reply.status]}</p>
-                {reply.templates && (reply.status === "no_inbound" || reply.status === "window_closed") && (
-                  <ButtonLink href="/disparos" variant="outline" size="sm">Usar modelo aprovado em Disparos</ButtonLink>
-                )}
-              </div>
-            )}
-          </>
-        ) : <p className="text-sm text-neutral panel:text-white/55">Nenhuma conversa vinculada.</p>}
-      </DetailSection>
+  const historyTab = timeline.length === 0 ? <p className={muted}>Nenhum evento registrado.</p> : (
+    <ol className="space-y-4 border-l border-ink/10 pl-4 text-sm panel:border-white/10">
+      {timeline.map((event) => (
+        <li key={event.id} className="relative break-words">
+          <span aria-hidden className="absolute -left-[1.3rem] top-1.5 size-2 rounded-full bg-iris" />
+          <p className="font-medium">{event.title}</p>
+          {event.details && <p className="text-neutral panel:text-white/55">{event.details}</p>}
+          <p className="text-neutral panel:text-white/55">{event.source && `${event.source} · `}<time dateTime={event.at.toISOString()}>{dateTimeLabel(event.at)}</time></p>
+        </li>
+      ))}
+    </ol>
+  );
 
-      <DetailSection title="Linha do tempo">
-        {timeline.length === 0 ? <p className="text-sm text-neutral panel:text-white/55">Nenhum evento registrado.</p> :
-          <ol className="space-y-2 text-sm">
-            {timeline.map((event) => (
-              <li key={event.id} className="break-words">
-                <p className="font-medium">{event.title}</p>
-                {event.details && <p className="text-neutral panel:text-white/55">{event.details}</p>}
-                <p className="text-neutral panel:text-white/55">{event.source && `${event.source} · `}<time dateTime={event.at.toISOString()}>{dateTimeLabel(event.at)}</time></p>
-              </li>
-            ))}
-          </ol>}
-      </DetailSection>
-    </CrmLeadDrawer>
+  return (
+    <CrmLeadDrawer title={lead.name?.trim() || "Contato sem nome"} meta={meta} back={crmBoardHref(params, { lead: null, antes: null })}
+      main={conversationPanel}
+      tabs={[
+        { key: "dados", label: "Dados", content: dataTab },
+        { key: "tarefas", label: openTasks ? `Tarefas (${openTasks})` : "Tarefas", content: tasksTab },
+        { key: "historico", label: "Histórico", content: historyTab },
+      ]} />
   );
 }

@@ -64,6 +64,8 @@ function navFor(
 /** Área logada: fora do índice. Robots.txt já bloqueia, mas a meta tag cobre o
  *  caso de a URL ser descoberta por link externo. */
 export const metadata: Metadata = {
+  // Aba do navegador no painel: "fechai | Página" (o site público segue o modelo da raiz).
+  title: { template: "fechai | %s", default: "fechai" },
   robots: { index: false, follow: false },
 };
 

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { MessagesSquare, Inbox } from "lucide-react";
 import type { Prisma } from "@prisma/client";
@@ -16,6 +17,8 @@ import { ConversationThread } from "./ConversationThread";
 
 import { SandboxDialog } from "./SandboxDialog";
 import { parseConversationVariables, parseVariableDefinitions, withContactDefaults } from "@/modules/agent-engine/variables";
+
+export const metadata: Metadata = { title: "Conversas" };
 
 /** Tamanho do lote. "Carregar mais" soma outro. */
 const PAGE_SIZE = 30;

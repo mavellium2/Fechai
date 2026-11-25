@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { monthRangeUtc } from "@/modules/scheduling/time";
 import type { ReminderStatus } from "@/modules/scheduling/reminder-status";
 import { Suspense, type ReactNode } from "react";
@@ -32,6 +33,8 @@ import { CalendarMonth } from "./CalendarMonth";
 import { DayPanel, type DayEntry } from "./DayPanel";
 import { NewAppointmentDialog, type ContactOption } from "./NewAppointmentDialog";
 import { CalendarSyncStatus, type CalendarSyncItem } from "./CalendarSyncStatus";
+
+export const metadata: Metadata = { title: "Agenda" };
 
 /** As agendas de fora que a página espera juntas: Clinicorp e Calendário da Apple. */
 type ExternalAgendas = [ClinicorpAgenda, IcloudAgenda];
@@ -381,7 +384,7 @@ export default async function AgendaPage({
       <PageHeader
         eyebrow="agenda"
         title="Agenda"
-        description={
+        hint={
           clinicorpActive || icloudActive
             ? `Os horários que seu agente marcou nas conversas, o que você marcar à mão${
                 clinicorpActive && icloudActive ? ", as consultas do Clinicorp e os eventos do iPhone"

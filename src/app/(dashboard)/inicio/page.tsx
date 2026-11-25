@@ -1,4 +1,5 @@
-﻿import Link from "next/link";
+import type { Metadata } from "next";
+import Link from "next/link";
 import { ArrowUpRight, Bot, FileText, MessagesSquare, Star, TriangleAlert } from "lucide-react";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -22,6 +23,8 @@ import { HealthStrip } from "./HealthStrip";
 import { SetupSteps } from "./SetupSteps";
 import { Sparkline } from "./Sparkline";
 import { ReviewSurveyButton } from "./ReviewSurveyButton";
+
+export const metadata: Metadata = { title: "Início" };
 
 const PERIODS = [
   { key: "7", label: "7 dias" },

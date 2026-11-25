@@ -1,4 +1,5 @@
-﻿import type { Prisma } from "@prisma/client";
+import type { Metadata } from "next";
+import type { Prisma } from "@prisma/client";
 import { UsersRound, UserPlus, MessageSquare } from "lucide-react";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -14,6 +15,8 @@ import { Alert } from "@/components/ui/alert";
 import { ContatoSearch } from "./ContatoSearch";
 import { AddContactDialog } from "./AddContactDialog";
 import { SendMessageDialog, type ContactRef } from "./SendMessageDialog";
+
+export const metadata: Metadata = { title: "Contatos" };
 
 type StatusTone = "neutral" | "iris" | "signal" | "success" | "warn" | "danger";
 
@@ -90,7 +93,7 @@ export default async function ContatosPage({
       <PageHeader
         eyebrow="contatos"
         title="Contatos"
-        description="Quem já falou com seu agente — e qualquer número que você quiser adicionar para mandar uma mensagem."
+        hint="Quem já falou com seu agente — e qualquer número que você quiser adicionar para mandar uma mensagem."
         actions={<AddContactDialog />}
       />
 

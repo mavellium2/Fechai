@@ -1,4 +1,5 @@
-﻿import { BarChart3, Download } from "lucide-react";
+import type { Metadata } from "next";
+import { BarChart3, Download } from "lucide-react";
 import { requireTenant, requireOwner } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { requireProductAccess } from "@/lib/require-product";
@@ -45,6 +46,8 @@ import { loadBroadcastCampaignReport } from "@/modules/reports/broadcast-campaig
 import { loadCampaignReport } from "@/modules/campaign-reports/queries";
 import { getCampaignSettings } from "@/modules/campaign-reports/settings-store";
 import { parseGapSettings } from "@/modules/knowledge-gaps/settings";
+
+export const metadata: Metadata = { title: "Relatórios" };
 
 const PERIODS: PeriodKey[] = ["hoje", "7", "30", "mes", "ano", "tudo"];
 // A aba "Afiliados" só existe para quem está no programa — o filtro abaixo

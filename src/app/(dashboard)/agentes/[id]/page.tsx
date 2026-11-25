@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireTenant } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -16,6 +17,8 @@ import type { PersonaAnswers } from "@/modules/agent-engine/persona";
 import { parseVariableDefinitions } from "@/modules/agent-engine/variables";
 import { AgentWizard } from "./AgentWizard";
 import { AgentsFrame } from "../AgentsFrame";
+
+export const metadata: Metadata = { title: "Agente" };
 
 export default async function AgentePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { CircleHelp } from "lucide-react";
 import { requireProductAccess } from "@/lib/require-product";
 import { countGaps, gapStats, listGaps, parseGapStatus } from "@/modules/knowledge-gaps/queue";
@@ -20,6 +21,8 @@ import {
   resumeGapAction,
   saveGapDraftAction,
 } from "./actions";
+
+export const metadata: Metadata = { title: "Perguntas" };
 
 const EMPTY: Record<string, { title: string; description: string }> = {
   open: {
@@ -59,7 +62,7 @@ export default async function PerguntasPage({ searchParams }: { searchParams: Pr
       <PageHeader
         eyebrow="perguntas"
         title="Perguntas sem resposta"
-        description="O que o agente não soube responder. Responda uma vez: a resposta entra na base e ele passa a responder sozinho."
+        hint="O que o agente não soube responder. Responda uma vez: a resposta entra na base e ele passa a responder sozinho."
       />
 
       {masked && (

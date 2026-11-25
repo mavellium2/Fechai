@@ -58,7 +58,7 @@ export function CampaignsOverview({
       <PageHeader
         eyebrow="campanhas"
         title="Campanhas"
-        description="Cada ação de marketing da clínica, com período e resultado."
+        hint="Cada ação de marketing da clínica, com período e resultado."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <CampaignGuideButton />
