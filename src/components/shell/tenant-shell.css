@@ -87,6 +87,9 @@
 .tenant-main { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; overflow: auto; border: 1px solid var(--tenant-line); border-radius: 16px; background: var(--tenant-surface); }
 .tenant-content { padding: 28px; }
 .tenant-main-agents { overflow: hidden; }
+/* Quadro do CRM: a página do quadro não rola. O quadro ocupa a altura que
+   sobra e cada coluna rola os próprios cards; no celular volta ao fluxo normal. */
+.tenant-main-crm { overflow: hidden; }
 .tenant-mobile-header { display: none; }
 .tenant-skip { position: absolute; left: 12px; top: -100px; z-index: 100; padding: 10px 16px; background: var(--tenant-surface); border-radius: 8px; }
 .tenant-skip:focus { top: 12px; }
@@ -124,6 +127,7 @@
   .tenant-mobile-header { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding-inline: 4px; }
   .tenant-content { padding: 20px 16px; }
   .tenant-main { border-radius: 12px; }
+  .tenant-main-crm { overflow: auto; }
   .tenant-theme .impersonation-banner { margin-bottom: 0; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -2,7 +2,7 @@
 
 ## Autorização
 
-As actions `moveCrmCard`, `saveCrmLead`, `sendCrmReply`, `saveCrmStage` e `saveCrmLossCatalog` começam por [`requireCrmSession()`](../../../src/modules/crm/access.ts): sessão do produto e permissão `crm:ver` em [`hasPermission`](../../../src/lib/permissions.ts). Sem a permissão, a guarda lança o `notFound` do Next e a action responde "Você não tem acesso ao CRM.". Conta e autor vêm sempre da sessão, nunca do formulário. Hoje só o papel `OWNER` tem a permissão; o SEG-05 acrescenta os demais papéis na mesma matriz.
+As actions `moveCrmCard`, `createCrmLead`, `deleteCrmLead`, `saveCrmLead`, `sendCrmReply`, `saveCrmStage` e `saveCrmLossCatalog` começam por [`requireCrmSession()`](../../../src/modules/crm/access.ts): sessão do produto e permissão `crm:ver` em [`hasPermission`](../../../src/lib/permissions.ts). Sem a permissão, a guarda lança o `notFound` do Next e a action responde "Você não tem acesso ao CRM.". Conta e autor vêm sempre da sessão, nunca do formulário. Hoje só o papel `OWNER` tem a permissão; o SEG-05 acrescenta os demais papéis na mesma matriz.
 
 ## Liberação pelo superadmin
 
@@ -23,6 +23,12 @@ Uma nova tentativa substitui a anterior. Desativar retira o acesso e cancela um 
 ## Movimentação no Kanban
 
 [`moveCrmCard`](../../../src/app/\(dashboard\)/crm/actions.ts) obtém conta e usuário da sessão e valida a etapa de origem e o destino. `setLeadStage` confere a flag e o pipeline padrão na transação e recusa uma etapa que mudou desde a leitura do quadro. Uma tentativa repetida para o mesmo destino mantém um único evento. Mover para Perdido exige um motivo disponível na conta e uma justificativa de até 500 caracteres. O histórico recebe `source: user`, o ator, a chave do motivo, o rótulo e a justificativa. `Lead.status` permanece com o valor do fluxo operacional. O quadro é revalidado após a gravação.
+
+## Cadastrar e excluir lead pelo quadro
+
+[`createCrmLead`](../../../src/app/\(dashboard\)/crm/actions.ts) valida nome opcional (até 80 caracteres), telefone e etapa, e chama [`createManualCrmLead`](../../../src/modules/crm/manual-leads.ts). O telefone é normalizado para E.164 (`55` + DDD + número) e recusado quando não dá para discar; a etapa precisa estar ativa no pipeline padrão da conta, e Perdido é recusado porque perda exige motivo e justificativa. A criação e a transição `lead_created_manual` acontecem na mesma transação, sob a trava de admissão compartilhada e a trava por telefone do atendimento — o mesmo caminho do webhook. Número já existente devolve `exists`: nada é duplicado e o lead **não** é movido de etapa; a tela avisa que ele já está na lista. O lead nasce `originChannel: "manual"`, sem conversa, sem mensagem e sem consumo de cota. Grava `lead.created` e revalida `/crm`, `/conversas`, `/contatos` e `/inicio`.
+
+[`deleteCrmLead`](../../../src/app/\(dashboard\)/crm/actions.ts) chama [`deleteManualCrmLead`](../../../src/modules/crm/manual-leads.ts), que lê o lead por `realBoardLeads` (conta ativa, CRM ligado, `isTest: false`) dentro da transação com a trava compartilhada. **Só exclui lead sem histórico**: nenhuma mensagem na conversa e nenhum agendamento. Com qualquer um dos dois, o retorno é `has_history` e a action explica que o lead não pode ser excluído pelo quadro. A exclusão é definitiva e leva em cascata conversa, mensagens, transições, etiquetas, tarefas e origem de anúncio; o retrato do lead é registrado em `lead.deleted` (`recordDeletion`) e as mesmas páginas são revalidadas. Os dois diálogos usam `useActionToast` com `FormFeedback` inline, como o resto da ficha.
 
 ## Configuração de etapas
 

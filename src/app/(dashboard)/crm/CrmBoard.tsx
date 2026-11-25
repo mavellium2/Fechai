@@ -1,8 +1,8 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
-import { ArrowLeftRight, GripVertical } from "lucide-react";
+import { ArrowLeftRight, GripVertical, Plus, Trash2 } from "lucide-react";
 import { FormFeedback } from "@/components/ui/alert";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -15,6 +15,8 @@ import { CRM_COLUMN_SIZE, crmBoardHref, type CrmSearchParams } from "@/modules/c
 import { CRM_LOSS_NOTE_LIMIT } from "@/modules/crm/limits";
 import { crmSlaLabel, crmSlaLevel, crmWaitMinutes, type CrmSlaLevel, type CrmSlaLimits } from "@/modules/crm/sla";
 import { moveCrmCard } from "./actions";
+import { CrmLeadCreateDialog } from "./CrmLeadCreateDialog";
+import { CrmLeadDeleteDialog } from "./CrmLeadDeleteDialog";
 import { useCrmLiveRefresh } from "./useCrmLiveRefresh";
 
 type Board = Awaited<ReturnType<typeof getCrmBoard>>;
@@ -58,14 +60,19 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
   const [dragging, setDragging] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [clock, setClock] = useState(0);
+  const [createAt, setCreateAt] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<CrmBoardCard | null>(null);
   const dragged = useRef<CrmBoardCard | null>(null);
+  const board = useRef<HTMLDivElement>(null);
+  const pan = useRef<{ pointerId: number; x: number; left: number } | null>(null);
+  const [panning, setPanning] = useState(false);
   const [state, submit, pending] = useActionState(async (previous: ActionResult | null, data: FormData) => {
     const result = await moveCrmCard(previous, data);
     if (result.ok) setMove(null);
     return result;
   }, null);
   useActionToast(state, pending, { entity: "lead", action: "update" });
-  useCrmLiveRefresh(version, Boolean(params.lead || move || dragging || pending));
+  useCrmLiveRefresh(version, Boolean(params.lead || move || dragging || pending || createAt || deleting));
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);
     return () => window.clearInterval(timer);
@@ -75,6 +82,38 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
     dragged.current = null;
     setDragging(null);
     setHover(null);
+  }
+
+  /**
+   * Rolar o quadro arrastando o fundo com o mouse (como na agenda do Clinicorp).
+   * Só começa fora de card, link e botão: arrastar um card continua sendo mover
+   * o lead, e clicar num controle continua sendo clicar.
+   */
+  function startPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (!target || target.closest("[data-crm-card], a, button, input, textarea, select, summary, [role='button']")) return;
+    const el = board.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    pan.current = { pointerId: event.pointerId, x: event.clientX, left: el.scrollLeft };
+    el.setPointerCapture(event.pointerId);
+    setPanning(true);
+  }
+
+  function movePan(event: ReactPointerEvent<HTMLDivElement>) {
+    const current = pan.current;
+    const el = board.current;
+    if (!current || !el || current.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    el.scrollLeft = current.left - (event.clientX - current.x);
+  }
+
+  function endPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (pan.current?.pointerId !== event.pointerId) return;
+    pan.current = null;
+    setPanning(false);
+    const el = board.current;
+    if (el?.hasPointerCapture(event.pointerId)) el.releasePointerCapture(event.pointerId);
   }
 
   function drop(stage: Stage) {
@@ -94,9 +133,13 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
 
   return (
     <>
-      <div data-crm-board className="w-full min-w-0 max-w-full rounded-surface md:flex md:items-start md:gap-3 md:overflow-x-auto md:pb-3" aria-label="Quadro de leads">
+      <div ref={board} data-crm-board aria-label="Quadro de leads"
+        onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}
+        className={`w-full min-w-0 max-w-full rounded-surface md:flex md:flex-1 md:min-h-0 md:items-stretch md:gap-3 md:overflow-x-auto md:overflow-y-hidden md:pb-2 ${
+          panning ? "cursor-grabbing select-none" : "md:cursor-grab"
+        }`}>
         {columns.map((column, index) => (
-          <section key={column.id} className={`${index ? "hidden md:block" : "block"} min-w-0 rounded-surface border px-3 py-3 md:w-64 md:shrink-0 ${
+          <section key={column.id} className={`${index ? "hidden md:flex" : "flex"} min-h-0 min-w-0 flex-col rounded-surface border px-3 py-3 md:h-full md:w-[clamp(15rem,21vw,19rem)] md:shrink-0 ${
             hover === column.id ? "border-iris bg-iris/10" : "border-ink/10 bg-ink/[0.03] panel:border-white/10 panel:bg-white/[0.04]"
           }`} aria-labelledby={`crm-column-${column.id}`} onDragOver={(event) => {
             if (!dragged.current || dragged.current.stageId === column.id || pending) return;
@@ -110,14 +153,14 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
             event.preventDefault();
             drop(column);
           }}>
-            <div className="mb-3 flex items-start justify-between gap-2">
+            <div className="mb-3 flex shrink-0 items-start justify-between gap-2">
               <h2 id={`crm-column-${column.id}`} className="min-w-0 break-words text-sm font-semibold">{column.name}</h2>
               <span className="rounded-control bg-ink/5 px-2 py-1 text-xs tabular-nums panel:bg-white/10" aria-label={`${column.total} leads`}>{column.total.toLocaleString("pt-BR")}</span>
             </div>
-            {column.cards.length === 0 ? <p className="py-4 text-sm text-neutral panel:text-white/55">Nenhum lead nesta etapa.</p> : (
-              <ul className="space-y-2">
+            {column.cards.length === 0 ? <p className="py-4 text-sm text-neutral panel:text-white/55 md:flex-1">Nenhum lead nesta etapa.</p> : (
+              <ul className="flex min-h-0 flex-col gap-2 md:flex-1 md:overflow-y-auto md:overscroll-contain md:pr-1">
                 {column.cards.map((card) => (
-                  <li key={card.id} data-crm-card={card.id} draggable={!pending} className={`min-w-0 rounded-control border border-ink/10 bg-white p-3 panel:border-white/10 panel:bg-ink ${dragging === card.id ? "opacity-45" : ""}`}
+                  <li key={card.id} data-crm-card={card.id} draggable={!pending} className={`min-w-0 shrink-0 rounded-control border border-ink/10 bg-white p-3 panel:border-white/10 panel:bg-ink ${dragging === card.id ? "opacity-45" : ""}`}
                     onDragStart={(event) => {
                       dragged.current = card;
                       setDragging(card.id);
@@ -131,9 +174,14 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
                           className="block text-sm font-medium [overflow-wrap:anywhere] hover:underline">{card.name}</Link>
                         <p className="mt-1 text-xs text-neutral panel:text-white/60">{card.phone}</p>
                       </div>
-                      <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Mover ${card.name}`} title="Mover lead" onClick={() => setMove({ card })}>
-                        <ArrowLeftRight size={15} aria-hidden />
-                      </Button>
+                      <div className="flex shrink-0 items-start">
+                        <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Mover ${card.name}`} title="Mover lead" onClick={() => setMove({ card })}>
+                          <ArrowLeftRight size={15} aria-hidden />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon" disabled={pending} aria-label={`Excluir ${card.name}`} title="Excluir lead" onClick={() => setDeleting(card)}>
+                          <Trash2 size={15} aria-hidden />
+                        </Button>
+                      </div>
                     </div>
                     <p className="mt-2 text-xs text-neutral panel:text-white/60">{card.origin} · {timeInStage(card.stageSince, Math.max(now, clock))}</p>
                     <p className={`mt-1 text-xs [overflow-wrap:anywhere] ${card.assignee.kind === "user" ? "text-ink panel:text-white/85" : "text-neutral panel:text-white/55"}`}>
@@ -150,7 +198,7 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
               </ul>
             )}
             {column.total > CRM_COLUMN_SIZE && (
-              <nav className="mt-3 flex flex-wrap items-center justify-between gap-1" aria-label={`Páginas de ${column.name}`}>
+              <nav className="mt-3 flex shrink-0 flex-wrap items-center justify-between gap-1" aria-label={`Páginas de ${column.name}`}>
                 {column.page > 1 && <ButtonLink size="sm" variant="ghost" scroll={false} prefetch={false}
                   href={crmBoardHref(params, { [`p_${column.id}`]: String(column.page - 1) })}>Anterior</ButtonLink>}
                 <span className="text-xs text-neutral panel:text-white/55">{column.page} de {Math.ceil(column.total / CRM_COLUMN_SIZE)}</span>
@@ -158,11 +206,19 @@ export function CrmBoard({ columns, stages, lossReasons, params, version, now, s
                   href={crmBoardHref(params, { [`p_${column.id}`]: String(column.page + 1) })}>Próxima</ButtonLink>}
               </nav>
             )}
+            {column.kind !== "lost" && (
+              <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setCreateAt(column.id)}
+                className="mt-3 w-full shrink-0 justify-center border border-dashed border-ink/15 panel:border-white/15">
+                <Plus size={15} aria-hidden />Adicionar lead
+              </Button>
+            )}
           </section>
         ))}
       </div>
       {move && <MoveCardDialog key={`${move.card.id}:${move.to ?? ""}`} move={move} stages={stages} lossReasons={lossReasons}
         close={() => setMove(null)} action={submit} pending={pending} state={state} />}
+      {createAt && <CrmLeadCreateDialog stages={stages} defaultStageId={createAt} close={() => setCreateAt(null)} />}
+      {deleting && <CrmLeadDeleteDialog lead={deleting} close={() => setDeleting(null)} />}
     </>
   );
 }

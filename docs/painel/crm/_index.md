@@ -23,6 +23,8 @@ O CRM organiza os leads em um quadro Kanban com colunas por etapa, totais e filt
 - A ativação provisiona as etapas e classifica os leads existentes antes de publicar a flag. Leads ou conversas de teste são excluídos.
 - A configuração permite renomear e ordenar as etapas ativas. Etapas de sistema mantêm sua identidade semântica. Etapas personalizadas podem ser arquivadas com transferência dos leads para outra etapa ativa.
 - O quadro permite mover leads por arraste ou pelo botão Mover. A etapa Perdido exige motivo do catálogo da conta e justificativa.
+- No desktop o quadro ocupa a altura da tela (classe `tenant-main-crm` no `TenantShell`, só em `/crm`): quem rola é a lista de cards de cada coluna, nunca a página. No celular o quadro volta ao fluxo normal, com uma coluna por vez.
+- Adicionar lead pelo quadro cria um cadastro manual na etapa escolhida, sem conversa e sem cota; número já existente não é duplicado nem movido. Excluir é definitivo e só vale para lead sem mensagem e sem agendamento ([`manual-leads.ts`](../../../src/modules/crm/manual-leads.ts)).
 - O responsável do card e do filtro é o da conversa (`Conversation.assignedUserId`). "Humano não identificado" é o lead em Em atendimento humano sem pessoa atribuída, e não se soma a "Sem responsável".
 - O selo de espera em Aguardando humano é calculado na leitura ([`sla.ts`](../../../src/modules/crm/sla.ts)) com os prazos da conta. Quem avisa é o worker ([Prazo do transbordo](domain.md#prazo-do-transbordo)): um alerta por limite, marcado antes do envio.
 - Toda action e rota nova do CRM chama `requireCrmSession()`. O teste `tests/crm-permissao.test.ts` falha se a guarda faltar.

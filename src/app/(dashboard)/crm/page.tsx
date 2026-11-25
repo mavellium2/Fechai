@@ -41,7 +41,8 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
 
   return (
     <CrmFiltersProvider>
-    <div className="w-full min-w-0 max-w-full space-y-5">
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-5 md:min-h-0 md:flex-1">
+      <div className="shrink-0 space-y-5">
       <PageHeader eyebrow="crm" title="CRM" hint="Acompanhe cada lead do primeiro contato ao fechamento, veja quem está aguardando a equipe e assuma o atendimento."
         actions={<>
           <CrmFiltersButton filters={filters} />
@@ -75,6 +76,7 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
       )}
       <CrmFiltersPanel filters={filters} stages={pipeline.stages} tags={detail?.tags ?? boardTags} users={users} />
       {filters.invalidRange && <p role="alert" className="text-sm text-danger">A data inicial precisa ser anterior ou igual à final.</p>}
+      </div>
       {columns.length > 0 ? <CrmBoard columns={columns} stages={pipeline.stages} lossReasons={lossCatalog?.options ?? []} params={params} version={version} now={observedAt}
         sla={{ alertMinutes: sla.alertMinutes, escalateMinutes: sla.escalateMinutes }} /> : (
         <Card><EmptyState title="Nenhuma etapa para exibir" description="Escolha uma etapa ativa para consultar os leads." action={<ButtonLink href="/crm" variant="outline">Limpar filtros</ButtonLink>} /></Card>

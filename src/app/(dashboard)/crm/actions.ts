@@ -11,6 +11,11 @@ import { setLeadStage } from "@/modules/crm/lead-stage";
 import { claimCrmConversation } from "@/modules/crm/assignments";
 import { currentAssigneeName, returnToAiAndReply, transferCrmConversation } from "@/modules/crm/handoff-panel";
 import { claimPhoneReplies } from "@/modules/crm/phone-reply";
+import { CRM_MANUAL_NAME_MAX } from "@/modules/crm/limits";
+import {
+  createManualCrmLead, deleteManualCrmLead, normalizeCrmName, normalizeCrmPhone,
+} from "@/modules/crm/manual-leads";
+import { recordAudit, recordDeletion } from "@/modules/audit/log";
 
 export async function moveCrmCard(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
   try {
@@ -42,6 +47,93 @@ export async function moveCrmCard(_previous: ActionResult | null, form: FormData
     if (isFrameworkSignal(error)) return { ok: false, code: "forbidden", error: "Você não tem acesso ao CRM." };
     console.error("[crm] falha ao mover card", error);
     return { ok: false, code: "server", error: "Não foi possível mover o lead. Tente novamente." };
+  }
+}
+
+/**
+ * Adiciona um lead direto no quadro. O número entra como cadastro manual e a
+ * etapa escolhida vale como entrada: nada de conversa, mensagem ou disparo.
+ */
+export async function createCrmLead(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  try {
+    if (!(await auth())?.user) return { ok: false, code: "auth", error: "Sua sessão expirou." };
+    const session = await requireCrmSession();
+    const tenantId = session.user.tenantId;
+    const stageId = form.get("stageId");
+    const rawName = form.get("name");
+    const rawPhone = form.get("phone");
+    if (!validCrmId(stageId)) return { ok: false, code: "validation", error: "Escolha a etapa inicial do lead." };
+    if (typeof rawName === "string" && rawName.trim().length > CRM_MANUAL_NAME_MAX) {
+      return { ok: false, code: "validation", error: `O nome pode ter até ${CRM_MANUAL_NAME_MAX} caracteres.` };
+    }
+    const phone = normalizeCrmPhone(typeof rawPhone === "string" ? rawPhone : "");
+    if (!phone) return { ok: false, code: "validation", error: "Telefone inválido. Use DDD + número (ex.: 11 99999-9999)." };
+
+    const name = normalizeCrmName(typeof rawName === "string" ? rawName : "");
+    const result = await createManualCrmLead({ tenantId, userId: session.user.id, name: name ?? "", phone, stageId });
+    if (result.status === "stage_unavailable") {
+      return { ok: false, code: "validation", error: "Escolha uma etapa disponível do seu funil." };
+    }
+    revalidatePath("/crm");
+    if (result.status === "exists") {
+      return { ok: false, code: "validation", error: "Este número já está na sua lista. Abra o card para ver o lead." };
+    }
+
+    await recordAudit({
+      event: "lead.created",
+      target: { type: "Lead", id: result.leadId, label: result.name || result.phone },
+      after: { name: result.name || null, phone: result.phone, stage: result.stageName },
+    });
+    revalidatePath("/conversas");
+    revalidatePath("/contatos");
+    revalidatePath("/inicio");
+    return {
+      ok: true,
+      info: result.name
+        ? `Lead de ${result.name} criado em ${result.stageName}.`
+        : `Lead criado em ${result.stageName}.`,
+    };
+  } catch (error) {
+    if (isFrameworkSignal(error)) return { ok: false, code: "forbidden", error: "Você não tem acesso ao CRM." };
+    console.error("[crm] falha ao adicionar lead", error);
+    return { ok: false, code: "server", error: "Não foi possível adicionar o lead. Tente novamente." };
+  }
+}
+
+/**
+ * Exclui um lead sem histórico do quadro. Lead com mensagem ou agendamento é
+ * recusado: o botão existe para limpar cadastro manual e teste, não para apagar
+ * atendimento — a exclusão leva junto conversa, mensagens e histórico.
+ */
+export async function deleteCrmLead(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  try {
+    if (!(await auth())?.user) return { ok: false, code: "auth", error: "Sua sessão expirou." };
+    const session = await requireCrmSession();
+    const leadId = form.get("leadId");
+    if (!validCrmId(leadId)) return { ok: false, code: "validation", error: "O lead não está disponível." };
+
+    const result = await deleteManualCrmLead({ tenantId: session.user.tenantId, leadId });
+    if (result.status === "not_found") return { ok: false, code: "forbidden", error: "O lead não está disponível no CRM." };
+    if (result.status === "has_history") {
+      return { ok: false, code: "validation", error: "Este lead tem conversa ou agendamento e não pode ser excluído pelo quadro." };
+    }
+
+    revalidatePath("/crm");
+    await recordDeletion({
+      event: "lead.deleted",
+      target: { type: "Lead", id: leadId, label: result.label },
+      snapshot: result.snapshot,
+      meta: { via: "crm_board" },
+      tenantId: session.user.tenantId,
+    });
+    revalidatePath("/conversas");
+    revalidatePath("/contatos");
+    revalidatePath("/inicio");
+    return { ok: true, info: "Lead excluído." };
+  } catch (error) {
+    if (isFrameworkSignal(error)) return { ok: false, code: "forbidden", error: "Você não tem acesso ao CRM." };
+    console.error("[crm] falha ao excluir lead", error);
+    return { ok: false, code: "server", error: "Não foi possível excluir o lead. Tente novamente." };
   }
 }
 

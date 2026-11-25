@@ -1,5 +1,9 @@
 # CRM nativo — Histórico
 
+## 2026-11-25 — Quadro com altura de tela, adicionar e excluir lead
+
+O Kanban de `/crm` passou a ocupar a altura disponível no desktop: cada coluna rola só a lista de cards, com título, contador, paginador e o botão **Adicionar lead** fixos, e a página não rola mais — a barra de rolagem horizontal do quadro fica sempre à vista. As colunas têm largura flexível e o fundo do quadro pode ser arrastado com o mouse para andar de lado. Cada coluna ganhou **Adicionar lead** e cada card, **Excluir**. O cadastro manual entra na etapa escolhida sem iniciar conversa, não duplica número existente e não aceita Perdido (a perda exige motivo). A exclusão é definitiva e restrita a lead sem conversa e sem agendamento, com o retrato guardado em `lead.deleted`. O layout depende da nova classe `tenant-main-crm` (`pathname === "/crm"`), que libera a rolagem da página no celular. Para testar com dados variados, `scripts/crm-demo-leads.ts` cria até 8 cards por etapa (simula sem `--apply` e remove com `--remove`).
+
 ## 2026-11-25 — Deploy do schema do CRM
 
 `prisma/manual/003-crm-tenant-id-unique.sql` cria os índices únicos `Lead (tenantId, id)` e `Conversation (tenantId, id)` antes do `db push` do `deploy.sh` (as tabelas já têm dados e o `db push` recusaria sem `--accept-data-loss`; `id` já é único, então não há duplicata). Ensaiado num banco temporário com o schema anterior e dados: 002, 003 e `db push` sem a flag terminam em sincronia, sem perder linhas. O CRM nasce desligado em todas as contas (`crmEnabled`).

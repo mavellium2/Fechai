@@ -59,6 +59,7 @@ export function TenantShell({ navItems, brandHref, brandSubtitle, footerLabel, u
   if (openPath !== pathname) { setOpenPath(pathname); setOpen(false); }
   const expanded = pinned || open;
   const agents = pathname === "/agentes" || pathname.startsWith("/agentes/") || pathname === "/conversas";
+  const crmBoard = pathname === "/crm";
   const accountHref = context === "admin" ? brandHref : "/configuracoes";
   const initials = brandSubtitle.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "F";
 
@@ -122,7 +123,7 @@ export function TenantShell({ navItems, brandHref, brandSubtitle, footerLabel, u
           <div className="tenant-admin-identity"><span className="tenant-admin-badge">Administração</span><span className="tenant-admin-user" title={userLabel}>{userLabel}</span></div>
           <form action={signOutAction} onSubmit={onSignOut} data-leave-page><Button type="submit" variant="outline" size="sm">Sair</Button></form>
         </header>}
-        <main id="conteudo" tabIndex={-1} className={`tenant-main ${agents ? "tenant-main-agents" : "tenant-content"}`}>
+        <main id="conteudo" tabIndex={-1} className={`tenant-main ${agents ? "tenant-main-agents" : "tenant-content"} ${crmBoard ? "tenant-main-crm" : ""}`}>
           {children}
         </main>
       </div>

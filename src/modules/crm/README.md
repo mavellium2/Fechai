@@ -24,6 +24,8 @@ O CRM organiza os leads de cada conta em um pipeline e mostra os totais por etap
 | [`assignments.ts`](./assignments.ts) | Assunção condicional da conversa com histórico e gatilho de etapa. A operação pode ser reutilizada pelos próximos fluxos. |
 | [`whatsapp-reply.ts`](./whatsapp-reply.ts) e [`inbound-proof.ts`](../whatsapp/inbound-proof.ts) | Comprovam o número para resposta manual na ficha. A action reutiliza o núcleo de Conversas e verifica bloqueio, pedido de parar, conexão e janela. |
 | [`board-version.ts`](./board-version.ts) | Versão opaca da conta para o pulso de atualização do quadro. |
+| [`manual-leads.ts`](./manual-leads.ts) | Cadastro manual de lead pelo quadro (`createManualCrmLead`) e exclusão com trava (`deleteManualCrmLead`). |
+| [`limits.ts`](./limits.ts) | Limites de texto do CRM usados no servidor e nos formulários (justificativa, resposta, nome do cadastro manual). |
 
 O provisionamento usa as restrições de unicidade do Postgres e `createMany({ skipDuplicates: true })` para deduplicar chamadas concorrentes. Reexecutar preserva nome, cor e ordem editados. O `kind` das etapas de sistema é a chave semântica imutável dentro do pipeline. `kind: null` representa uma etapa personalizada. `position` serve à apresentação. Etapas referenciadas pelo histórico são mantidas e podem ser arquivadas quando a configuração estiver disponível.
 
@@ -44,6 +46,12 @@ O preenchimento usa o status atual do lead e a prioridade da conversa. Registra 
 Toda action e rota do CRM chama `requireCrmSession()`, que exige `crm:ver` ([`src/lib/permissions.ts`](../../lib/permissions.ts)). O teste estático `tests/crm-permissao.test.ts` falha se uma action exportada não chamar a guarda. O SEG-05 amplia a matriz com os novos papéis.
 
 Criação e movimentação de leads usam a trava compartilhada da conta. O arquivamento usa a trava exclusiva para impedir atribuições concorrentes à etapa. O Kanban em `/crm` tem paginação por coluna e filtros compartilháveis. Consulte o [guia funcional](../../../docs/painel/crm/telas.md) para os recursos que ainda dependem de outros cards.
+
+## Cadastro e exclusão pelo quadro
+
+`createManualCrmLead` cria o lead já na etapa escolhida, com `originChannel: "manual"` e a transição de entrada na mesma transação. Usa o mesmo par de travas do webhook (`withConversationContactLock`: admissão compartilhada + telefone), então um número que já existe na conta não nasce de novo nem muda de etapa — o retorno `exists` só informa o lead atual. Etapa perdida é recusada (`stage_unavailable`): Perdido exige motivo e justificativa, que só a movimentação pede. Não há conversa, mensagem, disparo nem consumo de cota.
+
+`deleteManualCrmLead` apaga o lead (e, em cascata, conversa, mensagens, transições, etiquetas, tarefas e origem de anúncio) **somente sem histórico**: nenhuma mensagem na conversa e nenhum agendamento. Com qualquer um dos dois, o retorno é `has_history` e a tela explica a recusa — o botão existe para limpar cadastro manual e teste, nunca atendimento real. A leitura usa `realBoardLeads(tenantId)` (conta ativa, CRM ligado, `isTest: false`), então o quadro não exclui lead de teste nem de outra conta. O retrato do lead vai para a auditoria (`lead.deleted`) antes do `delete`.
 
 Para mudanças no schema, usar o [laboratório isolado](../../../docs/plataforma/ambientes/ambiente-de-testes-admin.md) e seguir `db push` e `prisma generate` no web e no worker antes de implantar. Com o schema aplicado em um PostgreSQL local de teste, definir `CRM_TEST_DATABASE_URL` para a URL dessa base e rodar `npm test -- tests/crm-foundation.integration.test.ts tests/crm-transbordo.integration.test.ts`. O segundo arquivo cobre o filtro de responsável, o WhatsApp da equipe (índice único e LID), a espera de transbordo com a trava `FOR UPDATE`, assumir, transferir e devolver pelo painel (CRM-07) e o grupo de transbordo pelo caminho real do webhook (CRM-08). O teste requer uma base local identificada no nome por `test`, `teste`, `sandbox` ou `lab`, distinta de `DATABASE_URL`. Sem a variável, a suíte de integração fica desativada.
 
