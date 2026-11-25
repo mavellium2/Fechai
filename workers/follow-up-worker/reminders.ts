@@ -12,6 +12,12 @@ import {
   type ScheduleConfig,
 } from "../../src/modules/scheduling/config";
 import { parseReminderOverride } from "../../src/modules/scheduling/reminder-override";
+import {
+  MISSING_IN_CLINICORP_REASON,
+  reconcileMirroredAppointments,
+  reminderVerdict,
+  type ReconcileResult,
+} from "../../src/modules/scheduling/clinicorp-reconcile";
 import { loadCampaignReminderOverrides, loadReminderOverrides, loadReminderPauses } from "../../src/modules/campaigns/active";
 import { activePause, pausedDue, reminderPausedBy, type ReminderPause } from "../../src/modules/campaigns/reminder-pause";
 import type { CampaignRules } from "../../src/modules/campaigns/rules";
@@ -202,6 +208,17 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
     r.minutesBefore + (r.sendTime ? 1440 : 0),
   ));
 
+  // O Clinicorp pode ter remarcado ou cancelado o que o fechai espelhou lá. Isso
+  // é conferido ANTES de ler as consultas, para o lembrete sair com o horário
+  // de agora (`clinicorp-reconcile.ts`). Envio explícito de uma consulta só
+  // (`target`) é escolha de uma pessoa e não espera essa conferência.
+  const reconciled = new Map<string, ReconcileResult>();
+  if (!target) {
+    for (const [tenantId, cfg] of configByTenant) {
+      reconciled.set(tenantId, await reconcileMirroredAppointments(tenantId, cfg.timezone, now));
+    }
+  }
+
   const appointments = await prisma.appointment.findMany({
     where: {
       // Pela conta, não pelo `agentId`: ver `loadAccountScheduleConfigs`.
@@ -298,6 +315,14 @@ export async function scanAndSendReminders(now: Date = new Date(), target?: { te
       ...(target && !dueNow.length ? [toSend.minutesBefore] : due.map((r) => r.minutesBefore)),
     ])];
     const dispatchKey = { tenantId: appt.tenantId, sourceKey: reminderSource(appt.id, appt.clinicorpAppointmentId), startsAt: appt.startsAt, minutesBefore: toSend.minutesBefore };
+    // Consulta espelhada no Clinicorp: só lembra o que a leitura de agora
+    // confirma. Sem conseguir conferir, espera a próxima volta (a janela do
+    // lembrete dura o dia); ausente de lá, o motivo fica visível na agenda.
+    if (!target && appt.clinicorpAppointmentId) {
+      const verdict = reminderVerdict(reconciled.get(appt.tenantId), appt.id);
+      if (verdict === "wait") continue;
+      if (verdict === "missing") { await blockReminder(dispatchKey, MISSING_IN_CLINICORP_REASON); continue; }
+    }
     const handled = await reminderAlreadyHandled(dispatchKey);
     if (handled) { await markSent(appt.id, appt.remindersSent, closing, handled.acceptedAt); continue; }
     if (target?.operation === "manual") {

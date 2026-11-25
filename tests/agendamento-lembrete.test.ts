@@ -713,7 +713,9 @@ describe("Varredura (scanAndSendReminders)", () => {
 
     expect(result.sent).toBe(1);
     expect(provider.sendMessage).toHaveBeenCalledTimes(1);
-    const query = db.appointment.findMany.mock.calls[0][0];
+    // A primeira busca é a conferência com o Clinicorp (só consultas espelhadas);
+    // a que interessa aqui é a das consultas a lembrar.
+    const query = db.appointment.findMany.mock.calls.map(([arg]) => arg).find((arg) => arg?.where?.OR);
     expect(query.where.OR[0].startsAt.lte.getTime() - now.getTime()).toBe(2 * UM_DIA * 60_000);
   });
 

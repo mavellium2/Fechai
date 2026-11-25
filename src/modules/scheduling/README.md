@@ -1012,6 +1012,23 @@ Schema novo: `ClinicorpReminder` — `db push` + `generate` nos dois processos.
 Regressões: `tests/clinicorp-lembrete.test.ts`.
 
 
+### O fechai acompanha o que mudou no Clinicorp (24/11/2026)
+
+O espelho era de mão única: o que a recepção remarcava ou apagava no Clinicorp
+não chegava ao `Appointment`, e o lembrete saía com a hora velha (caso do
+Gilberto: 10:15 aqui, 10:00 lá) ou para quem já não estava lá (caso da Lucimar).
+`clinicorp-reconcile.ts` confere, antes de cada varredura de lembretes
+(`scanAndSendReminders`), as consultas **espelhadas** dos próximos 30 dias contra
+uma leitura `fresh` do Clinicorp (no máximo a cada 4 min por conta). **O Clinicorp
+vence**: remarcada lá, o horário daqui muda (com `AppointmentReschedule`, Google e
+iCloud acompanham, e os lembretes voltam a valer para o horário novo); cancelada
+lá, cancela aqui sem devolver nada ao Clinicorp. **Ausente da leitura não cancela
+nada**: o lembrete é bloqueado com o motivo visível na agenda
+(`MISSING_IN_CLINICORP_REASON`). Leitura que falhou, veio incompleta (`skipped`)
+ou consulta alterada há menos de 15 min: nada é concluído e o lembrete espera a
+próxima volta. Envio explícito de uma consulta só (`target`) não espera a
+conferência. Sem schema novo. Testes: `tests/clinicorp-reconcile.test.ts`.
+
 ### Cancelamento preservado nas observações (07/10/2026)
 
 `cancelAppointment` mantém ID e horário e acrescenta às observações a data/hora
