@@ -17,7 +17,6 @@ import { payloadTooLarge } from "@/lib/rate-limit";
 import { sendManualReply } from "@/modules/agent-engine/conversation";
 import { summarizeConversation } from "@/modules/agent-engine/summary";
 import { runAgentTurn, resolveAgent } from "@/modules/agent-engine/orchestrator";
-import { recoverPendingAgentReply } from "@/modules/agent-engine/recover-pending";
 import { closeHandoffNoticesTimed } from "@/modules/agent-engine/handoff-notice";
 import { leadOfConversation, recordCrmTrail, secondsBetween } from "@/modules/crm/trail";
 import { transcribeAudio } from "@/modules/ai/transcribe";
